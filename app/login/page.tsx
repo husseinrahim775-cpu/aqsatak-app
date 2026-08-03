@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"; // 👈 تم إضافة getDoc
 import { auth, db } from "../../services/firebase";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock, Mail } from "lucide-react";
@@ -15,18 +15,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  // 🤖 دالة إرسال إشعار تلغرام مع الـ userId لتفعيل الأزرار
   const sendTelegramNotification = async (newUserEmail: string, userId: string) => {
     try {
       await fetch("/api/telegram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          email: newUserEmail,
-          userId: userId 
-        }),
+        body: JSON.stringify({ email: newUserEmail, userId: userId }),
       });
-      console.log("تم إرسال طلب التلغرام للسيرفر بنجاح!");
     } catch (err) {
       console.error("خطأ في إرسال طلب التلغرام:", err);
     }
@@ -39,15 +34,45 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        // تسجيل الدخول
-        await signInWithEmailAndPassword(auth, email, password);
+        // 1. تسجيل الدخول في Firebase Auth
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+
+        // 2. 🛡️ فحص حالة الحساب وتاريخ انتهاء الاشتراك في Firestore
+        const userDocRef = doc(db, "users", user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+
+          // التحقق إذا كان الحساب موقوفاً أو مرفوضاً
+          if (userData.status === "suspended" || userData.status === "rejected" || userData.status === "pending") {
+            await signOut(auth); // طرده فوراً
+            setError(
+              userData.status === "pending"
+                ? "حسابك قيد الانتظار ولم يتم تفعيله بعد."
+                : "حسابك موقوف أو معطل. يرجى التواصل مع الإدارة لتجديد الاشتراك."
+            );
+            return;
+          }
+
+          // التحقق من تاريخ انتهاء الاشتراك (إذا كان محدداً)
+          if (userData.expiresAt) {
+            const expiryDate = userData.expiresAt.toDate ? userData.expiresAt.toDate() : new Date(userData.expiresAt);
+            if (new Date() > expiryDate) {
+              await signOut(auth); // طرده إذا انتهى تاريخ الاشتراك
+              setError("انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الدخول.");
+              return;
+            }
+          }
+        }
+
         router.push("/dashboard");
       } else {
         // إنشاء حساب جديد
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
 
-        // حفظ بيانات المستخدم في Firestore بحالة "قيد الانتظار"
         await setDoc(doc(db, "users", user.uid), {
           email: user.email,
           status: "pending",
@@ -55,10 +80,7 @@ export default function LoginPage() {
           createdAt: serverTimestamp(),
         });
 
-        // 1. إرسال الإشعار للتلغرام مع معرف المستخدم (userId)
         await sendTelegramNotification(user.email || email, user.uid);
-
-        // 2. التوجيه لصفحة الانتظار
         router.push("/pending");
       }
     } catch (err: any) {

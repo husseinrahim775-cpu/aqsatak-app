@@ -3,9 +3,12 @@
 import Sidebar from "../components/Sidebar";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { AuthProvider, useAuth } from "../components/AuthProvider";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { onSnapshot, doc } from "firebase/firestore";
+import { auth, db } from "../services/firebase"; // تأكد من صحة مسار firebase لديك
+import { signOut } from "firebase/auth";
 import { 
   LayoutDashboard, 
   Users, 
@@ -19,12 +22,59 @@ import {
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, logout } = useAuth() as any;
   const isLoginPage = pathname === "/login";
+  const isPendingPage = pathname === "/pending";
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
+  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
+  useEffect(() => {
+    if (!user || isLoginPage) return;
+
+    // استماع حي لمستند المستخدم في Firestore
+    const userDocRef = doc(db, "users", user.uid);
+    const unsubscribeDoc = onSnapshot(userDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const now = new Date();
+        
+        // تحويل تاريخ الانتهاء سواء كان Timestamp أو Date
+        const expiryDate = data.expiresAt?.toDate 
+          ? data.expiresAt.toDate() 
+          : (data.expiresAt ? new Date(data.expiresAt) : null);
+
+        const isSuspended = data.status === "suspended";
+        const isRejected = data.status === "rejected";
+        const isPending = data.status === "pending";
+        const isExpired = expiryDate && now > expiryDate;
+
+        // 🛡️ إذا انتهت صلاحيته أو تم إيقافه/رفضه
+        if (isSuspended || isRejected || isExpired) {
+          let message = "تم إيقاف حسابك. يرجى التواصل مع الإدارة للتجديد.";
+          if (isExpired) message = "انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الاستمرار.";
+          if (isRejected) message = "تم رفض طلب انضمامك للنظام.";
+
+          alert(message);
+          if (logout) await logout();
+          await signOut(auth);
+          router.push("/login");
+        } 
+        // ⏳ إذا كان الحساب قيد الانتظار ويحاول التصفح
+        else if (isPending && !isPendingPage) {
+          router.push("/pending");
+        }
+      }
+    }, (error) => {
+      console.error("خطأ في المراقبة الحية للحساب:", error);
+    });
+
+    return () => unsubscribeDoc();
+  }, [user, pathname, router, logout, isLoginPage, isPendingPage]);
+
+  // 2. التحكم في الوضع الليلي
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
       setIsDarkMode(true);
