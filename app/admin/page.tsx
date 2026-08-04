@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/services/firebase";
-import { collection, getDocs, doc, updateDoc, query, orderBy } from "firebase/firestore";
-import { CheckCircle2, XCircle, PauseCircle, PlayCircle, RefreshCw, UserCheck, ShieldAlert, Users } from "lucide-react";
+import { collection, getDocs, doc, updateDoc, deleteDoc, query } from "firebase/firestore";
+import { CheckCircle2, XCircle, PauseCircle, PlayCircle, RefreshCw, UserCheck, ShieldAlert, Users, Trash2 } from "lucide-react";
 
 interface UserAccount {
   id: string;
@@ -22,7 +22,6 @@ export default function AdminDashboardPage() {
     setLoading(true);
     try {
       const usersRef = collection(db, "users");
-      // جلب البيانات مع الترتيب بحسب وقت الإنشاء
       const q = query(usersRef);
       const querySnapshot = await getDocs(q);
       
@@ -59,13 +58,33 @@ export default function AdminDashboardPage() {
         updatedAt: new Date(),
       });
       
-      // تحديث الحالة محلياً في الواجهة فوراً
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, status: newStatus } : u))
       );
     } catch (error) {
       console.error("خطأ في تغيير حالة الحساب:", error);
       alert("حدث خطأ أثناء تحديث حالة الحساب");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // 🗑️ دالة حذف الحساب نهائياً من Firestore
+  const handleDeleteUser = async (userId: string, userEmail: string) => {
+    const isConfirmed = window.confirm(`هل أنت متأكد من حذف حساب (${userEmail}) نهائياً؟\nلا يمكن التراجع عن هذا الإجراء.`);
+    
+    if (!isConfirmed) return;
+
+    setUpdatingId(userId);
+    try {
+      const userRef = doc(db, "users", userId);
+      await deleteDoc(userRef);
+
+      // تحديث الحالة محلياً وإزالته من القائمة
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch (error) {
+      console.error("خطأ في حذف الحساب:", error);
+      alert("حدث خطأ أثناء حذف الحساب، يرجى المحاولة لاحقاً.");
     } finally {
       setUpdatingId(null);
     }
@@ -220,7 +239,7 @@ export default function AdminDashboardPage() {
                             </button>
                           )}
 
-                          {/* إيقاف الاشتراك مؤقتاً (عدم تجديد الاشتراك) */}
+                          {/* إيقاف الاشتراك مؤقتاً */}
                           {account.status === "active" && (
                             <button
                               disabled={isBusy}
@@ -244,6 +263,17 @@ export default function AdminDashboardPage() {
                               <span>رفض</span>
                             </button>
                           )}
+
+                          {/* 🗑️ زر الحذف النهائي (متاح لجميع الحالات) */}
+                          <button
+                            disabled={isBusy}
+                            onClick={() => handleDeleteUser(account.id, account.email)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-600 hover:text-white text-red-600 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                            title="حذف الحساب نهائياً من قاعدة البيانات"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>حذف</span>
+                          </button>
                         </div>
                       </td>
                     </tr>

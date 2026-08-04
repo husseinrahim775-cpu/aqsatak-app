@@ -46,24 +46,26 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           ? data.expiresAt.toDate() 
           : (data.expiresAt ? new Date(data.expiresAt) : null);
 
-        const isSuspended = data.status === "suspended";
-        const isRejected = data.status === "rejected";
-        const isPending = data.status === "pending";
-        const isExpired = expiryDate && now > expiryDate;
+        const status = data.status; // حالة الحساب
 
-        // 🛡️ إذا انتهت صلاحيته أو تم إيقافه/رفضه
-        if (isSuspended || isRejected || isExpired) {
+        // 🛡️ 1. إذا كان الحساب موقوفاً أو مرفوضاً أو انتهى اشتراكه
+        if (status === "suspended" || status === "rejected" || (expiryDate && now > expiryDate)) {
           let message = "تم إيقاف حسابك. يرجى التواصل مع الإدارة للتجديد.";
-          if (isExpired) message = "انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الاستمرار.";
-          if (isRejected) message = "تم رفض طلب انضمامك للنظام.";
+          if (expiryDate && now > expiryDate) message = "انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الاستمرار.";
+          if (status === "rejected") message = "تم رفض طلب انضمامك للنظام.";
 
           alert(message);
           if (logout) await logout();
           await signOut(auth);
           router.push("/login");
         } 
-        // ⏳ إذا كان الحساب قيد الانتظار ويحاول التصفح
-        else if (isPending && !isPendingPage) {
+        // ⏳ 2. إذا لم تكن الحالة "active" (مثلاً pending أو غير معرفة) وكان يحاول التصفح
+        else if (status !== "active" && !isPendingPage) {
+          router.push("/pending");
+        }
+      } else {
+        // إذا كان المستخدم غير موجود أصلاً في قاعدة البيانات Firestore
+        if (!isPendingPage) {
           router.push("/pending");
         }
       }
@@ -73,7 +75,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribeDoc();
   }, [user, pathname, router, logout, isLoginPage, isPendingPage]);
-
   // 2. التحكم في الوضع الليلي
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
