@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search } from "lucide-react";
+import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addInstallmentRecord, getUserInstallments, InstallmentData } from "../../../services/firestore";
@@ -58,12 +58,132 @@ export default function NewInstallmentPage() {
     guarantorName: "",
     guarantorPhone: "",
     productName: "",
-    productPrice: "" as number | "",
-    downPayment: "" as number | "",
-    profitMargin: "" as number | "",
-    months: "" as number | "",
+    purchasePrice: "" as number | "", // سعر الشراء (التكلفة)
+    productPrice: "" as number | "",  // سعر البيع الكلي
+    downPayment: "" as number | "",   // الدفعة المقدمة
+    profitMargin: "" as number | "",  // نسبة الربح %
+    months: "" as number | "",        // عدد الأشهر
+    monthlyInstallment: "" as number | "", // القسط الشهري اليدوي
     startDate: defaultStartDate,
   });
+
+  // ----------------------------------------------------
+  // 🟢 1. دبابيس التعديل المتبادل للأسعار ونسبة الربح
+  // ----------------------------------------------------
+  const handlePurchasePriceChange = (val: number | "") => {
+    const cost = val;
+    let newSellPrice = formData.productPrice;
+
+    if (cost !== "" && formData.profitMargin !== "" && cost > 0) {
+      newSellPrice = cost + cost * (Number(formData.profitMargin) / 100);
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      purchasePrice: cost,
+      productPrice: newSellPrice,
+    }));
+  };
+
+  const handleProfitMarginChange = (val: number | "") => {
+    const margin = val;
+    let newSellPrice = formData.productPrice;
+
+    if (margin !== "" && formData.purchasePrice !== "" && Number(formData.purchasePrice) > 0) {
+      const cost = Number(formData.purchasePrice);
+      newSellPrice = cost + cost * (Number(margin) / 100);
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      profitMargin: margin,
+      productPrice: newSellPrice,
+    }));
+  };
+
+  const handleProductPriceChange = (val: number | "") => {
+    const sellPrice = val;
+    let newMargin = formData.profitMargin;
+
+    if (sellPrice !== "" && formData.purchasePrice !== "" && Number(formData.purchasePrice) > 0) {
+      const cost = Number(formData.purchasePrice);
+      const profitAmount = Number(sellPrice) - cost;
+      const rate = (profitAmount / cost) * 100;
+      newMargin = Number(rate.toFixed(2));
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      productPrice: sellPrice,
+      profitMargin: newMargin,
+    }));
+  };
+
+  // ----------------------------------------------------
+  // 🟢 2. التعديل المتبادل لـ (عدد الأشهر ↔ القسط الشهري)
+  // ----------------------------------------------------
+  // عند كتابة عدد الأشهر -> تصفير القسط الشهري اليدوي ليعتمد الحساب التلقائي
+  const handleMonthsChange = (val: number | "") => {
+    setFormData((prev) => ({
+      ...prev,
+      months: val,
+      monthlyInstallment: "", 
+    }));
+  };
+
+  // عند كتابة القسط الشهري اليدوي -> يمسح الأشهر الثابتة ليحسبها بكسور دقيقة
+  const handleMonthlyInstallmentChange = (val: number | "") => {
+    setFormData((prev) => ({
+      ...prev,
+      monthlyInstallment: val,
+      months: "", 
+    }));
+  };
+
+  // ----------------------------------------------------
+  // 🧮 الحسابات المالية الدقيقة والوقت الإضافي بالأيام
+  // ----------------------------------------------------
+  const calculation = useMemo(() => {
+    const productPrice = Number(formData.productPrice) || 0;
+    const purchasePrice = Number(formData.purchasePrice) || 0;
+    const downPayment = Number(formData.downPayment) || 0;
+
+    const totalProfit = purchasePrice > 0 
+      ? Math.max(0, productPrice - purchasePrice) 
+      : productPrice * ((Number(formData.profitMargin) || 0) / 100);
+
+    const totalDue = Math.max(0, productPrice - downPayment);
+
+    let calculatedMonths = 0;
+    let calculatedDays = 0;
+    let finalMonthlyInstallment = 0;
+
+    // حالة 1: العميل أدخل القسط الشهري يدويًا
+    if (formData.monthlyInstallment !== "" && Number(formData.monthlyInstallment) > 0) {
+      finalMonthlyInstallment = Number(formData.monthlyInstallment);
+      if (totalDue > 0) {
+        const exactMonths = totalDue / finalMonthlyInstallment;
+        calculatedMonths = Math.floor(exactMonths); // الأشهر الكاملة
+        const remainingFraction = exactMonths - calculatedMonths;
+        calculatedDays = Math.round(remainingFraction * 30); // الأيام الإضافية
+      }
+    } 
+    // حالة 2: العميل أدخل عدد الأشهر
+    else {
+      calculatedMonths = Number(formData.months) || 1;
+      calculatedDays = 0;
+      finalMonthlyInstallment = calculatedMonths > 0 ? totalDue / calculatedMonths : 0;
+    }
+
+    return {
+      totalAmountWithProfit: productPrice,
+      totalProfit,
+      totalDue,
+      monthlyInstallment: finalMonthlyInstallment,
+      calculatedMonths,
+      calculatedDays,
+    };
+  }, [formData]);
 
   // تصفية اقتراحات العملاء
   const filteredSuggestions = useMemo(() => {
@@ -75,7 +195,6 @@ export default function NewInstallmentPage() {
     );
   }, [existingCustomers, formData.customerName]);
 
-  // تعبئة البيانات تلقائياً عند اختيار عميل من القائمة
   const selectCustomer = (customer: ExistingCustomer) => {
     setFormData((prev) => ({
       ...prev,
@@ -87,29 +206,6 @@ export default function NewInstallmentPage() {
     }));
     setShowSuggestions(false);
   };
-
-  // الحسابات المالية الدقيقة
-  const calculation = useMemo(() => {
-    const productPrice = Number(formData.productPrice) || 0;
-    const downPayment = Number(formData.downPayment) || 0;
-    const profitMargin = Number(formData.profitMargin) || 0;
-    const months = Number(formData.months) || 1;
-
-    // الربح يُحسب على سعر المنتج كاملاً
-    const totalProfit = productPrice * (profitMargin / 100);
-    const totalAmountWithProfit = productPrice + totalProfit;
-    
-    // المتبقي للتقسيط بعد خصم الدفعة المقدمة
-    const totalDue = Math.max(0, totalAmountWithProfit - downPayment);
-    const monthlyInstallment = months > 0 ? totalDue / months : 0;
-
-    return {
-      totalAmountWithProfit,
-      totalProfit,
-      totalDue,
-      monthlyInstallment,
-    };
-  }, [formData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,7 +228,7 @@ export default function NewInstallmentPage() {
       productPrice: Number(formData.productPrice) || 0,
       downPayment: Number(formData.downPayment) || 0,
       profitMargin: Number(formData.profitMargin) || 0,
-      months: Number(formData.months) || 1,
+      months: calculation.calculatedMonths || 1,
       totalDue: calculation.totalDue,
       totalProfit: calculation.totalProfit,
       monthlyInstallment: calculation.monthlyInstallment,
@@ -174,7 +270,6 @@ export default function NewInstallmentPage() {
               <h2 className="font-bold text-lg">بيانات العميل</h2>
             </div>
             
-            {/* حقل الاسم مع قائمة البحث التلقائي */}
             <div className="relative">
               <label className="block text-sm font-medium mb-1">الاسم الرباعي (أو ابحث عن عميل سابق)</label>
               <div className="relative">
@@ -193,7 +288,6 @@ export default function NewInstallmentPage() {
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3.5" />
               </div>
 
-              {/* القائمة المنسدلة للعملاء المتاحين */}
               {showSuggestions && filteredSuggestions.length > 0 && (
                 <div className="absolute z-50 w-full bg-card border border-border rounded-xl shadow-xl mt-1 max-h-52 overflow-y-auto">
                   <div className="p-2 text-xs font-bold text-gray-400 border-b border-border bg-background/50">
@@ -266,14 +360,14 @@ export default function NewInstallmentPage() {
             </div>
           </div>
 
-          {/* قسم تفاصيل المنتج والتقسيط وتاريخ الاستحقاق */}
+          {/* قسم تفاصيل المنتج والتقسيط */}
           <div className="md:col-span-2 bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
             <div className="flex items-center gap-2 mb-4 text-primary">
               <Box className="w-5 h-5" />
               <h2 className="font-bold text-lg">تفاصيل المنتج وخطة التسديد</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              <div>
+              <div className="sm:col-span-2 md:col-span-3">
                 <label className="block text-sm font-medium mb-1">نوع المنتج</label>
                 <input
                   type="text"
@@ -283,27 +377,64 @@ export default function NewInstallmentPage() {
                   onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
                 />
               </div>
+
+              {/* سعر الشراء */}
               <div>
-                <label className="block text-sm font-medium mb-1">سعر المنتج (د.ع)</label>
+                <label className="block text-sm font-medium mb-1">سعر الشراء (التكلفة)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="أدخل سعر الشراء"
+                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  value={formData.purchasePrice}
+                  onChange={(e) =>
+                    handlePurchasePriceChange(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                />
+              </div>
+
+              {/* نسبة الربح (%) */}
+              <div>
+                <label className="block text-sm font-medium mb-1">نسبة الربح (%)</label>
                 <input
                   type="number"
                   required
                   min="0"
+                  step="any"
+                  placeholder="0"
                   className="w-full p-3 rounded-lg border border-border bg-background"
-                  value={formData.productPrice}
+                  value={formData.profitMargin}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      productPrice: e.target.value === "" ? "" : Number(e.target.value),
-                    })
+                    handleProfitMarginChange(e.target.value === "" ? "" : Number(e.target.value))
                   }
                 />
               </div>
+
+              {/* سعر البيع الكلي */}
+              <div>
+                <label className="block text-sm font-medium mb-1">سعر البيع الكلي (د.ع)</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="any"
+                  placeholder="السعر الكلي للبيع"
+                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  value={formData.productPrice}
+                  onChange={(e) =>
+                    handleProductPriceChange(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                />
+              </div>
+
+              {/* الدفعة المقدمة */}
               <div>
                 <label className="block text-sm font-medium mb-1">الدفعة المقدمة (د.ع)</label>
                 <input
                   type="number"
                   min="0"
+                  step="any"
                   className="w-full p-3 rounded-lg border border-border bg-background"
                   value={formData.downPayment}
                   onChange={(e) =>
@@ -314,38 +445,42 @@ export default function NewInstallmentPage() {
                   }
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">نسبة الربح (%)</label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
-                  value={formData.profitMargin}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      profitMargin: e.target.value === "" ? "" : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
+
+              {/* عدد الأشهر (تفاعلي) */}
               <div>
                 <label className="block text-sm font-medium mb-1">عدد الأشهر</label>
                 <input
                   type="number"
-                  required
                   min="1"
+                  step="any"
+                  placeholder="مثال: 12"
                   className="w-full p-3 rounded-lg border border-border bg-background"
                   value={formData.months}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      months: e.target.value === "" ? "" : Number(e.target.value),
-                    })
+                    handleMonthsChange(e.target.value === "" ? "" : Number(e.target.value))
                   }
                 />
               </div>
+
+              {/* القسط الشهري المباشر (تفاعلي) */}
+              <div>
+                <label className="block text-sm font-medium mb-1 text-primary font-bold">
+                  أو أدخل القسط الشهري (د.ع)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="مثال: 50000"
+                  className="w-full p-3 rounded-lg border border-primary/40 bg-background focus:ring-2 focus:ring-primary outline-none"
+                  value={formData.monthlyInstallment}
+                  onChange={(e) =>
+                    handleMonthlyInstallmentChange(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                />
+              </div>
+
+              {/* تاريخ أول قسط */}
               <div>
                 <label className="block text-sm font-medium mb-1 flex items-center gap-1">
                   <Calendar className="w-4 h-4 text-primary" />
@@ -363,23 +498,35 @@ export default function NewInstallmentPage() {
           </div>
         </div>
 
-        {/* قسم النتائج الحسابية */}
+        {/* قسم النتائج الحسابية الفوري */}
         <div className="bg-primary text-primary-foreground rounded-xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center text-center md:text-right gap-6 shadow-lg relative overflow-hidden">
           <Calculator className="absolute opacity-10 w-48 h-48 left-[-20px] top-[-20px] pointer-events-none" />
 
-          <div className="z-10 w-full md:w-auto">
-            <p className="text-primary-foreground/80 text-sm mb-1">السعر الكلي (السعر + الربح)</p>
-            <p className="text-xl font-bold">
-              {Math.round(calculation.totalAmountWithProfit).toLocaleString()} د.ع
-            </p>
-            <p className="text-primary-foreground/80 text-sm mt-3 mb-1">المتبقي للتقسيط (بعد المقدمة)</p>
-            <p className="text-2xl font-black">{Math.round(calculation.totalDue).toLocaleString()} د.ع</p>
+          <div className="z-10 w-full md:w-auto space-y-2">
+            <div>
+              <p className="text-primary-foreground/80 text-xs">سعر البيع الكلي</p>
+              <p className="text-lg font-bold">
+                {Math.round(calculation.totalAmountWithProfit).toLocaleString()} د.ع
+              </p>
+            </div>
+            <div>
+              <p className="text-primary-foreground/80 text-xs">المتبقي للتقسيط (بعد المقدمة)</p>
+              <p className="text-xl font-black">{Math.round(calculation.totalDue).toLocaleString()} د.ع</p>
+            </div>
           </div>
 
-          <div className="z-10 w-full md:w-auto border-y md:border-y-0 md:border-x border-primary-foreground/20 py-4 md:py-0 md:px-8">
-            <p className="text-primary-foreground/80 text-sm mb-1">الربح الصافي</p>
-            <p className="text-2xl font-bold text-green-300">
-              +{Math.round(calculation.totalProfit).toLocaleString()} د.ع
+          {/* تفاصيل المدة المحسوبة بالأشهر والأيام */}
+          <div className="z-10 w-full md:w-auto border-y md:border-y-0 md:border-x border-primary-foreground/20 py-4 md:py-0 md:px-8 space-y-2">
+            <p className="text-primary-foreground/80 text-xs flex items-center justify-center md:justify-start gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              <span>مدة التسديد المحسوبة</span>
+            </p>
+            <div className="text-xl font-extrabold text-amber-300">
+              {calculation.calculatedMonths} شهر
+              {calculation.calculatedDays > 0 && ` و ${calculation.calculatedDays} يوم`}
+            </div>
+            <p className="text-xs text-primary-foreground/70">
+              الربح الصافي: <span className="text-green-300 font-bold">+{Math.round(calculation.totalProfit).toLocaleString()} د.ع</span>
             </p>
           </div>
 
