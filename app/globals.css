@@ -11,15 +11,15 @@
   --border: 214.3 31.8% 91.4%;
 }
 
-/* ألوان الوضع الليلي (أسود حقيقي مع شفافية زجاجية) */
+/* ألوان الوضع الليلي */
 .dark {
-  --background: 0 0% 0%; /* أسود خالص خلفية الصفحة */
+  --background: 0 0% 0%;
   --foreground: 0 0% 98%;
-  --card: 0 0% 5%; /* أسود معتم جداً للكروت لتسهيل الشفافية الزجاجية */
+  --card: 0 0% 5%;
   --card-foreground: 0 0% 98%;
   --primary: 217.2 91.2% 59.8%;
   --primary-foreground: 222.2 47.4% 11.2%;
-  --border: 0 0% 15%; /* حدود ناعمة ومظلمة تناسب الأسود */
+  --border: 0 0% 15%;
 }
 
 @theme {
@@ -39,10 +39,36 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* كلاسات جاهزة لإعطاء تأثير الزجاج الشفاف باللون الأسود بسهولة */
 .dark .glass-card {
   background-color: rgba(10, 10, 10, 0.6);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* 👈 كلاسات الشارات المعدلة لإظهار النص بشكل حاد وواضح جداً */
+
+/* شارة تم الدفع (أخضر غامق مع نص أبيض بارز) */
+.badge-paid {
+  background-color: #15803d !important; /* أخضر غامق واضح */
+  color: #ffffff !important; /* نص أبيض صريح */
+  font-weight: 800 !important;
+}
+
+/* شارة مستحق (أصفر دافئ مع نص أسود غامق) */
+.badge-due {
+  background-color: #fef08a !important; /* خلفية صفراء */
+  color: #854d0e !important; /* نص بني/ذهبي غامق جداً يسهل قراءته */
+  font-weight: 800 !important;
+}
+
+/* للوضع الليلي */
+.dark .badge-paid {
+  background-color: #16a34a !important;
+  color: #ffffff !important;
+}
+
+.dark .badge-due {
+  background-color: #713f12 !important;
+  color: #fef08a !important;
 }

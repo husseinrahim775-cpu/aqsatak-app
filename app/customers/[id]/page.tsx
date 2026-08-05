@@ -8,11 +8,13 @@ import {
   getUserPayments, 
   updateInstallment,
   deleteInstallment,
+  updatePaymentRecord,
+  deletePaymentRecord,
   InstallmentData, 
   PaymentRecord 
 } from "../../../services/firestore";
 import { useAuth } from "../../../components/AuthProvider";
-import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X } from "lucide-react";
+import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X, Receipt } from "lucide-react";
 import Link from "next/link";
 
 export default function CustomerDetailPage() {
@@ -26,7 +28,7 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
 
-  // --- حالات التعديل ---
+  // --- حالات تعديل القسط ---
   const [editingInstallment, setEditingInstallment] = useState<InstallmentData | null>(null);
   const [editForm, setEditForm] = useState({
     productName: "",
@@ -37,26 +39,32 @@ export default function CustomerDetailPage() {
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  // تم فصل دالة جلب البيانات لتسهيل تحديث الصفحة بعد التعديل أو الحذف
+  // --- حالات تعديل الدفعة/الغرامة ---
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({
+    amount: 0,
+    targetMonth: "",
+    notes: "",
+  });
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+
+  // جلب البيانات
   const fetchData = useCallback(async () => {
     if (!phoneOrId || !user?.uid) return;
     try {
       setLoading(true);
-      // 1. جلب سجل جميع الدفعات للمستخدم
       const userPayments = await getUserPayments(user.uid);
       setPayments(userPayments);
 
-      // 2. جلب أقساط العميل برقم الهاتف
       const data = await getInstallmentsByPhone(user.uid, phoneOrId);
       if (data.length > 0) {
         setInstallments(data);
       } else {
-        // كحل بديل إذا كان المعامل ID قديم
         const single = await getInstallmentById(phoneOrId);
         if (single) {
           setInstallments([single]);
         } else {
-          setInstallments([]); // في حال تم حذف كل الأقساط
+          setInstallments([]); 
         }
       }
     } catch (error) {
@@ -70,7 +78,7 @@ export default function CustomerDetailPage() {
     fetchData();
   }, [fetchData]);
 
-  // --- دوال الحذف والتعديل ---
+  // --- دوال القسط (حذف وتعديل) ---
   const handleDeleteInstallment = async (id: string, productName: string) => {
     const confirmDelete = window.confirm(
       `هل أنت متأكد من حذف قسط "${productName}" بالكامل؟\n\nتنبيه: سيتم حذف هذا القسط فقط ولن يمكن التراجع.`
@@ -79,7 +87,6 @@ export default function CustomerDetailPage() {
       try {
         await deleteInstallment(id);
         await fetchData();
-        // إذا كان هذا هو القسط الأخير وتم حذفه، نعود لصفحة العملاء
         if (installments.length === 1) {
           router.push("/customers");
         }
@@ -122,15 +129,70 @@ export default function CustomerDetailPage() {
     }
   };
 
-  const getDueDate = (startDateStr: string | undefined, monthIndex: number) => {
-    if (!startDateStr) {
-      const fallback = new Date();
-      fallback.setMonth(fallback.getMonth() + monthIndex + 1);
-      return fallback.toLocaleDateString("ar-IQ", { year: "numeric", month: "long", day: "numeric" });
+  // --- دوال الدفعة/الغرامة (حذف وتعديل) ---
+  const handleDeletePayment = async (payment: PaymentRecord) => {
+    const confirmDelete = window.confirm(
+      `هل أنت متأكد من حذف هذه الدفعة بقيمة ${payment.amount} د.ع؟\nسيتم إرجاع المبلغ إلى ديون العميل وإلغاء حالة الدفع.`
+    );
+    if (confirmDelete && payment.id) {
+      try {
+        await deletePaymentRecord(payment.id, payment.installmentId, payment.amount);
+        await fetchData();
+      } catch (error) {
+        console.error("خطأ في حذف الدفعة:", error);
+        alert("حدث خطأ أثناء حذف الدفعة.");
+      }
     }
-    const [year, month, day] = startDateStr.split("-").map(Number);
-    const date = new Date(year, month - 1 + monthIndex, day);
-    return date.toLocaleDateString("ar-IQ", { year: "numeric", month: "long", day: "numeric" });
+  };
+
+  const openEditPaymentModal = (payment: PaymentRecord) => {
+    setEditingPayment(payment);
+    setEditPaymentForm({
+      amount: payment.amount,
+      targetMonth: payment.targetMonth || "",
+      notes: payment.notes || "",
+    });
+  };
+
+  const handleSavePaymentEdit = async () => {
+    if (!editingPayment?.id) return;
+    setIsSavingPayment(true);
+    try {
+      await updatePaymentRecord(
+        editingPayment.id,
+        editingPayment.installmentId,
+        editingPayment.amount,
+        Number(editPaymentForm.amount),
+        {
+          amount: Number(editPaymentForm.amount),
+          targetMonth: editPaymentForm.targetMonth,
+          notes: editPaymentForm.notes,
+        }
+      );
+      await fetchData();
+      setEditingPayment(null);
+    } catch (error) {
+      console.error("خطأ في التعديل:", error);
+      alert("حدث خطأ أثناء حفظ تعديل الدفعة.");
+    } finally {
+      setIsSavingPayment(false);
+    }
+  };
+
+  // --- دالة التاريخ الرقمي YYYY-MM-DD ---
+  const getDueDate = (startDateStr: string | undefined, monthIndex: number) => {
+    let date;
+    if (!startDateStr) {
+      date = new Date();
+      date.setMonth(date.getMonth() + monthIndex + 1);
+    } else {
+      const [year, month, day] = startDateStr.split("-").map(Number);
+      date = new Date(year, month - 1 + monthIndex, day);
+    }
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`; 
   };
 
   const handleSendWhatsApp = async (
@@ -230,15 +292,15 @@ export default function CustomerDetailPage() {
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-500">الاسم الرباعي</p>
-              <p className="font-semibold text-foreground">{mainInfo.customerName}</p>
+              <p className="font-bold text-foreground">{mainInfo.customerName}</p>
             </div>
             <div>
               <p className="text-gray-500">رقم الهاتف</p>
-              <p className="font-semibold text-foreground" dir="ltr">{mainInfo.phoneNumber}</p>
+              <p className="font-bold text-foreground" dir="ltr">{mainInfo.phoneNumber}</p>
             </div>
             <div>
               <p className="text-gray-500">العنوان</p>
-              <p className="font-semibold text-foreground">{mainInfo.address || "غير محدد"}</p>
+              <p className="font-bold text-foreground">{mainInfo.address || "غير محدد"}</p>
             </div>
           </div>
         </div>
@@ -251,100 +313,100 @@ export default function CustomerDetailPage() {
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-500">اسم الكفيل</p>
-              <p className="font-semibold text-foreground">{mainInfo.guarantorName}</p>
+              <p className="font-bold text-foreground">{mainInfo.guarantorName || "لا يوجد"}</p>
             </div>
             <div>
               <p className="text-gray-500">رقم هاتف الكفيل</p>
-              <p className="font-semibold text-foreground" dir="ltr">{mainInfo.guarantorPhone}</p>
+              <p className="font-bold text-foreground" dir="ltr">{mainInfo.guarantorPhone || "لا يوجد"}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* حلقة تكرار لعرض كل قسط وجدول دفعاته على حدة */}
+      {/* الأقساط والدفعات */}
       {installments.map((item, idx) => {
-        const totalPaidForThisInstallment = payments
-          .filter((p) => p.installmentId === item.id)
-          .reduce((sum, p) => sum + (p.amount || 0), 0);
+        const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
 
         return (
           <div key={item.id || idx} className="space-y-4 bg-card border border-border rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center justify-between border-b border-border pb-4 group">
-              <div className="flex items-center gap-2 text-primary font-bold text-xl">
-                <CreditCard className="w-6 h-6" />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4 group">
+              <div className="flex items-center gap-2 text-primary font-bold text-xl flex-wrap">
+                <CreditCard className="w-6 h-6 shrink-0" />
                 <span>القسط #{idx + 1}: {item.productName}</span>
                 
-                {/* أزرار التعديل والحذف تظهر عند مرور الماوس */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2">
-                  <button onClick={() => openEditModal(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="تعديل بيانات القسط">
+                {/* 👈 أزرار التعديل والحذف: ظاهرة دائماً على الهواتف، وتظهر عند الهوفر على الشاشات الكبيرة */}
+                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mr-2">
+                  <button onClick={() => openEditModal(item)} className="p-1.5 text-blue-600 sm:text-gray-400 sm:hover:text-blue-600 bg-blue-50 dark:bg-blue-900/30 sm:bg-transparent rounded-md transition-colors" title="تعديل بيانات القسط">
                     <Edit className="w-4 h-4" />
                   </button>
-                  <button onClick={() => item.id && handleDeleteInstallment(item.id, item.productName)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="حذف القسط بالكامل">
+                  <button onClick={() => item.id && handleDeleteInstallment(item.id, item.productName)} className="p-1.5 text-red-600 sm:text-gray-400 sm:hover:text-red-600 bg-red-50 dark:bg-red-900/30 sm:bg-transparent rounded-md transition-colors" title="حذف القسط بالكامل">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-              <span className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-full font-bold">
+              <span className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-full font-extrabold">
                 {item.months} أشهر
               </span>
             </div>
 
             {/* ملخص مالية القسط */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-background/50 p-4 rounded-xl text-sm border border-border">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-4 rounded-xl text-sm border border-border">
               <div>
-                <p className="text-gray-500">سعر المنتج</p>
+                <p className="text-gray-500 text-xs">سعر المنتج</p>
                 <p className="font-bold">{item.productPrice.toLocaleString()} د.ع</p>
               </div>
               <div>
-                <p className="text-gray-500">الدفعة المقدمة</p>
+                <p className="text-gray-500 text-xs">الدفعة المقدمة</p>
                 <p className="font-bold">{item.downPayment.toLocaleString()} د.ع</p>
               </div>
               <div>
-                <p className="text-gray-500">المتبقي للتقسيط</p>
-                <p className="font-bold text-foreground">{Math.round(item.totalDue).toLocaleString()} د.ع</p>
+                <p className="text-gray-500 text-xs">المتبقي للتقسيط</p>
+                <p className="font-extrabold text-foreground">{Math.round(item.totalDue).toLocaleString()} د.ع</p>
               </div>
               <div>
-                <p className="text-gray-500">القسط الشهري</p>
-                <p className="font-extrabold text-primary">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</p>
+                <p className="text-gray-500 text-xs">القسط الشهري</p>
+                <p className="font-black text-primary">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</p>
               </div>
             </div>
 
             {/* جدول دفعات القسط */}
             <div className="border border-border rounded-xl overflow-hidden mt-4">
-              <div className="p-4 bg-background/80 border-b border-border font-bold text-sm flex items-center gap-2">
+              <div className="p-4 bg-secondary/40 border-b border-border font-bold text-sm flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-primary" />
                 <span>جدول دفعات ({item.productName})</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-right text-sm">
-                  <thead className="bg-background/50 text-gray-500">
+                  <thead className="bg-secondary/20 text-gray-500 border-b border-border">
                     <tr>
-                      <th className="p-3 font-medium">رقم الدفعة</th>
-                      <th className="p-3 font-medium">المبلغ المطلوب</th>
-                      <th className="p-3 font-medium">تاريخ الاستحقاق</th>
-                      <th className="p-3 font-medium text-center">الحالة / الإجراء</th>
+                      <th className="p-3 font-semibold">رقم الدفعة</th>
+                      <th className="p-3 font-semibold">المبلغ المطلوب</th>
+                      <th className="p-3 font-semibold">تاريخ الاستحقاق</th>
+                      <th className="p-3 font-semibold text-center">الحالة / الإجراء</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {Array.from({ length: item.months }).map((_, mIdx) => {
-                      const requiredAmountForThisStep = item.monthlyInstallment * (mIdx + 1);
-                      const isPaid = totalPaidForThisInstallment >= requiredAmountForThisStep - 50;
                       const dueDateFormatted = getDueDate(item.startDate, mIdx);
+                      const [year, month] = dueDateFormatted.split("-");
+                      const targetMonthString = `${year}-${month}`;
+                      
+                      const isPaid = item.paidMonths?.includes(targetMonthString);
                       const btnKey = `${item.id || idx}-${mIdx}`;
 
                       return (
-                        <tr key={mIdx} className="hover:bg-background/40 transition-colors">
+                        <tr key={mIdx} className="hover:bg-secondary/20 transition-colors">
                           <td className="p-3 font-bold text-primary">الدفعة #{mIdx + 1}</td>
-                          <td className="p-3 font-semibold">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</td>
-                          <td className="p-3 text-foreground font-medium">{dueDateFormatted}</td>
+                          <td className="p-3 font-extrabold">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</td>
+                          <td className="p-3 text-gray-500 font-bold" dir="ltr">{dueDateFormatted}</td>
                           <td className="p-3 text-center">
                             {isPaid ? (
-                              <span className="px-2.5 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full text-xs font-bold inline-block">
+                              <span className="px-3 py-1 bg-[#15803d] text-white dark:bg-emerald-600 dark:text-white rounded-full text-xs font-black shadow-sm inline-block">
                                 تم الدفع ✓
                               </span>
                             ) : (
                               <div className="flex items-center justify-center gap-2">
-                                <span className="px-2.5 py-0.5 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-full text-xs font-bold">
+                                <span className="px-3 py-1 bg-amber-300 text-amber-950 dark:bg-amber-500/20 dark:text-amber-400 border border-amber-400/50 rounded-full text-xs font-black shadow-sm">
                                   مستحق
                                 </span>
                                 <button
@@ -358,7 +420,7 @@ export default function CustomerDetailPage() {
                                     dueDateFormatted
                                   )}
                                   disabled={sendingIndex === btnKey}
-                                  className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-1 text-xs font-bold shadow-sm"
+                                  className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center gap-1 text-xs font-bold shadow-sm"
                                   title="إرسال تذكير عبر الواتساب"
                                 >
                                   {sendingIndex === btnKey ? (
@@ -378,17 +440,70 @@ export default function CustomerDetailPage() {
                 </table>
               </div>
             </div>
+
+            {/* سجل المقبوضات والغرامات */}
+            <div className="border border-border rounded-xl overflow-hidden mt-6">
+              <div className="p-4 bg-secondary/40 border-b border-border font-bold text-sm flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-primary" />
+                <span>سجل الدفعات والغرامات المسددة</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-sm">
+                  <thead className="bg-secondary/20 text-gray-500 border-b border-border">
+                    <tr>
+                      <th className="p-3 font-semibold">التاريخ</th>
+                      <th className="p-3 font-semibold">المبلغ</th>
+                      <th className="p-3 font-semibold">عن شهر</th>
+                      <th className="p-3 font-semibold">النوع / الملاحظات</th>
+                      <th className="p-3 font-semibold text-center">إجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {currentInstPayments.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-center text-gray-500">لا توجد دفعات أو غرامات مسجلة بعد.</td>
+                      </tr>
+                    ) : (
+                      currentInstPayments.map((p) => {
+                        const paidDate = p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-GB").split("/").reverse().join("-") : "-";
+                        return (
+                          <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
+                            <td className="p-3 font-semibold">{paidDate}</td>
+                            <td className="p-3 font-black text-emerald-700 dark:text-emerald-400">+{p.amount.toLocaleString()} د.ع</td>
+                            <td className="p-3 font-bold text-gray-500" dir="ltr">{p.targetMonth || "-"}</td>
+                            <td className="p-3 text-gray-500 text-xs max-w-[200px] truncate" title={p.notes}>
+                              {p.notes || "دفعة اعتيادية"}
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex justify-center items-center gap-2">
+                                <button onClick={() => openEditPaymentModal(p)} className="p-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-md border border-blue-200 dark:border-blue-800 transition-colors" title="تعديل الدفعة">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeletePayment(p)} className="p-1.5 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-md border border-red-200 dark:border-red-800 transition-colors" title="حذف الدفعة">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
           </div>
         );
       })}
 
-      {/* --- نافذة تعديل القسط (Modal) --- */}
+      {/* نافذة تعديل القسط (Modal) */}
       {editingInstallment && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-background rounded-2xl w-full max-w-md p-6 shadow-xl border border-border animate-in zoom-in-95 duration-200">
+          <div className="bg-card rounded-2xl w-full max-w-md p-6 shadow-xl border border-border animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">تعديل بيانات القسط</h2>
-              <button onClick={() => setEditingInstallment(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+              <button onClick={() => setEditingInstallment(null)} className="p-2 hover:bg-secondary rounded-full transition-colors">
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
@@ -447,7 +562,7 @@ export default function CustomerDetailPage() {
               <div className="pt-4 flex gap-3">
                 <button
                   onClick={() => setEditingInstallment(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-border font-medium hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                  className="flex-1 py-2.5 rounded-xl border border-border font-medium hover:bg-secondary transition-colors"
                   disabled={isSaving}
                 >
                   إلغاء
@@ -458,6 +573,70 @@ export default function CustomerDetailPage() {
                   className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-70"
                 >
                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : 'حفظ التعديلات'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تعديل الدفعة / الغرامة (Modal) */}
+      {editingPayment && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-card rounded-2xl w-full max-w-md p-6 shadow-xl border border-border animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold">تعديل الدفعة / الغرامة</h2>
+              <button onClick={() => setEditingPayment(null)} className="p-2 hover:bg-secondary rounded-full transition-colors">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">المبلغ (د.ع)</label>
+                <input
+                  type="number"
+                  value={editPaymentForm.amount}
+                  onChange={(e) => setEditPaymentForm({...editPaymentForm, amount: Number(e.target.value)})}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">عن شهر (مثال: 2026-09)</label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  placeholder="YYYY-MM"
+                  value={editPaymentForm.targetMonth}
+                  onChange={(e) => setEditPaymentForm({...editPaymentForm, targetMonth: e.target.value})}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none text-left"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">ملاحظات / غرامة</label>
+                <textarea
+                  value={editPaymentForm.notes}
+                  onChange={(e) => setEditPaymentForm({...editPaymentForm, notes: e.target.value})}
+                  rows={3}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none resize-none"
+                  placeholder="مثال: غرامة تأخير..."
+                />
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  onClick={() => setEditingPayment(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-border font-medium hover:bg-secondary transition-colors"
+                  disabled={isSavingPayment}
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={handleSavePaymentEdit}
+                  disabled={isSavingPayment || !editPaymentForm.amount}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-70"
+                >
+                  {isSavingPayment ? <Loader2 className="w-5 h-5 animate-spin" /> : 'حفظ التعديلات'}
                 </button>
               </div>
             </div>

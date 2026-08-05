@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useAuth } from "../../components/AuthProvider";
 import { 
   getUserPayments, 
@@ -24,7 +24,8 @@ import {
   X, 
   CheckCircle2,
   Edit,
-  Trash2
+  Trash2,
+  FileText
 } from "lucide-react";
 
 export default function AccountsPage() {
@@ -36,8 +37,16 @@ export default function AccountsPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  
+  // حالات جديدة لإضافة الدفعة
   const [selectedInstallmentId, setSelectedInstallmentId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState<number | "">("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [targetMonth, setTargetMonth] = useState(""); 
+  
+  // حالات خاصة للبحث عن العميل داخل النافذة
+  const [customerSearchTerm, setCustomerSearchTerm] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -88,36 +97,48 @@ export default function AccountsPage() {
     });
   }, [payments, searchQuery]);
 
+  // تصفية العملاء داخل قائمة البحث
+  const filteredInstallmentsForSearch = useMemo(() => {
+    if (!customerSearchTerm) return installments;
+    return installments.filter(inst => 
+      inst.customerName?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+      inst.productName?.toLowerCase().includes(customerSearchTerm.toLowerCase())
+    );
+  }, [installments, customerSearchTerm]);
+
   const selectedInstallment = useMemo(() => {
     return installments.find((i) => i.id === selectedInstallmentId);
   }, [installments, selectedInstallmentId]);
 
   const handleOpenModal = (installmentId?: string) => {
+    setPaymentNotes("");
+    setTargetMonth("");
+    setCustomerSearchTerm("");
+    setShowCustomerDropdown(false);
+
     if (installmentId) {
-      setSelectedInstallmentId(installmentId);
-      const inst = installments.find((i) => i.id === installmentId);
-      if (inst) {
-        setPaymentAmount(Math.round(inst.monthlyInstallment || 0));
-      }
-    } else if (installments.length > 0) {
-      setSelectedInstallmentId(installments[0].id || "");
-      setPaymentAmount(Math.round(installments[0].monthlyInstallment || 0));
+      handleInstallmentSelection(installmentId);
+    } else {
+      setSelectedInstallmentId("");
+      setPaymentAmount("");
     }
     setIsModalOpen(true);
   };
 
-  const handleInstallmentChange = (id: string) => {
+  const handleInstallmentSelection = (id: string) => {
     setSelectedInstallmentId(id);
     const inst = installments.find((i) => i.id === id);
     if (inst) {
       setPaymentAmount(Math.round(inst.monthlyInstallment || 0));
+      setCustomerSearchTerm(`${inst.customerName} - ${inst.productName}`);
     }
+    setShowCustomerDropdown(false);
   };
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.uid || !selectedInstallmentId || !paymentAmount) {
-      alert("يرجى ملء كافة الحقول المطلوبة.");
+      alert("يرجى اختيار العميل وتحديد المبلغ.");
       return;
     }
 
@@ -126,6 +147,7 @@ export default function AccountsPage() {
       const inst = selectedInstallment;
       const amountNum = Number(paymentAmount);
 
+      // تأكد من إضافة targetMonth و notes لدالة الإرسال في ملف firestore.ts
       await addPaymentRecord({
         userId: user.uid,
         installmentId: selectedInstallmentId,
@@ -133,6 +155,8 @@ export default function AccountsPage() {
         productName: inst?.productName || "غير محدد",
         amount: amountNum,
         paidAt: new Date().toISOString(),
+        targetMonth: targetMonth || undefined, // إرسال الشهر المستهدف
+        notes: paymentNotes || "",             // إرسال الملاحظات
       });
 
       await fetchData();
@@ -198,7 +222,6 @@ export default function AccountsPage() {
   };
 
   return (
-    // تصغير المسافات العامة
     <div className="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-8 md:pb-12 relative">
       
       {/* 1. الهيدر وزر إضافة دفعة */}
@@ -207,7 +230,6 @@ export default function AccountsPage() {
           <h1 className="text-xl md:text-2xl font-bold text-foreground">الحسابات والمدفوعات</h1>
           <p className="text-gray-500 text-xs md:text-sm mt-1">سجل الدفعات المستلمة والموقف المالي العام للحساب.</p>
         </div>
-        {/* زر الإضافة يأخذ العرض بالكامل في الهاتف */}
         <button
           onClick={() => handleOpenModal()}
           className="flex justify-center w-full sm:w-auto items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl hover:bg-primary/90 transition-all font-bold shadow-sm text-sm md:text-base"
@@ -271,7 +293,7 @@ export default function AccountsPage() {
         />
       </div>
 
-      {/* 4. سجل المقبوضات (Table Desktop / Cards Mobile) */}
+      {/* 4. سجل المقبوضات */}
       <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         <div className="p-4 md:p-5 border-b border-border bg-background/50 flex items-center justify-between">
           <h2 className="font-bold text-base md:text-lg flex items-center gap-2">
@@ -295,7 +317,7 @@ export default function AccountsPage() {
           </div>
         ) : (
           <>
-            {/* العرض الخاص بالهاتف (بطاقات بدلاً من الجدول لمنع التمرير الأفقي) */}
+            {/* العرض الخاص بالهاتف */}
             <div className="block md:hidden divide-y divide-border">
               {filteredPayments.map((p, idx) => (
                 <div key={p.id || idx} className="p-4 space-y-3 bg-background/30 hover:bg-background/50 transition-colors">
@@ -304,7 +326,6 @@ export default function AccountsPage() {
                       <User className="w-4 h-4 text-primary" />
                       <span className="font-bold text-sm text-foreground">{p.customerName || "عميل مسجل"}</span>
                     </div>
-                    {/* الأزرار ظاهرة دائماً في الهاتف لسهولة النقر */}
                     <div className="flex items-center gap-1">
                       <button onClick={() => handleOpenEditModal(p)} className="p-1.5 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-md">
                         <Edit className="w-3.5 h-3.5" />
@@ -318,11 +339,19 @@ export default function AccountsPage() {
                     <span className="text-gray-500">{p.productName || "قسط"}</span>
                     <span className="font-extrabold text-green-600 dark:text-green-400 text-sm">+{p.amount.toLocaleString()} د.ع</span>
                   </div>
+                  {/* عرض الملاحظات والشهر المستهدف إذا وجدت */}
+                  {(p as any).targetMonth && (
+                     <div className="text-[10px] text-gray-500">شهر الاستحقاق: <span className="font-bold">{(p as any).targetMonth}</span></div>
+                  )}
+                  {(p as any).notes && (
+                     <div className="text-[10px] text-gray-500 bg-gray-50 dark:bg-gray-800 p-1.5 rounded truncate">ملاحظة: {(p as any).notes}</div>
+                  )}
                   <div className="flex justify-between items-center text-[10px] text-gray-500 pt-2 border-t border-border">
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       <span>
-                        {p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ", { year: "numeric", month: "short", day: "numeric" }) : "غير محدد"}
+                        {/* تم تغيير month إلى numeric لعرض أرقام فقط */}
+                        {p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ", { year: "numeric", month: "numeric", day: "numeric" }) : "غير محدد"}
                       </span>
                     </div>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full font-bold">
@@ -333,16 +362,16 @@ export default function AccountsPage() {
               ))}
             </div>
 
-            {/* العرض الخاص بالديسكتوب (جدول طبيعي) */}
+            {/* العرض الخاص بالديسكتوب */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-right text-sm whitespace-nowrap">
                 <thead className="bg-background/50 text-gray-500 border-b border-border">
                   <tr>
                     <th className="p-4 font-medium">اسم العميل</th>
                     <th className="p-4 font-medium">المنتج / القسط</th>
+                    <th className="p-4 font-medium">عن شهر</th>
                     <th className="p-4 font-medium">المبلغ المستلم</th>
                     <th className="p-4 font-medium">تاريخ التحصيل</th>
-                    <th className="p-4 font-medium text-center">الحالة</th>
                     <th className="p-4 font-medium text-center">إجراءات</th>
                   </tr>
                 </thead>
@@ -350,13 +379,21 @@ export default function AccountsPage() {
                   {filteredPayments.map((p, idx) => (
                     <tr key={p.id || idx} className="hover:bg-background/40 transition-colors group">
                       <td className="p-4 font-bold text-foreground">
-                        <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-primary" />
-                          <span>{p.customerName || "عميل مسجل"}</span>
+                        <div className="flex flex-col">
+                           <div className="flex items-center gap-2">
+                             <User className="w-4 h-4 text-primary" />
+                             <span>{p.customerName || "عميل مسجل"}</span>
+                           </div>
+                           {(p as any).notes && (
+                             <span className="text-[10px] text-gray-400 mt-1 truncate max-w-[150px]" title={(p as any).notes}>ملاحظة: {(p as any).notes}</span>
+                           )}
                         </div>
                       </td>
                       <td className="p-4 font-medium text-gray-600 dark:text-gray-300">
                         {p.productName || "قسط"}
+                      </td>
+                      <td className="p-4 font-bold text-gray-600 dark:text-gray-300">
+                        {(p as any).targetMonth || "-"}
                       </td>
                       <td className="p-4 font-extrabold text-green-600 dark:text-green-400 text-base">
                         +{p.amount.toLocaleString()} د.ع
@@ -365,21 +402,16 @@ export default function AccountsPage() {
                         <div className="flex items-center gap-1.5">
                           <Calendar className="w-4 h-4 text-gray-400" />
                           <span>
+                            {/* تم تغيير month إلى numeric لعرض أرقام فقط */}
                             {p.paidAt
                               ? new Date(p.paidAt).toLocaleDateString("ar-IQ", {
                                   year: "numeric",
-                                  month: "long",
+                                  month: "numeric",
                                   day: "numeric",
                                 })
                               : "غير محدد"}
                           </span>
                         </div>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full text-xs font-bold">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>تم القبض</span>
-                        </span>
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex justify-center items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -426,21 +458,46 @@ export default function AccountsPage() {
             </div>
 
             <form onSubmit={handleAddPayment} className="space-y-3 md:space-y-4">
-              <div>
-                <label className="block text-[10px] md:text-xs font-bold text-gray-500 mb-1">اختر القسط / العميل</label>
-                <select
-                  value={selectedInstallmentId}
-                  onChange={(e) => handleInstallmentChange(e.target.value)}
-                  className="w-full p-2.5 md:p-3 rounded-xl border border-border bg-background text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary/50 outline-none"
-                  required
-                >
-                  {installments.length === 0 && <option value="">لا توجد أقساط مسجلة</option>}
-                  {installments.map((inst) => (
-                    <option key={inst.id} value={inst.id}>
-                      {inst.customerName} - {inst.productName} (القسط الشهري: {Math.round(inst.monthlyInstallment || 0).toLocaleString()} د.ع)
-                    </option>
-                  ))}
-                </select>
+              
+              {/* 1. حقل البحث واختيار العميل بدلاً من القائمة العادية */}
+              <div className="relative">
+                <label className="block text-[10px] md:text-xs font-bold text-gray-500 mb-1">ابحث واختر العميل</label>
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="اكتب اسم العميل للبحث..."
+                    value={customerSearchTerm}
+                    onChange={(e) => {
+                      setCustomerSearchTerm(e.target.value);
+                      setShowCustomerDropdown(true);
+                      setSelectedInstallmentId(""); // تصفير الاختيار إذا قام المستخدم بتعديل النص
+                    }}
+                    onFocus={() => setShowCustomerDropdown(true)}
+                    className="w-full pr-9 pl-3 p-2.5 md:p-3 rounded-xl border border-border bg-background text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                    required
+                  />
+                </div>
+                
+                {/* القائمة المنسدلة للبحث */}
+                {showCustomerDropdown && (
+                  <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {filteredInstallmentsForSearch.length > 0 ? (
+                      filteredInstallmentsForSearch.map((inst) => (
+                        <div
+                          key={inst.id}
+                          onClick={() => handleInstallmentSelection(inst.id!)}
+                          className="p-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-0 transition-colors"
+                        >
+                          <div className="font-bold text-sm">{inst.customerName}</div>
+                          <div className="text-[10px] text-gray-500">{inst.productName} - (قسط: {Math.round(inst.monthlyInstallment || 0).toLocaleString()} د.ع)</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-3 text-center text-xs text-gray-500">لا يوجد عميل بهذا الاسم</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {selectedInstallment && (
@@ -457,6 +514,21 @@ export default function AccountsPage() {
                 </div>
               )}
 
+              {/* 2. حقل اختيار شهر الدفعة */}
+              <div>
+                <label className="block text-[10px] md:text-xs font-bold text-gray-500 mb-1 flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  <span>الدفعة تخص أي شهر؟ (اختياري)</span>
+                </label>
+                <input
+                  type="month"
+                  value={targetMonth}
+                  onChange={(e) => setTargetMonth(e.target.value)}
+                  className="w-full p-2.5 md:p-3 rounded-xl border border-border bg-background text-foreground text-sm font-bold focus:ring-2 focus:ring-primary/50 outline-none"
+                />
+              </div>
+
+              {/* 3. حقل المبلغ */}
               <div>
                 <label className="block text-[10px] md:text-xs font-bold text-gray-500 mb-1">المبلغ المستلم (د.ع)</label>
                 <input
@@ -470,6 +542,21 @@ export default function AccountsPage() {
                 />
               </div>
 
+              {/* 4. حقل الملاحظات */}
+              <div>
+                <label className="block text-[10px] md:text-xs font-bold text-gray-500 mb-1 flex items-center gap-1">
+                  <FileText className="w-3 h-3" />
+                  <span>ملاحظات الدفعة (اختياري)</span>
+                </label>
+                <textarea
+                  placeholder="اكتب أي ملاحظة تخص هذا القسط (مثال: تعثر مالي، تم دفع جزء من المبلغ...)"
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                  rows={2}
+                  className="w-full p-2.5 md:p-3 rounded-xl border border-border bg-background text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary/50 outline-none resize-none"
+                />
+              </div>
+
               <div className="pt-2 flex gap-2 md:gap-3">
                 <button
                   type="button"
@@ -480,8 +567,8 @@ export default function AccountsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="flex-1 py-2.5 md:py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 text-xs md:text-sm shadow-md"
+                  disabled={submitting || !selectedInstallmentId}
+                  className="flex-1 py-2.5 md:py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 text-xs md:text-sm shadow-md disabled:opacity-50"
                 >
                   {submitting && <Loader2 className="w-3 h-3 md:w-4 md:h-4 animate-spin" />}
                   <span>تأكيد التسديد</span>
@@ -492,7 +579,7 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* نافذة تعديل دفعة (Edit Modal) */}
+      {/* نافذة تعديل دفعة (Edit Modal) - تُترك كما هي مع إمكانية إضافة الملاحظات لاحقاً */}
       {isEditModalOpen && editingPayment && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 md:p-4">
           <div className="bg-background border border-border rounded-2xl w-full max-w-sm shadow-2xl p-4 md:p-6 space-y-4 md:space-y-5 animate-in zoom-in-95 duration-200">

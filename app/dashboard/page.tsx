@@ -5,7 +5,7 @@ import MetricCard from "@/components/dashboard/MetricCard";
 import ProfitSimulator from "@/components/dashboard/ProfitSimulator";
 import { 
   Wallet, Users, Percent, BellRing, Coins, Banknote, 
-  Loader2, MessageSquare, AlertTriangle, Activity, Target
+  Loader2, MessageSquare, AlertTriangle, Activity, Target, Landmark
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { getUserInstallments, getUserPayments } from "@/services/firestore";
@@ -25,8 +25,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const [stats, setStats] = useState({
-    totalCapital: 0,
-    totalProfits: 0,
+    totalRemainingCapital: 0, 
+    totalRemainingProfits: 0, 
+    totalRemainingDebt: 0,    
     collectedThisMonth: 0,
     activeMonthlyIncome: 0,
     activeCustomers: 0,
@@ -54,12 +55,12 @@ export default function DashboardPage() {
           return;
         }
 
-        let capitalSum = 0;
-        let profitsSum = 0;
+        let remainingCapitalSum = 0;
+        let remainingProfitsSum = 0;
+        let remainingDebtSum = 0;
         let profitMarginSum = 0;
         
         let activeMonthlyIncomeSum = 0;
-
         let totalExpectedToDate = 0;
         let totalCollectedAllTime = 0;
 
@@ -81,29 +82,52 @@ export default function DashboardPage() {
           .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
         installments.forEach((inst) => {
-          const price = Number(inst.productPrice) || 0;
-          const profit = Number(inst.totalProfit) || (Number(inst.totalDue) - price) || 0;
           const monthlyAmount = Number(inst.monthlyInstallment) || 0;
-          const totalDue = Number(inst.totalDue) || (price + profit);
-          const margin = Number(inst.profitMargin) || 0;
           const totalMonths = Number(inst.months) || 1;
+          const margin = Number(inst.profitMargin) || 0;
+          
+          // إجمالي الأرباح الأصلية المسجلة في العقد
+          const totalProfit = Number(inst.totalProfit) || 0;
+          
+          // المتبقي الفعلي من قاعدة البيانات (تم خصم الدفعات منه مسبقاً)
+          const currentDebt = Math.max(0, Number(inst.totalDue) || 0);
 
-          capitalSum += price;
-          profitsSum += profit;
-          profitMarginSum += margin;
-
-          if (inst.phoneNumber) uniquePhones.add(inst.phoneNumber.trim());
-
+          // إجمالي ما دفعه العميل (نحتاجه فقط لحساب كفاءة التحصيل والأشهر المتأخرة)
           const totalPaidForInst = payments
             .filter((p) => p.installmentId === inst.id)
             .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
           totalCollectedAllTime += totalPaidForInst;
+          profitMarginSum += margin;
 
-          if (totalPaidForInst < totalDue - 50) {
-            activeMonthlyIncomeSum += monthlyAmount;
+          // ====================================================
+          // 🟢 المعالجة المالية الدقيقة (نظام استرداد رأس المال أولاً)
+          // ====================================================
+          
+          // 1. الأرباح المتبقية: لا تُمس إلا بعد تسديد رأس المال.
+          // لذا هي الأرباح الكلية، وإذا نزل الدين عن الأرباح، تصبح هي الدين.
+          const remainingProfit = Math.min(totalProfit, currentDebt);
+          
+          // 2. رأس المال المتبقي: إجمالي الدين الحالي ناقص الأرباح
+          const remainingCapital = Math.max(0, currentDebt - remainingProfit);
+
+          remainingDebtSum += currentDebt;
+          remainingCapitalSum += remainingCapital;
+          remainingProfitsSum += remainingProfit;
+
+          // العملاء النشطين
+          if (currentDebt > 0 && inst.phoneNumber) {
+            uniquePhones.add(inst.phoneNumber.trim());
           }
 
+          // الوارد الشهري النشط (نأخذ القسط أو المتبقي الفعلي أيهما أقل)
+          if (currentDebt > 0) {
+            activeMonthlyIncomeSum += Math.min(monthlyAmount, currentDebt);
+          }
+
+          // ====================================================
+          // 🟢 حساب التنبيهات والأشهر المتأخرة
+          // ====================================================
           if (!inst.startDate) return;
           const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
 
@@ -112,13 +136,14 @@ export default function DashboardPage() {
           for (let m = 0; m < totalMonths; m++) {
             const dueDate = new Date(sYear, sMonth - 1 + m, sDay);
             const requiredForStep = monthlyAmount * (m + 1);
+            
             const isPaid = totalPaidForInst >= requiredForStep - 50;
 
             if (dueDate.getTime() <= now.getTime()) {
               totalExpectedToDate += monthlyAmount;
             }
 
-            if (!isPaid) {
+            if (!isPaid && currentDebt > 0) { // أضفنا شرط أن عليه دين لتجنب العقود المنتهية
               const diffTime = dueDate.getTime() - now.getTime();
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -128,7 +153,7 @@ export default function DashboardPage() {
                     customerName: inst.customerName,
                     phoneNumber: inst.phoneNumber,
                     productName: inst.productName,
-                    amount: monthlyAmount,
+                    amount: Math.min(monthlyAmount, currentDebt), 
                     dueDate: dueDate,
                     daysLeft: Math.abs(diffDays), 
                   });
@@ -137,7 +162,7 @@ export default function DashboardPage() {
                     customerName: inst.customerName,
                     phoneNumber: inst.phoneNumber,
                     productName: inst.productName,
-                    amount: monthlyAmount,
+                    amount: Math.min(monthlyAmount, currentDebt), 
                     dueDate: dueDate,
                     daysLeft: diffDays,
                   });
@@ -155,8 +180,9 @@ export default function DashboardPage() {
           : 100;
 
         setStats({
-          totalCapital: capitalSum,
-          totalProfits: profitsSum,
+          totalRemainingCapital: remainingCapitalSum,
+          totalRemainingProfits: remainingProfitsSum,
+          totalRemainingDebt: remainingDebtSum,
           collectedThisMonth: collectedThisMonthSum,
           activeMonthlyIncome: activeMonthlyIncomeSum,
           activeCustomers: uniquePhones.size,
@@ -170,12 +196,12 @@ export default function DashboardPage() {
         setUpcomingAlerts(alertsList.slice(0, 5));
         setOverdueAlerts(overdueList.slice(0, 5));
 
-  } catch (error) {
-      console.error("خطأ في جلب بيانات الداشبورد:", error);
-    } finally {
-      setLoading(false);
+      } catch (error) {
+        console.error("خطأ في جلب بيانات الداشبورد:", error);
+      } finally {
+        setLoading(false);
+      }
     }
-  }
 
     fetchDashboardData();
   }, [user]);
@@ -206,7 +232,7 @@ export default function DashboardPage() {
       <div className="flex flex-row justify-between items-center gap-3 bg-card p-3.5 md:p-5 rounded-2xl border border-border/70 shadow-sm">
         <div>
           <h1 className="text-lg md:text-2xl font-bold tracking-tight text-foreground">المركز المالي</h1>
-          <p className="text-[11px] md:text-xs text-muted-foreground mt-0.5">نظرة تحليلية شاملة لأداء محفظة الأقساط.</p>
+          <p className="text-[11px] md:text-xs text-muted-foreground mt-0.5">نظرة تحليلية دقيقة لأداء محفظة الأقساط وتدوير الأموال.</p>
         </div>
         
         <div className={`flex items-center gap-2 px-3 py-1.5 md:px-3.5 md:py-2 rounded-xl border transition-colors ${
@@ -225,10 +251,14 @@ export default function DashboardPage() {
       </div>
 
       {/* 2. الكارتات الأساسية */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 md:gap-4">
-        <MetricCard title="رأس المال الكلي" value={`${stats.totalCapital.toLocaleString()} د.ع`} icon={Wallet} />
-        <MetricCard title="الأرباح المتوقعة" value={`${stats.totalProfits.toLocaleString()} د.ع`} icon={Banknote} />
-        <MetricCard title="الوارد الشهري (النشط)" value={`${stats.activeMonthlyIncome.toLocaleString()} د.ع`} icon={Target} />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5 md:gap-4">
+        {/* الكارتات المالية المخصصة */}
+        <MetricCard title="إجمالي الديون (مال + أرباح)" value={`${stats.totalRemainingDebt.toLocaleString()} د.ع`} icon={Landmark} />
+        <MetricCard title="رأس المال المتبقي بالسوق" value={`${stats.totalRemainingCapital.toLocaleString()} د.ع`} icon={Wallet} />
+        <MetricCard title="الأرباح المتبقية بالسوق" value={`${stats.totalRemainingProfits.toLocaleString()} د.ع`} icon={Banknote} />
+        
+        {/* كارتات السيولة والأداء */}
+        <MetricCard title="الوارد الشهري (المتوقع)" value={`${stats.activeMonthlyIncome.toLocaleString()} د.ع`} icon={Target} />
         <MetricCard title="المحصل هذا الشهر" value={`${stats.collectedThisMonth.toLocaleString()} د.ع`} icon={Coins} />
         <MetricCard title="العملاء النشطين" value={stats.activeCustomers.toString()} icon={Users} />
         <MetricCard title="متوسط الفائدة" value={`${stats.avgInterest}%`} icon={Percent} />
@@ -239,8 +269,8 @@ export default function DashboardPage() {
         
         <div className="xl:col-span-2">
           <ProfitSimulator 
-            initialCapital={stats.totalCapital} 
-            currentCapital={stats.totalCapital}
+            initialCapital={stats.totalRemainingCapital} 
+            currentCapital={stats.totalRemainingCapital}
             defaultProfitMargin={stats.avgInterest || 20}
             monthlyCashFlow={stats.activeMonthlyIncome} 
           />
@@ -266,7 +296,7 @@ export default function DashboardPage() {
                   <div key={index} className="flex justify-between items-center p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 border border-border/50 transition-colors">
                     <div className="space-y-0.5 min-w-0 pr-1">
                       <p className="font-bold text-xs truncate text-foreground">{alert.customerName}</p>
-                      <p className="text-[10px] text-muted-foreground font-mono">{Math.round(alert.amount).toLocaleString()} د.ع</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">{Math.round(alert.amount).toLocaleString()} د.ع - يُستحق في: {alert.dueDate.toISOString().split("T")[0]}</p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[10px] font-bold">
@@ -308,7 +338,7 @@ export default function DashboardPage() {
                 <div key={index} className="flex justify-between items-center p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 border border-border/50 transition-colors">
                   <div className="space-y-0.5 min-w-0 pr-1">
                     <p className="font-bold text-xs truncate text-foreground">{alert.customerName}</p>
-                    <p className="text-[10px] text-muted-foreground font-mono">القسط: {Math.round(alert.amount).toLocaleString()} د.ع</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">القسط: {Math.round(alert.amount).toLocaleString()} د.ع - يُستحق في: {alert.dueDate.toISOString().split("T")[0]}</p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400">

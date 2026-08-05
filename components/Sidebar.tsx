@@ -12,14 +12,17 @@ import {
   ShieldCheck, 
   Sun, 
   Moon,
-  LogOut 
+  LogOut,
+  Wallet // 👈 تمت إضافة أيقونة المحفظة هنا
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+// 👈 تمت إضافة "سجل الديون" إلى قائمة الروابط هنا
 const menuItems = [
   { name: 'لوحة التحكم', path: '/dashboard', icon: LayoutDashboard },
   { name: 'العملاء والأقساط', path: '/customers', icon: Users },
   { name: 'الحسابات والمدفوعات', path: '/accounts', icon: CreditCard },
+  { name: 'سجل الديون', path: '/debts', icon: Wallet }, 
   { name: 'الإعدادات', path: '/settings', icon: Settings },
 ];
 

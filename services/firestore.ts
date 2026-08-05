@@ -7,9 +7,10 @@ import {
   getDoc, 
   query, 
   where, 
+  orderBy, // 👈 تمت إضافتها هنا
   serverTimestamp,
   updateDoc,
-  deleteDoc // تم إضافة دالة الحذف هنا
+  deleteDoc 
 } from "firebase/firestore";
 
 // واجهة بيانات القسط والعميل
@@ -31,6 +32,7 @@ export interface InstallmentData {
   monthlyInstallment: number;
   startDate?: string;
   createdAt?: any;
+  paidMonths?: string[]; // 👈 تمت الإضافة لتتبع الأشهر التي تم تسديدها بنجاح
 }
 
 // واجهة تسديد الدفعة
@@ -43,6 +45,9 @@ export interface PaymentRecord {
   amount: number;
   paidAt?: any;
   createdAt?: any;
+  targetMonth?: string; 
+  notes?: string;   
+  isPenalty?: boolean; // 👈 إضافة هذا الحقل لتمييز الغرامة عن الدفعة    
 }
 
 // 1. إضافة قسط جديد مرتبط بالمستخدم الحالي
@@ -50,6 +55,7 @@ export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "c
   try {
     const docRef = await addDoc(collection(db, "installments"), {
       ...data,
+      paidMonths: [], // 👈 تهيئة مصفوفة الأشهر المدفوعة كفارغة عند إنشاء قسط جديد
       createdAt: serverTimestamp(),
     });
     return { success: true, id: docRef.id };
@@ -95,28 +101,43 @@ export const getInstallmentById = async (id: string) => {
   }
 };
 
-// 4. تسديد دفعة جديدة وتحديث المتبقي للتقسيط تلقائياً
+// 4. تسديد دفعة جديدة وتحديث المتبقي وحالة الشهر تلقائياً
 export const addPaymentRecord = async (data: Omit<PaymentRecord, "id">) => {
   try {
-    // 1. إضافة الدفعة لسجل المقبوضات
-    const docRef = await addDoc(collection(db, "payments"), {
+    const paymentPayload: any = {
       ...data,
       paidAt: data.paidAt || new Date().toISOString(),
       createdAt: serverTimestamp(),
-    });
+    };
 
-    // 2. تحديث المبلغ المتبقي (totalDue) في القسط نفسه
+    if (paymentPayload.targetMonth === undefined) delete paymentPayload.targetMonth;
+    if (paymentPayload.notes === undefined) delete paymentPayload.notes;
+
+    // 1. إضافة الدفعة لسجل المقبوضات
+    const docRef = await addDoc(collection(db, "payments"), paymentPayload);
+
+    // 2. تحديث المبلغ المتبقي (totalDue) والأشهر المدفوعة في القسط نفسه
     if (data.installmentId && data.amount) {
       const instRef = doc(db, "installments", data.installmentId);
       const instSnap = await getDoc(instRef);
 
       if (instSnap.exists()) {
-        const currentTotalDue = instSnap.data().totalDue || 0;
+        const instData = instSnap.data() as InstallmentData;
+        const currentTotalDue = instData.totalDue || 0;
         const newTotalDue = Math.max(0, currentTotalDue - data.amount);
+        
+        // 👈 جلب الأشهر المدفوعة السابقة وإضافة الشهر الجديد إليها
+        const currentPaidMonths = instData.paidMonths || [];
+        const updatedPaidMonths = [...currentPaidMonths];
+
+        if (data.targetMonth && !updatedPaidMonths.includes(data.targetMonth)) {
+          updatedPaidMonths.push(data.targetMonth);
+        }
         
         // تحديث المستند في الفايرستور
         await updateDoc(instRef, {
           totalDue: newTotalDue,
+          paidMonths: updatedPaidMonths, // 👈 حفظ التحديث
         });
       }
     }
@@ -173,7 +194,6 @@ export const getInstallmentsByPhone = async (userId: string, phoneNumber: string
   }
 };
 
-
 // ==========================================
 // ====== الدوال الجديدة (التعديل والحذف) ======
 // ==========================================
@@ -204,6 +224,7 @@ export const deleteInstallment = async (installmentId: string) => {
     throw error;
   }
 };
+
 // 9. تعديل دفعة مسددة (مع تسوية المتبقي للقسط تلقائياً)
 export const updatePaymentRecord = async (
   paymentId: string,
@@ -213,20 +234,21 @@ export const updatePaymentRecord = async (
   updatedData: Partial<PaymentRecord>
 ) => {
   try {
-    // 1. تحديث بيانات الدفعة في سجل المقبوضات
+    const cleanData = { ...updatedData };
+    if (cleanData.targetMonth === undefined) delete cleanData.targetMonth;
+    if (cleanData.notes === undefined) delete cleanData.notes;
+
     const paymentRef = doc(db, "payments", paymentId);
     await updateDoc(paymentRef, {
-      ...updatedData,
+      ...cleanData,
       updatedAt: serverTimestamp(),
     });
 
-    // 2. تحديث المتبقي من القسط إذا تم تغيير المبلغ
     if (oldAmount !== newAmount) {
       const instRef = doc(db, "installments", installmentId);
       const instSnap = await getDoc(instRef);
       if (instSnap.exists()) {
         const currentTotalDue = instSnap.data().totalDue || 0;
-        // إرجاع المبلغ القديم ثم طرح المبلغ الجديد لمعرفة الصافي
         const newTotalDue = Math.max(0, currentTotalDue + oldAmount - newAmount);
         await updateDoc(instRef, { totalDue: newTotalDue });
       }
@@ -238,23 +260,159 @@ export const updatePaymentRecord = async (
   }
 };
 
-// 10. حذف دفعة مسددة (مع إرجاع قيمتها للمتبقي من القسط)
+// 10. حذف دفعة مسددة أو غرامة (مع معالجة المتبقي بشكل صحيح)
 export const deletePaymentRecord = async (paymentId: string, installmentId: string, amount: number) => {
   try {
-    // 1. حذف الدفعة من سجل المقبوضات
+    // جلب معلومات الدفعة لمعرفة إذا كانت غرامة أو دفعة عادية
     const paymentRef = doc(db, "payments", paymentId);
+    const paymentSnap = await getDoc(paymentRef);
+    let targetMonthToRemove = "";
+    let isPenaltyRecord = false;
+    
+    if (paymentSnap.exists()) {
+      const data = paymentSnap.data();
+      targetMonthToRemove = data.targetMonth || "";
+      isPenaltyRecord = data.isPenalty || false; // 👈 نتحقق هنا إذا كان السجل عبارة عن غرامة
+    }
+    
+    // 1. حذف السجل
     await deleteDoc(paymentRef);
 
-    // 2. إرجاع المبلغ المحذوف إلى إجمالي المتبقي للقسط
+    // 2. تحديث المتبقي للقسط
+    const instRef = doc(db, "installments", installmentId);
+    const instSnap = await getDoc(instRef);
+    
+    if (instSnap.exists()) {
+      const instData = instSnap.data() as InstallmentData;
+      const currentTotalDue = instData.totalDue || 0;
+      
+      let updatedPaidMonths = instData.paidMonths || [];
+      if (targetMonthToRemove) {
+        // إزالة الشهر المحذوف من قائمة الأشهر المدفوعة
+        updatedPaidMonths = updatedPaidMonths.filter((month: string) => month !== targetMonthToRemove);
+      }
+
+      // 👈 المنطق الذكي هنا:
+      // إذا كانت غرامة ومسحناها -> ننقصها من الدين
+      // إذا كانت دفعة ومسحناها -> نرجعها للدين
+      const newTotalDue = isPenaltyRecord 
+        ? Math.max(0, currentTotalDue - amount) 
+        : currentTotalDue + amount;
+
+      await updateDoc(instRef, { 
+        totalDue: newTotalDue,
+        paidMonths: updatedPaidMonths 
+      });
+    }
+    return true;
+  } catch (error) {
+    console.error("خطأ في حذف الدفعة/الغرامة:", error);
+    throw error;
+  }
+};
+export const addPenaltyRecord = async (
+  installmentId: string,
+  userId: string,
+  amount: number,
+  notes: string
+) => {
+  try {
+    // 1. حفظ السجل كغرامة
+    const docRef = await addDoc(collection(db, "payments"), {
+      installmentId,
+      userId,
+      amount,
+      notes,
+      isPenalty: true, // 👈 تمييز السجل كغرامة
+      paidAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+
+    // 2. تحديث المتبقي للقسط (بزيادة المبلغ وليس تنقيصه)
     const instRef = doc(db, "installments", installmentId);
     const instSnap = await getDoc(instRef);
     if (instSnap.exists()) {
       const currentTotalDue = instSnap.data().totalDue || 0;
-      await updateDoc(instRef, { totalDue: currentTotalDue + amount });
+      await updateDoc(instRef, {
+        totalDue: currentTotalDue + amount, // 👈 زيادة الدين
+      });
     }
+    return { success: true, id: docRef.id };
+  } catch (error) {
+    console.error("خطأ في تسجيل الغرامة:", error);
+    throw error;
+  }
+};
+// ==========================================
+// ========== 💰 قسم الديون الحرة 💰 ==========
+// ==========================================
+
+export interface DebtData {
+  id?: string;
+  userId: string;
+  customerName: string;
+  phoneNumber: string;
+  amount: number;
+  reason: string;
+  isPaid: boolean;
+  createdAt: any;
+}
+
+// 1. إضافة دين جديد
+export const addDebt = async (debtData: Omit<DebtData, "id" | "createdAt">) => {
+  try {
+    const docRef = await addDoc(collection(db, "debts"), {
+      ...debtData,
+      createdAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error("خطأ في إضافة الدين:", error);
+    throw error;
+  }
+};
+
+// 2. جلب جميع الديون الخاصة بالمستخدم
+export const getUserDebts = async (userId: string) => {
+  try {
+    const q = query(
+      collection(db, "debts"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as DebtData[];
+  } catch (error) {
+    console.error("خطأ في جلب الديون:", error);
+    return [];
+  }
+};
+
+// 3. تغيير حالة الدين (مسدد / غير مسدد)
+export const toggleDebtStatus = async (debtId: string, currentStatus: boolean) => {
+  try {
+    const debtRef = doc(db, "debts", debtId);
+    await updateDoc(debtRef, {
+      isPaid: !currentStatus
+    });
     return true;
   } catch (error) {
-    console.error("خطأ في حذف الدفعة:", error);
+    console.error("خطأ في تحديث حالة الدين:", error);
+    throw error;
+  }
+};
+
+// 4. حذف السجل بالكامل
+export const deleteDebt = async (debtId: string) => {
+  try {
+    const debtRef = doc(db, "debts", debtId);
+    await deleteDoc(debtRef);
+    return true;
+  } catch (error) {
+    console.error("خطأ في حذف الدين:", error);
     throw error;
   }
 };
