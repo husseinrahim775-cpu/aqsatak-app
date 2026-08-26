@@ -1,5 +1,10 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { 
+  getFirestore, 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager 
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 // جلب المفاتيح من ملف .env.local
@@ -16,6 +21,13 @@ const firebaseConfig = {
 // تهيئة Firebase (التأكد من عدم تهيئته أكثر من مرة في Next.js)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// تصدير خدمات قاعدة البيانات والمصادقة لاستخدامها في باقي النظام
-export const db = getFirestore(app);
+// تفعيل التخزين المؤقت لدعم العمل بدون إنترنت وسرعة جلب البيانات
+export const db = typeof window !== "undefined"
+  ? initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager() // يدعم فتح أكثر من تبويب في المتصفح بنفس الوقت
+      })
+    })
+  : getFirestore(app);
+
 export const auth = getAuth(app);
