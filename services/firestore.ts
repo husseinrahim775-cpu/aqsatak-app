@@ -1,4 +1,4 @@
-import { db } from "./firebase";
+import { db, storage } from "./firebase";
 import { 
   collection, 
   addDoc, 
@@ -7,13 +7,17 @@ import {
   getDoc, 
   query, 
   where, 
-  orderBy, // 👈 تمت إضافتها هنا
+  orderBy, 
   serverTimestamp,
   updateDoc,
   deleteDoc 
 } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-// واجهة بيانات القسط والعميل
+// ==========================================
+// ====== الواجهات والمجسمات (Interfaces) ======
+// ==========================================
+
 export interface InstallmentData {
   id?: string;
   userId: string;
@@ -26,16 +30,22 @@ export interface InstallmentData {
   productPrice: number;
   downPayment: number;
   profitMargin: number;
-  months: number;
+  months: number; // يمثل عدد الدفعات (عدد الأيام / الأسابيع / الأشهر)
+  paymentPeriod?: "daily" | "weekly" | "monthly"; // (يومي / أسبوعي / شهري)
   totalDue: number;
   totalProfit: number;
-  monthlyInstallment: number;
+  monthlyInstallment: number; // المبلغ المطلوب في كل دفعة
   startDate?: string;
   createdAt?: any;
-  paidMonths?: string[]; // 👈 تمت الإضافة لتتبع الأشهر التي تم تسديدها بنجاح
+  paidMonths?: string[];
+  documents?: {
+    idCardUrl?: string;
+    contractUrl?: string;
+    personalPhotoUrl?: string;
+    otherDocUrls?: string[];
+  };
 }
 
-// واجهة تسديد الدفعة
 export interface PaymentRecord {
   id?: string;
   installmentId: string;
@@ -46,16 +56,64 @@ export interface PaymentRecord {
   paidAt?: any;
   createdAt?: any;
   targetMonth?: string; 
-  notes?: string;   
-  isPenalty?: boolean; // 👈 إضافة هذا الحقل لتمييز الغرامة عن الدفعة    
+  notes?: string;    
+  isPenalty?: boolean;     
 }
 
-// 1. إضافة قسط جديد مرتبط بالمستخدم الحالي
+export interface DebtData {
+  id?: string;
+  userId: string;
+  customerName: string;
+  phoneNumber: string;
+  amount: number;
+  reason: string;
+  isPaid: boolean;
+  createdAt: any;
+}
+
+export interface InventoryItem {
+  id?: string;
+  title: string;          
+  category: string;       
+  price: number;          
+  status: "available" | "sold";
+  specs?: {
+    chassisNumber?: string;
+    color?: string;         
+    modelYear?: string;     
+    [key: string]: any;     
+  };
+  soldToClientId?: string;
+  soldToClientName?: string;
+  contractId?: string;
+  soldAt?: string;
+}
+
+// ==========================================
+// ====== 0. دالة رفع الصور والمستندات ======
+// ==========================================
+
+export const uploadCustomerDocument = async (file: File, folderName: string): Promise<string> => {
+  try {
+    const fileRef = ref(storage, `documents/${folderName}/${Date.now()}_${file.name}`);
+    await uploadBytes(fileRef, file);
+    const downloadUrl = await getDownloadURL(fileRef);
+    return downloadUrl;
+  } catch (error) {
+    console.error("خطأ في رفع صورة المستند:", error);
+    throw error;
+  }
+};
+
+// ==========================================
+// ====== 1. إدارة الأقساط والعملاء ======
+// ==========================================
+
 export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "createdAt">) => {
   try {
     const docRef = await addDoc(collection(db, "installments"), {
       ...data,
-      paidMonths: [], // 👈 تهيئة مصفوفة الأشهر المدفوعة كفارغة عند إنشاء قسط جديد
+      paidMonths: [],
       createdAt: serverTimestamp(),
     });
     return { success: true, id: docRef.id };
@@ -65,7 +123,6 @@ export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "c
   }
 };
 
-// 2. جلب جميع أقساط وعملاء المستخدم الحالي فقط
 export const getUserInstallments = async (userId: string) => {
   try {
     const q = query(collection(db, "installments"), where("userId", "==", userId));
@@ -86,7 +143,6 @@ export const getUserInstallments = async (userId: string) => {
   }
 };
 
-// 3. جلب تفاصيل قسط/عميل معين بواسطة الـ ID
 export const getInstallmentById = async (id: string) => {
   try {
     const docRef = doc(db, "installments", id);
@@ -101,80 +157,54 @@ export const getInstallmentById = async (id: string) => {
   }
 };
 
-// 4. تسديد دفعة جديدة وتحديث المتبقي وحالة الشهر تلقائياً
-export const addPaymentRecord = async (data: Omit<PaymentRecord, "id">) => {
+export const updateInstallment = async (installmentId: string, updatedData: Partial<InstallmentData>) => {
   try {
-    const paymentPayload: any = {
-      ...data,
-      paidAt: data.paidAt || new Date().toISOString(),
-      createdAt: serverTimestamp(),
-    };
-
-    if (paymentPayload.targetMonth === undefined) delete paymentPayload.targetMonth;
-    if (paymentPayload.notes === undefined) delete paymentPayload.notes;
-
-    // 1. إضافة الدفعة لسجل المقبوضات
-    const docRef = await addDoc(collection(db, "payments"), paymentPayload);
-
-    // 2. تحديث المبلغ المتبقي (totalDue) والأشهر المدفوعة في القسط نفسه
-    if (data.installmentId && data.amount) {
-      const instRef = doc(db, "installments", data.installmentId);
-      const instSnap = await getDoc(instRef);
-
-      if (instSnap.exists()) {
-        const instData = instSnap.data() as InstallmentData;
-        const currentTotalDue = instData.totalDue || 0;
-        const newTotalDue = Math.max(0, currentTotalDue - data.amount);
-        
-        // 👈 جلب الأشهر المدفوعة السابقة وإضافة الشهر الجديد إليها
-        const currentPaidMonths = instData.paidMonths || [];
-        const updatedPaidMonths = [...currentPaidMonths];
-
-        if (data.targetMonth && !updatedPaidMonths.includes(data.targetMonth)) {
-          updatedPaidMonths.push(data.targetMonth);
-        }
-        
-        // تحديث المستند في الفايرستور
-        await updateDoc(instRef, {
-          totalDue: newTotalDue,
-          paidMonths: updatedPaidMonths, // 👈 حفظ التحديث
-        });
-      }
-    }
-
-    return { success: true, id: docRef.id };
-  } catch (error) {
-    console.error("خطأ في إضافة الدفعة وتحديث القسط:", error);
-    return { success: false, error };
-  }
-};
-
-// اسم مستعار للدالة القديمة لضمان عدم حدوث كسر في أجزاء المشروع الأخرى
-export const recordPayment = async (installmentId: string, userId: string, amount: number) => {
-  return addPaymentRecord({
-    installmentId,
-    userId,
-    amount,
-  });
-};
-
-// 5. جلب جميع الدفعات المسددة لمستخدم معين
-export const getUserPayments = async (userId: string) => {
-  try {
-    const q = query(collection(db, "payments"), where("userId", "==", userId));
-    const querySnapshot = await getDocs(q);
-    const payments: PaymentRecord[] = [];
-    querySnapshot.forEach((docSnap) => {
-      payments.push({ id: docSnap.id, ...docSnap.data() } as PaymentRecord);
+    const docRef = doc(db, "installments", installmentId);
+    await updateDoc(docRef, {
+      ...updatedData,
+      updatedAt: serverTimestamp()
     });
-    return payments;
+    return true;
   } catch (error) {
-    console.error("خطأ في جلب السجلات:", error);
+    console.error("خطأ في تحديث بيانات العميل/القسط:", error);
     throw error;
   }
 };
 
-// 6. جلب جميع أقساط عميل معين برقم الهاتف
+export const deleteInstallment = async (installmentId: string) => {
+  try {
+    // 1. البحث في المخزن عن أي مادة مرتبطة بهذا العقد
+    const q = query(
+      collection(db, "inventory"), 
+      where("contractId", "==", installmentId)
+    );
+    const querySnapshot = await getDocs(q);
+
+    // 2. إرجاع المواد المرتبطة إلى حالة "متوفر" وإلغاء بيانات البيع
+    const resetPromises = querySnapshot.docs.map((docSnap) => {
+      const itemRef = doc(db, "inventory", docSnap.id);
+      return updateDoc(itemRef, {
+        status: "available",
+        soldToClientId: "",
+        soldToClientName: "",
+        contractId: "",
+        soldAt: "",
+      });
+    });
+
+    await Promise.all(resetPromises);
+
+    // 3. حذف القسط نفسه من قاعدة البيانات
+    const docRef = doc(db, "installments", installmentId);
+    await deleteDoc(docRef);
+
+    return true;
+  } catch (error) {
+    console.error("خطأ في حذف القسط وإرجاع المادة للمخزن:", error);
+    throw error;
+  }
+};
+
 export const getInstallmentsByPhone = async (userId: string, phoneNumber: string) => {
   try {
     const q = query(
@@ -195,37 +225,75 @@ export const getInstallmentsByPhone = async (userId: string, phoneNumber: string
 };
 
 // ==========================================
-// ====== الدوال الجديدة (التعديل والحذف) ======
+// ====== 2. سجل المقبوضات والدفعات ======
 // ==========================================
 
-// 7. تحديث بيانات قسط/عميل معين
-export const updateInstallment = async (installmentId: string, updatedData: Partial<InstallmentData>) => {
+export const addPaymentRecord = async (data: Omit<PaymentRecord, "id">) => {
   try {
-    const docRef = doc(db, "installments", installmentId);
-    await updateDoc(docRef, {
-      ...updatedData,
-      updatedAt: serverTimestamp()
+    const paymentPayload: any = {
+      ...data,
+      paidAt: data.paidAt || new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    };
+
+    if (paymentPayload.targetMonth === undefined) delete paymentPayload.targetMonth;
+    if (paymentPayload.notes === undefined) delete paymentPayload.notes;
+
+    const docRef = await addDoc(collection(db, "payments"), paymentPayload);
+
+    if (data.installmentId && data.amount) {
+      const instRef = doc(db, "installments", data.installmentId);
+      const instSnap = await getDoc(instRef);
+
+      if (instSnap.exists()) {
+        const instData = instSnap.data() as InstallmentData;
+        const currentTotalDue = instData.totalDue || 0;
+        const newTotalDue = Math.max(0, currentTotalDue - data.amount);
+        
+        const currentPaidMonths = instData.paidMonths || [];
+        const updatedPaidMonths = [...currentPaidMonths];
+
+        if (data.targetMonth && !updatedPaidMonths.includes(data.targetMonth)) {
+          updatedPaidMonths.push(data.targetMonth);
+        }
+        
+        await updateDoc(instRef, {
+          totalDue: newTotalDue,
+          paidMonths: updatedPaidMonths,
+        });
+      }
+    }
+
+    return { success: true, id: docRef.id };
+  } catch (error) {
+    console.error("خطأ في إضافة الدفعة وتحديث القسط:", error);
+    return { success: false, error };
+  }
+};
+
+export const recordPayment = async (installmentId: string, userId: string, amount: number) => {
+  return addPaymentRecord({
+    installmentId,
+    userId,
+    amount,
+  });
+};
+
+export const getUserPayments = async (userId: string) => {
+  try {
+    const q = query(collection(db, "payments"), where("userId", "==", userId));
+    const querySnapshot = await getDocs(q);
+    const payments: PaymentRecord[] = [];
+    querySnapshot.forEach((docSnap) => {
+      payments.push({ id: docSnap.id, ...docSnap.data() } as PaymentRecord);
     });
-    return true;
+    return payments;
   } catch (error) {
-    console.error("خطأ في تحديث بيانات العميل/القسط:", error);
+    console.error("خطأ في جلب السجلات:", error);
     throw error;
   }
 };
 
-// 8. حذف قسط/عميل بالكامل
-export const deleteInstallment = async (installmentId: string) => {
-  try {
-    const docRef = doc(db, "installments", installmentId);
-    await deleteDoc(docRef);
-    return true;
-  } catch (error) {
-    console.error("خطأ في حذف القسط:", error);
-    throw error;
-  }
-};
-
-// 9. تعديل دفعة مسددة (مع تسوية المتبقي للقسط تلقائياً)
 export const updatePaymentRecord = async (
   paymentId: string,
   installmentId: string,
@@ -260,10 +328,8 @@ export const updatePaymentRecord = async (
   }
 };
 
-// 10. حذف دفعة مسددة أو غرامة (مع معالجة المتبقي بشكل صحيح)
 export const deletePaymentRecord = async (paymentId: string, installmentId: string, amount: number) => {
   try {
-    // جلب معلومات الدفعة لمعرفة إذا كانت غرامة أو دفعة عادية
     const paymentRef = doc(db, "payments", paymentId);
     const paymentSnap = await getDoc(paymentRef);
     let targetMonthToRemove = "";
@@ -272,13 +338,11 @@ export const deletePaymentRecord = async (paymentId: string, installmentId: stri
     if (paymentSnap.exists()) {
       const data = paymentSnap.data();
       targetMonthToRemove = data.targetMonth || "";
-      isPenaltyRecord = data.isPenalty || false; // 👈 نتحقق هنا إذا كان السجل عبارة عن غرامة
+      isPenaltyRecord = data.isPenalty || false;
     }
     
-    // 1. حذف السجل
     await deleteDoc(paymentRef);
 
-    // 2. تحديث المتبقي للقسط
     const instRef = doc(db, "installments", installmentId);
     const instSnap = await getDoc(instRef);
     
@@ -288,13 +352,9 @@ export const deletePaymentRecord = async (paymentId: string, installmentId: stri
       
       let updatedPaidMonths = instData.paidMonths || [];
       if (targetMonthToRemove) {
-        // إزالة الشهر المحذوف من قائمة الأشهر المدفوعة
         updatedPaidMonths = updatedPaidMonths.filter((month: string) => month !== targetMonthToRemove);
       }
 
-      // 👈 المنطق الذكي هنا:
-      // إذا كانت غرامة ومسحناها -> ننقصها من الدين
-      // إذا كانت دفعة ومسحناها -> نرجعها للدين
       const newTotalDue = isPenaltyRecord 
         ? Math.max(0, currentTotalDue - amount) 
         : currentTotalDue + amount;
@@ -310,6 +370,7 @@ export const deletePaymentRecord = async (paymentId: string, installmentId: stri
     throw error;
   }
 };
+
 export const addPenaltyRecord = async (
   installmentId: string,
   userId: string,
@@ -317,24 +378,22 @@ export const addPenaltyRecord = async (
   notes: string
 ) => {
   try {
-    // 1. حفظ السجل كغرامة
     const docRef = await addDoc(collection(db, "payments"), {
       installmentId,
       userId,
       amount,
       notes,
-      isPenalty: true, // 👈 تمييز السجل كغرامة
+      isPenalty: true,
       paidAt: new Date().toISOString(),
       createdAt: serverTimestamp(),
     });
 
-    // 2. تحديث المتبقي للقسط (بزيادة المبلغ وليس تنقيصه)
     const instRef = doc(db, "installments", installmentId);
     const instSnap = await getDoc(instRef);
     if (instSnap.exists()) {
       const currentTotalDue = instSnap.data().totalDue || 0;
       await updateDoc(instRef, {
-        totalDue: currentTotalDue + amount, // 👈 زيادة الدين
+        totalDue: currentTotalDue + amount,
       });
     }
     return { success: true, id: docRef.id };
@@ -343,22 +402,11 @@ export const addPenaltyRecord = async (
     throw error;
   }
 };
+
 // ==========================================
-// ========== 💰 قسم الديون الحرة 💰 ==========
+// ====== 3. قسم الديون الحرة ======
 // ==========================================
 
-export interface DebtData {
-  id?: string;
-  userId: string;
-  customerName: string;
-  phoneNumber: string;
-  amount: number;
-  reason: string;
-  isPaid: boolean;
-  createdAt: any;
-}
-
-// 1. إضافة دين جديد
 export const addDebt = async (debtData: Omit<DebtData, "id" | "createdAt">) => {
   try {
     const docRef = await addDoc(collection(db, "debts"), {
@@ -372,7 +420,6 @@ export const addDebt = async (debtData: Omit<DebtData, "id" | "createdAt">) => {
   }
 };
 
-// 2. جلب جميع الديون الخاصة بالمستخدم
 export const getUserDebts = async (userId: string) => {
   try {
     const q = query(
@@ -391,7 +438,6 @@ export const getUserDebts = async (userId: string) => {
   }
 };
 
-// 3. تغيير حالة الدين (مسدد / غير مسدد)
 export const toggleDebtStatus = async (debtId: string, currentStatus: boolean) => {
   try {
     const debtRef = doc(db, "debts", debtId);
@@ -405,7 +451,6 @@ export const toggleDebtStatus = async (debtId: string, currentStatus: boolean) =
   }
 };
 
-// 4. حذف السجل بالكامل
 export const deleteDebt = async (debtId: string) => {
   try {
     const debtRef = doc(db, "debts", debtId);
@@ -413,6 +458,192 @@ export const deleteDebt = async (debtId: string) => {
     return true;
   } catch (error) {
     console.error("خطأ في حذف الدين:", error);
+    throw error;
+  }
+};
+
+// ==========================================
+// ====== 4. قسم المخزن والمنتجات ======
+// ==========================================
+
+export const addInventoryItem = async (item: Omit<InventoryItem, "id">) => {
+  const docRef = await addDoc(collection(db, "inventory"), {
+    ...item,
+    status: "available",
+    createdAt: serverTimestamp(),
+  });
+  return docRef.id;
+};
+
+export const getAvailableInventory = async (): Promise<InventoryItem[]> => {
+  const q = query(collection(db, "inventory"), where("status", "==", "available"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
+};
+
+export const getSoldInventory = async (): Promise<InventoryItem[]> => {
+  const q = query(collection(db, "inventory"), where("status", "==", "sold"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
+};
+
+export const bindProductToContract = async (
+  itemId: string,
+  clientId: string,
+  clientName: string,
+  contractId: string
+) => {
+  const itemRef = doc(db, "inventory", itemId);
+  await updateDoc(itemRef, {
+    status: "sold",
+    soldToClientId: clientId,
+    soldToClientName: clientName,
+    contractId: contractId,
+    soldAt: new Date().toISOString().split("T")[0],
+  });
+};
+
+export const unbindProductFromContract = async (itemId: string) => {
+  try {
+    const itemRef = doc(db, "inventory", itemId);
+    await updateDoc(itemRef, {
+      status: "available",
+      soldToClientId: "",
+      soldToClientName: "",
+      contractId: "",
+      soldAt: "",
+    });
+    return true;
+  } catch (error) {
+    console.error("خطأ في إلغاء ربط المادة وإرجاعها للمخزن:", error);
+    throw error;
+  }
+};
+
+// ==========================================
+// 🏦 أنواع بيانات ودوال الخزينة والصندوق (Treasury)
+// ==========================================
+
+export interface TreasuryTransaction {
+  id?: string;
+  userId: string;
+  type: "inflow" | "outflow"; // inflow: دخل/إيداع | outflow: مصاريف/سحب
+  category: "installment_payment" | "down_payment" | "capital_deposit" | "inventory_purchase" | "expense" | "withdrawal";
+  amount: number;
+  description: string;
+  date: string; // ISO String
+  relatedId?: string; // رقم القسط أو العميل المربوط (اختياري)
+}
+
+// 1. إضافة حركة جديدة للخزينة
+export const addTreasuryTransaction = async (transaction: Omit<TreasuryTransaction, "id">) => {
+  try {
+    const docRef = await addDoc(collection(db, "treasury_transactions"), {
+      ...transaction,
+      createdAt: new Date().toISOString(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error("خطأ في إضافة حركة الخزينة:", error);
+    throw error;
+  }
+};
+
+// 2. جلب كافة حركات الخزينة للمستخدم
+export const getUserTreasuryTransactions = async (userId: string): Promise<TreasuryTransaction[]> => {
+  try {
+    const q = query(
+      collection(db, "treasury_transactions"),
+      where("userId", "==", userId)
+    );
+    const querySnapshot = await getDocs(q);
+    const list: TreasuryTransaction[] = [];
+    querySnapshot.forEach((doc) => {
+      list.push({ id: doc.id, ...doc.data() } as TreasuryTransaction);
+    });
+    // ترتيب الحركات من الأحدث للأقدم
+    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  } catch (error) {
+    console.error("خطأ في جلب حركات الخزينة:", error);
+    return [];
+  }
+};
+
+// 3. حذف حركة من الخزينة
+export const deleteTreasuryTransaction = async (id: string) => {
+  try {
+    await deleteDoc(doc(db, "treasury_transactions", id));
+  } catch (error) {
+    console.error("خطأ في حذف حركة الخزينة:", error);
+    throw error;
+  }
+};
+
+// ==========================================
+// 👥 أنواع بيانات ودوال إدارة الموظفين والصلاحيات
+// ==========================================
+
+export type UserRole = "admin" | "employee";
+
+export interface SystemUser {
+  id?: string;
+  ownerUid: string; // UID المدير الأساسي مالك النظام
+  name: string;
+  email: string;
+  username?: string; // اسم المستخدم المباشر
+  password?: string; // للعرض في جدول الموظفين للمدير
+  role: UserRole;
+  isApproved?: boolean; // الموافقة المباشرة للحساب
+  permissions: {
+    canViewDashboard: boolean;
+    canManageCustomers: boolean; // إضافة وتسديد عملاء
+    canViewTreasury: boolean;    // الاطلاع على الخزينة والصندوق
+    canManageStore: boolean;     // المخزن والمبيعات
+    canDeleteOrEdit: boolean;    // تعديل وحذف الأقساط
+  };
+  createdAt: string;
+}
+
+// 1. إضافة موظف جديد
+export const addSystemUser = async (userObj: Omit<SystemUser, "id">) => {
+  try {
+    const docRef = await addDoc(collection(db, "system_users"), {
+      ...userObj,
+      isApproved: userObj.isApproved ?? true,
+      createdAt: new Date().toISOString(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error("خطأ في إضافة الموظف:", error);
+    throw error;
+  }
+};
+
+// 2. جلب قائمة الموظفين التابعين للمدير
+export const getSystemUsers = async (ownerUid: string): Promise<SystemUser[]> => {
+  try {
+    const q = query(
+      collection(db, "system_users"),
+      where("ownerUid", "==", ownerUid)
+    );
+    const snapshot = await getDocs(q);
+    const list: SystemUser[] = [];
+    snapshot.forEach((docSnap) => {
+      list.push({ id: docSnap.id, ...docSnap.data() } as SystemUser);
+    });
+    return list;
+  } catch (error) {
+    console.error("خطأ في جلب قائمة الموظفين:", error);
+    return [];
+  }
+};
+
+// 3. حذف موظف
+export const deleteSystemUser = async (id: string) => {
+  try {
+    await deleteDoc(doc(db, "system_users", id));
+  } catch (error) {
+    console.error("خطأ في حذف الموظف:", error);
     throw error;
   }
 };

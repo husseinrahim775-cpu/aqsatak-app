@@ -15,14 +15,30 @@ import {
   Key,
   Database,
   Loader2,
-  Bot
+  Bot,
+  FileText,
+  Phone,
+  MapPin,
+  UserPlus,
+  Shield,
+  Trash2,
+  Mail,
+  Lock,
+  UserCheck
 } from "lucide-react";
 import { 
   getUserInstallments, 
   getUserPayments, 
   addInstallmentRecord, 
-  addPaymentRecord 
+  addPaymentRecord,
+  addSystemUser,
+  getSystemUsers,
+  deleteSystemUser,
+  SystemUser
 } from "../../services/firestore";
+import { getAuth, sendPasswordResetEmail } from "firebase/auth";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "../../services/firebase";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -30,8 +46,14 @@ export default function SettingsPage() {
   const [loadingAction, setLoadingAction] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  // حالات الإعدادات
+  // حالات الإعدادات العامة
   const [storeName, setStoreName] = useState("مكتب السلام");
+  const [storePhone, setStorePhone] = useState("");
+  const [storeAddress, setStoreAddress] = useState("");
+  const [contractTerms, setContractTerms] = useState(
+    "1. يتعهد الطرف الثاني بتسديد أقساطه المستحقة في مواعيدها المحدد أعلاه دون تأخير.\n2. في حال التأخير عن التسديد، يحق للطرف الأول اتخاذ الإجراءات القانونية المترتبة على ذلك.\n3. يعتبر هذا العقد وثيقة رسمية ملزمة للطرفين وللكفيل الضامن."
+  );
+
   const [defaultProfitRate, setDefaultProfitRate] = useState<number>(35);
   
   // إعدادات الواتساب وقوالب الرسائل
@@ -43,9 +65,56 @@ export default function SettingsPage() {
   );
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // تحميل الإعدادات من LocalStorage
+  // حالات تغيير كلمة المرور والأدمن PIN
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [adminPin, setAdminPin] = useState("1234");
+  const [savingPin, setSavingPin] = useState(false);
+
+  // حالات إدارة الموظفين والصلاحيات
+  const [usersList, setUsersList] = useState<SystemUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [submittingUser, setSubmittingUser] = useState(false);
+
+  // نموذج إضافة الموظف
+  const [empForm, setEmpForm] = useState({
+    name: "",
+    username: "",
+    password: "",
+    canViewDashboard: false,
+    canManageCustomers: true,
+    canViewTreasury: false,
+    canManageStore: true,
+    canDeleteOrEdit: false,
+  });
+
+  // جلب قائمة الموظفين ورمز PIN الخاص بحساب الأدمن
+  const fetchUsersAndSettings = async () => {
+    if (user?.uid) {
+      setLoadingUsers(true);
+      const list = await getSystemUsers(user.uid);
+      setUsersList(list);
+      setLoadingUsers(false);
+
+      // جلب رمز PIN المالك من Firestore
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          setAdminPin(userDocSnap.data().adminPin || "1234");
+        }
+      } catch (err) {
+        console.error("خطأ في جلب رمز المالك:", err);
+      }
+    }
+  };
+
+  // تحميل الإعدادات من LocalStorage والموظفين
   useEffect(() => {
     const savedStoreName = localStorage.getItem("app_store_name");
+    const savedStorePhone = localStorage.getItem("app_store_phone");
+    const savedStoreAddress = localStorage.getItem("app_store_address");
+    const savedContractTerms = localStorage.getItem("app_contract_terms");
+
     const savedProfitRate = localStorage.getItem("app_default_profit_rate");
     const savedAutoApi = localStorage.getItem("app_wa_use_api") === "true";
     const savedInstance = localStorage.getItem("app_wa_instance_id");
@@ -54,6 +123,10 @@ export default function SettingsPage() {
     const savedTheme = localStorage.getItem("theme");
 
     if (savedStoreName) setStoreName(savedStoreName);
+    if (savedStorePhone) setStorePhone(savedStorePhone);
+    if (savedStoreAddress) setStoreAddress(savedStoreAddress);
+    if (savedContractTerms) setContractTerms(savedContractTerms);
+
     if (savedProfitRate) setDefaultProfitRate(Number(savedProfitRate));
     setUseAutoApi(savedAutoApi);
     if (savedInstance) setWaInstanceId(savedInstance);
@@ -62,7 +135,9 @@ export default function SettingsPage() {
     if (savedTheme === "dark" || document.documentElement.classList.contains("dark")) {
       setIsDarkMode(true);
     }
-  }, []);
+
+    fetchUsersAndSettings();
+  }, [user]);
 
   // دالة تبديل المظهر
   const toggleTheme = () => {
@@ -77,10 +152,116 @@ export default function SettingsPage() {
     }
   };
 
+  // 🔒 إرسال رابط إعادة تعيين رمز الدخول إلى الجيميل
+  const handleSendPasswordReset = async () => {
+    if (!user?.email) {
+      alert("تعذر العثور على البريد الإلكتروني للحساب الحالي.");
+      return;
+    }
+
+    const confirmSend = window.confirm(
+      `هل ترغب بإرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني التالي:\n(${user.email})؟`
+    );
+
+    if (confirmSend) {
+      try {
+        setIsSendingReset(true);
+        const auth = getAuth();
+        await sendPasswordResetEmail(auth, user.email);
+        alert(`تم إرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني (${user.email}). يرجى فحص صندوق الوارد بريدك الإلكتروني.`);
+      } catch (error: any) {
+        console.error("خطأ في إرسال رابط التعيين:", error);
+        alert("حدث خطأ أثناء إرسال البريد الإلكتروني. يرجى التأكد من الاتصال بالإنترنت.");
+      } finally {
+        setIsSendingReset(false);
+      }
+    }
+  };
+
+  // 🔑 حفظ رمز PIN الخفي الخاص بمدير الشركة في Firestore
+  const handleUpdateAdminPin = async () => {
+    if (!user?.uid) return;
+    if (!adminPin.trim()) {
+      alert("يرجى كتابة رمز PIN جديد أولاً.");
+      return;
+    }
+
+    try {
+      setSavingPin(true);
+      await setDoc(doc(db, "users", user.uid), { adminPin: adminPin.trim() }, { merge: true });
+      alert("تم حفظ وتحديث رمز PIN الخاص بحساب المالك بنجاح!");
+    } catch (error) {
+      console.error("خطأ في حفظ رمز PIN المالك:", error);
+      alert("حدث خطأ أثناء حفظ الرمز.");
+    } finally {
+      setSavingPin(false);
+    }
+  };
+
+  // 🎯 إضافة الموظف باسم مستخدم عادي
+  const handleAddEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.uid || !empForm.name || !empForm.username || !empForm.password) return;
+
+    try {
+      setSubmittingUser(true);
+      const cleanUsername = empForm.username.trim().toLowerCase();
+
+      // حفظ بيانات الموظف مباشرة في Firestore
+      await addSystemUser({
+        ownerUid: user.uid,
+        name: empForm.name,
+        email: `${cleanUsername}@local.app`, // بريد إلكتروني افتراضي للمنظومة
+        username: cleanUsername,
+        password: empForm.password,
+        role: "employee" as const,
+        isApproved: true,
+        permissions: {
+          canViewDashboard: empForm.canViewDashboard,
+          canManageCustomers: empForm.canManageCustomers,
+          canViewTreasury: empForm.canViewTreasury,
+          canManageStore: empForm.canManageStore,
+          canDeleteOrEdit: empForm.canDeleteOrEdit,
+        },
+        createdAt: new Date().toISOString(),
+      });
+
+      alert("تم إنشاء حساب الموظف بنجاح! يمكنه الآن استخدام اسم المستخدم والرمز للتسجيل.");
+      setEmpForm({
+        name: "",
+        username: "",
+        password: "",
+        canViewDashboard: false,
+        canManageCustomers: true,
+        canViewTreasury: false,
+        canManageStore: true,
+        canDeleteOrEdit: false,
+      });
+      await fetchUsersAndSettings();
+    } catch (error: any) {
+      console.error(error);
+      alert("حدث خطأ أثناء إضافة الموظف: " + (error.message || ""));
+    } finally {
+      setSubmittingUser(false);
+    }
+  };
+
+  // حذف الموظف
+  const handleDeleteEmp = async (id: string, name: string) => {
+    if (confirm(`هل أنت متأكد من حذف الموظف (${name}) وإلغاء صلاحية دخوله؟`)) {
+      await deleteSystemUser(id);
+      await fetchUsersAndSettings();
+    }
+  };
+
   // حفظ الإعدادات العامة
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem("app_store_name", storeName);
+    localStorage.setItem("app_store_phone", storePhone);
+    localStorage.setItem("app_store_address", storeAddress);
+    localStorage.setItem("app_contract_terms", contractTerms);
+
     localStorage.setItem("app_default_profit_rate", defaultProfitRate.toString());
     localStorage.setItem("app_wa_use_api", useAutoApi ? "true" : "false");
     localStorage.setItem("app_wa_instance_id", waInstanceId);
@@ -176,9 +357,9 @@ export default function SettingsPage() {
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-12">
       {/* الهيدر */}
       <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام وإدارة الموظفين</h1>
         <p className="text-gray-500 text-xs md:text-sm mt-1">
-          تخصيص تفاصيل المكتب، النسخ الاحتياطي، وربط خدمة إشعارات الواتساب.
+          تخصيص تفاصيل المكتب، تغيير كلمة المرور عبر الجيميل، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
         </p>
       </div>
 
@@ -197,27 +378,270 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* 🔒 1. قسم حماية حساب الأدمن وتغيير الرمز عبر الجيميل وتعيين الـ PIN */}
+      <div className="bg-card border border-primary/30 rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
+          <Key className="w-4 h-4 md:w-5 md:h-5" />
+          <h2 className="font-bold text-base md:text-lg">أمان وحماية حساب الشركة والرمز السرّي</h2>
+        </div>
+
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-primary/5 border border-primary/20 p-4 rounded-xl">
+          <div className="space-y-1">
+            <p className="font-bold text-sm text-foreground flex items-center gap-2">
+              <Mail className="w-4 h-4 text-primary" />
+              <span>البريد الإلكتروني الحالي للمدير:</span>
+            </p>
+            <p className="text-xs font-mono font-bold text-primary dir-ltr">{user?.email || "غير مسجل"}</p>
+            <p className="text-[11px] text-gray-500 mt-1">
+              في حال نسيت كلمة المرور أو رغبت بتغييرها، اضغط الزر لإرسال رابط إعادة التعيين الرسمي لحساب الجيميل الخاص بك.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSendPasswordReset}
+            disabled={isSendingReset}
+            className="px-4 py-2.5 bg-primary text-primary-foreground text-xs md:text-sm font-bold rounded-xl hover:bg-primary/90 transition-all shadow-sm flex items-center gap-2 shrink-0 active:scale-95 disabled:opacity-50"
+          >
+            {isSendingReset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+            <span>إرسال رابط تغيير الرمز إلى الجيميل</span>
+          </button>
+        </div>
+
+        {/* 🔑 حقل تعيين رمز PIN السريع الخاص بالمالك */}
+        <div className="pt-3 border-t border-border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/20 p-4 rounded-xl">
+          <div>
+            <p className="text-xs md:text-sm font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              الرمز الذي تستخدمه لدخول حساب المالك من شاشة اختيار الموظف بدلاً من كتابة كلمة سر الشركة أمام الآخرين.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              type="password"
+              value={adminPin}
+              onChange={(e) => setAdminPin(e.target.value)}
+              placeholder="1234"
+              className="p-2.5 border border-border bg-background rounded-xl text-center font-mono w-32 text-sm outline-none focus:ring-2 focus:ring-primary font-bold"
+              dir="ltr"
+            />
+            <button
+              type="button"
+              onClick={handleUpdateAdminPin}
+              disabled={savingPin}
+              className="px-4 py-2.5 bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+            >
+              {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ الرمز"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 👥 2. قسم إضافة وتحديد صلاحيات الموظفين */}
+      <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
+          <UserPlus className="w-4 h-4 md:w-5 md:h-5" />
+          <h2 className="font-bold text-base md:text-lg">إضافة موظف جديد وتخصيص الصلاحيات</h2>
+        </div>
+
+        <form onSubmit={handleAddEmployee} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم الموظف</label>
+              <input
+                type="text"
+                required
+                placeholder="مثال: أحمد علي"
+                value={empForm.name}
+                onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
+                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم المستخدم (Username)</label>
+              <input
+                type="text"
+                required
+                placeholder="مثال: ahmed123"
+                value={empForm.username}
+                onChange={(e) => setEmpForm({ ...empForm, username: e.target.value })}
+                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50 text-left font-mono"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">رمز المرور الخاص به</label>
+              <input
+                type="text"
+                required
+                placeholder="11223344"
+                value={empForm.password}
+                onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
+                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50 text-left font-mono"
+                dir="ltr"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-border">
+            <label className="block text-xs font-bold text-gray-500 mb-2">تحديد أقسام الشاشة المسموح للموظف بدخولها:</label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-bold">
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={empForm.canManageCustomers}
+                  onChange={(e) => setEmpForm({ ...empForm, canManageCustomers: e.target.checked })}
+                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
+                />
+                <span>تسجيل عملاء وتلقي دفعات</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={empForm.canManageStore}
+                  onChange={(e) => setEmpForm({ ...empForm, canManageStore: e.target.checked })}
+                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
+                />
+                <span>إدارة المخزن والمبيعات</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={empForm.canViewDashboard}
+                  onChange={(e) => setEmpForm({ ...empForm, canViewDashboard: e.target.checked })}
+                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
+                />
+                <span>عرض الداشبورد والمركز المالي</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={empForm.canViewTreasury}
+                  onChange={(e) => setEmpForm({ ...empForm, canViewTreasury: e.target.checked })}
+                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
+                />
+                <span>عرض الخزينة ورصيد السيولة</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={empForm.canDeleteOrEdit}
+                  onChange={(e) => setEmpForm({ ...empForm, canDeleteOrEdit: e.target.checked })}
+                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
+                />
+                <span>تعديل وحذف العقود والدفعات</span>
+              </label>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submittingUser || !empForm.name || !empForm.username}
+            className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs md:text-sm hover:bg-primary/90 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
+          >
+            {submittingUser ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+            <span>حفظ الموظف بنجاح</span>
+          </button>
+        </form>
+
+        {/* قائمة الموظفين النشطين */}
+        <div className="pt-4 border-t border-border space-y-3">
+          <h3 className="font-bold text-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-primary" />
+            <span>قائمة الموظفين النشطين حالياً بالمنظومة:</span>
+          </h3>
+
+          {loadingUsers ? (
+            <div className="text-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" />
+            </div>
+          ) : usersList.length === 0 ? (
+            <p className="text-xs text-gray-400 italic py-2">لا يوجد موظفين مسجلين في الوقت الحالي.</p>
+          ) : (
+            <div className="divide-y divide-border border border-border rounded-xl overflow-hidden">
+              {usersList.map((emp) => (
+                <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-secondary/20 transition-colors bg-card">
+                  <div>
+                    <p className="font-bold text-xs md:text-sm text-foreground flex items-center gap-2">
+                      <UserCheck className="w-4 h-4 text-primary" />
+                      <span>{emp.name}</span>
+                    </p>
+                    <p className="text-[11px] text-gray-500 font-mono mt-0.5" dir="ltr">
+                      اسم المستخدم: <strong className="text-primary">{emp.username || emp.email.split('@')[0]}</strong> • كلمة السر: {emp.password}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => emp.id && handleDeleteEmp(emp.id, emp.name)}
+                    className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                    title="حذف الموظف"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       <form onSubmit={handleSaveSettings} className="space-y-4 md:space-y-6">
-        {/* 1. تفاصيل المكتب */}
+        {/* 🏢 3. تفاصيل المكتب والطباعة */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Store className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب / النشاط التجاري</h2>
+            <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب وبيانات العقود والمطبوعات</h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم المكتب / المتجر</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم المكتب / الشركة البائعة</label>
               <input
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
+                placeholder="مثال: مكتب السلام للتجارة والتقسيط"
                 className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">حساب المستورد / المالك</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
+                <Phone className="w-3.5 h-3.5 text-primary" /> رقم هاتف المكتب / الشركة
+              </label>
+              <input
+                type="text"
+                value={storePhone}
+                onChange={(e) => setStorePhone(e.target.value)}
+                placeholder="07700000000"
+                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-primary" /> عنوان المكتب / الفرع الرئيسي
+              </label>
+              <input
+                type="text"
+                value={storeAddress}
+                onChange={(e) => setStoreAddress(e.target.value)}
+                placeholder="مثال: بغداد - المنصور"
+                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">حساب المالك الحالي</label>
               <input
                 type="text"
                 disabled
@@ -226,9 +650,22 @@ export default function SettingsPage() {
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
+              <FileText className="w-3.5 h-3.5 text-primary" /> شروط وتعهدات العقد المطبوع
+            </label>
+            <textarea
+              rows={4}
+              value={contractTerms}
+              onChange={(e) => setContractTerms(e.target.value)}
+              placeholder="أدخل الشروط والأحكام التي تظهر بأسفل العقد..."
+              className="w-full p-3 md:p-4 bg-background border border-border rounded-xl text-xs md:text-sm outline-none resize-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
         </div>
 
-        {/* 2. إعدادات الواتساب و API التلقائي */}
+        {/* 💬 4. إعدادات الواتساب و API التلقائي */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-3 gap-3">
             <div className="flex items-center gap-2 text-primary">
@@ -236,7 +673,6 @@ export default function SettingsPage() {
               <h2 className="font-bold text-base md:text-lg">إشعارات الواتساب و ربط الـ API</h2>
             </div>
 
-            {/* مفتاح تفعيل الـ API التلقائي */}
             <div className="flex items-center justify-between sm:justify-start gap-3 bg-background p-2 md:p-1.5 rounded-xl border border-border">
               <div className="flex items-center gap-1.5">
                 <Bot className="w-4 h-4 text-green-500" />
@@ -251,7 +687,6 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* حقول الـ API في حالة التفعيل */}
           {useAutoApi && (
             <div className="p-3 md:p-4 bg-green-500/5 border border-green-500/20 rounded-xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
               <p className="text-[10px] md:text-xs text-green-600 dark:text-green-400 font-bold">
@@ -300,7 +735,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 3. الإعدادات المالية */}
+        {/* 📊 5. الإعدادات المالية */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Percent className="w-4 h-4 md:w-5 md:h-5" />
@@ -320,7 +755,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 4. مظهر التطبيق */}
+        {/* 🎨 6. مظهر التطبيق */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Sun className="w-4 h-4 md:w-5 md:h-5" />
@@ -350,7 +785,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 5. النسخ الاحتياطي */}
+        {/* 💾 7. النسخ الاحتياطي */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Database className="w-4 h-4 md:w-5 md:h-5" />
@@ -382,7 +817,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* زر الحفظ */}
+        {/* زر الحفظ النهائي */}
         <button
           type="submit"
           disabled={loadingAction}

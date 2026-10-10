@@ -6,6 +6,7 @@ import {
   persistentMultipleTabManager 
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage"; // 👈 استيراد مكتبة Storage
 
 // جلب المفاتيح من ملف .env.local
 const firebaseConfig = {
@@ -31,3 +32,6 @@ export const db = typeof window !== "undefined"
   : getFirestore(app);
 
 export const auth = getAuth(app);
+
+// 👈 تصدير خدمة Storage لرفع الأوراق الثبوتية والصور
+export const storage = getStorage(app);

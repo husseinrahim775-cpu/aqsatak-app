@@ -72,3 +72,39 @@ body {
   background-color: #713f12 !important;
   color: #fef08a !important;
 }
+@media print {
+  /* إخفاء القوائم والأزرار والعناصر التي لا نحتاجها في الطباعة */
+  header, nav, aside, footer, button, .no-print {
+    display: none !important;
+  }
+
+  /* إخفاء محتوى الصفحة العادي أثناء الطباعة لعدم زيادة عدد الصفحات */
+  .max-w-5xl > div:not(.print-container) {
+    display: none !important;
+  }
+
+  /* جعل حاوية الطباعة ظاهرة وفي بداية الورقة */
+  .print-container {
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* تحديد حجم ورقة الطباعة ومنع إيجاد صفحات فارغة إضافية */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+}

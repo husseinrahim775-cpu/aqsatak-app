@@ -14,8 +14,9 @@ import {
   PaymentRecord 
 } from "../../../services/firestore";
 import { useAuth } from "../../../components/AuthProvider";
-import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X, Receipt } from "lucide-react";
+import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X, Receipt, Printer } from "lucide-react";
 import Link from "next/link";
+import { ContractPrintTemplate, PaymentReceiptPrintTemplate } from "@/components/PrintTemplates";
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -27,6 +28,10 @@ export default function CustomerDetailPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
+
+  // --- حالات الطباعة ---
+  const [printContractData, setPrintContractData] = useState<InstallmentData | null>(null);
+  const [printPaymentData, setPrintPaymentData] = useState<PaymentRecord | null>(null);
 
   // --- حالات تعديل القسط ---
   const [editingInstallment, setEditingInstallment] = useState<InstallmentData | null>(null);
@@ -78,10 +83,17 @@ export default function CustomerDetailPage() {
     fetchData();
   }, [fetchData]);
 
+  // دالة إطلاق أمر الطباعة المباشرة
+  const triggerPrint = () => {
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
   // --- دوال القسط (حذف وتعديل) ---
   const handleDeleteInstallment = async (id: string, productName: string) => {
     const confirmDelete = window.confirm(
-      `هل أنت متأكد من حذف قسط "${productName}" بالكامل؟\n\nتنبيه: سيتم حذف هذا القسط فقط ولن يمكن التراجع.`
+      `هل أنت متأكد من حذف قسط "${productName}" بالكامل؟\n\nتنبيه: سيتم إرجاع السلعة المربوطة للمخزن تلقائياً.`
     );
     if (confirmDelete) {
       try {
@@ -179,16 +191,25 @@ export default function CustomerDetailPage() {
     }
   };
 
-  // --- دالة التاريخ الرقمي YYYY-MM-DD ---
-  const getDueDate = (startDateStr: string | undefined, monthIndex: number) => {
-    let date;
+  // 🎯 دالة التاريخ الرقمي YYYY-MM-DD المعدلة لتأخذ نوع القسط بعين الاعتبار (يومي/أسبوعي/شهري)
+  const getDueDate = (startDateStr: string | undefined, index: number, period?: string) => {
+    let date: Date;
+
     if (!startDateStr) {
       date = new Date();
-      date.setMonth(date.getMonth() + monthIndex + 1);
     } else {
       const [year, month, day] = startDateStr.split("-").map(Number);
-      date = new Date(year, month - 1 + monthIndex, day);
+      date = new Date(year, month - 1, day);
     }
+
+    if (period === "daily") {
+      date.setDate(date.getDate() + index);
+    } else if (period === "weekly") {
+      date.setDate(date.getDate() + (index * 7));
+    } else {
+      date.setMonth(date.getMonth() + index);
+    }
+
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
@@ -326,6 +347,8 @@ export default function CustomerDetailPage() {
       {/* الأقساط والدفعات */}
       {installments.map((item, idx) => {
         const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
+        const periodUnitName = item.paymentPeriod === "daily" ? "أيام" : item.paymentPeriod === "weekly" ? "أسابيع" : "أشهر";
+        const periodLabel = item.paymentPeriod === "daily" ? "يومي" : item.paymentPeriod === "weekly" ? "أسبوعي" : "شهري";
 
         return (
           <div key={item.id || idx} className="space-y-4 bg-card border border-border rounded-2xl p-6 shadow-sm">
@@ -334,7 +357,6 @@ export default function CustomerDetailPage() {
                 <CreditCard className="w-6 h-6 shrink-0" />
                 <span>القسط #{idx + 1}: {item.productName}</span>
                 
-                {/* 👈 أزرار التعديل والحذف: ظاهرة دائماً على الهواتف، وتظهر عند الهوفر على الشاشات الكبيرة */}
                 <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mr-2">
                   <button onClick={() => openEditModal(item)} className="p-1.5 text-blue-600 sm:text-gray-400 sm:hover:text-blue-600 bg-blue-50 dark:bg-blue-900/30 sm:bg-transparent rounded-md transition-colors" title="تعديل بيانات القسط">
                     <Edit className="w-4 h-4" />
@@ -344,9 +366,29 @@ export default function CustomerDetailPage() {
                   </button>
                 </div>
               </div>
-              <span className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-full font-extrabold">
-                {item.months} أشهر
-              </span>
+              
+              <div className="flex items-center gap-2">
+                {/* 🖨️ زر طباعة العقد */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintPaymentData(null);
+                    setPrintContractData(item);
+                    triggerPrint();
+                  }}
+                  className="px-3 py-1 bg-slate-800 hover:bg-black text-white text-xs font-bold rounded-full transition-all flex items-center gap-1 shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>طباعة العقد</span>
+                </button>
+
+                <span className="text-xs bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded-full font-bold">
+                  قسط {periodLabel}
+                </span>
+                <span className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-full font-extrabold">
+                  {item.months} {periodUnitName}
+                </span>
+              </div>
             </div>
 
             {/* ملخص مالية القسط */}
@@ -364,7 +406,7 @@ export default function CustomerDetailPage() {
                 <p className="font-extrabold text-foreground">{Math.round(item.totalDue).toLocaleString()} د.ع</p>
               </div>
               <div>
-                <p className="text-gray-500 text-xs">القسط الشهري</p>
+                <p className="text-gray-500 text-xs">القسط الـ{periodLabel}</p>
                 <p className="font-black text-primary">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</p>
               </div>
             </div>
@@ -387,11 +429,15 @@ export default function CustomerDetailPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {Array.from({ length: item.months }).map((_, mIdx) => {
-                      const dueDateFormatted = getDueDate(item.startDate, mIdx);
+                      const dueDateFormatted = getDueDate(item.startDate, mIdx, item.paymentPeriod);
                       const [year, month] = dueDateFormatted.split("-");
                       const targetMonthString = `${year}-${month}`;
                       
-                      const isPaid = item.paidMonths?.includes(targetMonthString);
+                      // 🎯 فحص ديناميكي يدعم التواريخ الكاملة والأشهر في التسديد
+                      const isPaid = currentInstPayments.some((p) => 
+                        p.targetMonth === dueDateFormatted || p.targetMonth === targetMonthString
+                      ) || item.paidMonths?.includes(dueDateFormatted) || item.paidMonths?.includes(targetMonthString);
+
                       const btnKey = `${item.id || idx}-${mIdx}`;
 
                       return (
@@ -453,7 +499,7 @@ export default function CustomerDetailPage() {
                     <tr>
                       <th className="p-3 font-semibold">التاريخ</th>
                       <th className="p-3 font-semibold">المبلغ</th>
-                      <th className="p-3 font-semibold">عن شهر</th>
+                      <th className="p-3 font-semibold">عن فترة/شهر</th>
                       <th className="p-3 font-semibold">النوع / الملاحظات</th>
                       <th className="p-3 font-semibold text-center">إجراءات</th>
                     </tr>
@@ -476,6 +522,19 @@ export default function CustomerDetailPage() {
                             </td>
                             <td className="p-3 text-center">
                               <div className="flex justify-center items-center gap-2">
+                                {/* 🖨️ زر طباعة الوصل */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPrintContractData(null);
+                                    setPrintPaymentData(p);
+                                    triggerPrint();
+                                  }}
+                                  className="p-1.5 text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 rounded-md border border-emerald-200 dark:border-emerald-800 transition-colors"
+                                  title="طباعة وصل إيصال"
+                                >
+                                  <Printer className="w-4 h-4" />
+                                </button>
                                 <button onClick={() => openEditPaymentModal(p)} className="p-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-md border border-blue-200 dark:border-blue-800 transition-colors" title="تعديل الدفعة">
                                   <Edit className="w-4 h-4" />
                                 </button>
@@ -496,6 +555,12 @@ export default function CustomerDetailPage() {
           </div>
         );
       })}
+
+      {/* 🖨️ منطقة الطباعة الخفية */}
+      <div className="print-container">
+        {printContractData && <ContractPrintTemplate installment={printContractData} />}
+        {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}
+      </div>
 
       {/* نافذة تعديل القسط (Modal) */}
       {editingInstallment && (
@@ -540,7 +605,7 @@ export default function CustomerDetailPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">القسط الشهري (د.ع)</label>
+                  <label className="block text-sm font-medium mb-1">القسط المطلوب (د.ع)</label>
                   <input
                     type="number"
                     value={editForm.monthlyInstallment}
@@ -549,7 +614,7 @@ export default function CustomerDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">عدد الأشهر</label>
+                  <label className="block text-sm font-medium mb-1">عدد الدفعات</label>
                   <input
                     type="number"
                     value={editForm.months}
@@ -602,11 +667,11 @@ export default function CustomerDetailPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">عن شهر (مثال: 2026-09)</label>
+                <label className="block text-sm font-medium mb-1">عن فترة (تاريخ YYYY-MM-DD أو شهر YYYY-MM)</label>
                 <input
                   type="text"
                   dir="ltr"
-                  placeholder="YYYY-MM"
+                  placeholder="YYYY-MM-DD"
                   value={editPaymentForm.targetMonth}
                   onChange={(e) => setEditPaymentForm({...editPaymentForm, targetMonth: e.target.value})}
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none text-left"

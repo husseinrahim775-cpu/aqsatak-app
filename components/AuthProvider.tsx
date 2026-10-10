@@ -7,7 +7,6 @@ import { auth, db } from "../services/firebase";
 import { useRouter, usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
-// إضافة بيانات المستخدم الإضافية (مثل الحالة والصلاحية) للسياق
 interface AuthContextType {
   user: User | null;
   userData: any | null; 
@@ -31,46 +30,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // دالة تسجيل الخروج
   const logout = async () => {
+    sessionStorage.removeItem("active_session");
+    localStorage.removeItem("current_employee");
     await signOut(auth);
+    setUser(null);
+    setUserData(null);
     router.push("/login");
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        
-        // جلب بيانات المستخدم من Firestore لمعرفة حالته (pending/active)
-        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-        
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserData(data);
-
-          // نظام توجيه الأمان (Security Routing)
-          if (data.status === "pending" && pathname !== "/pending") {
-            router.push("/pending"); // اطرده لصفحة الانتظار
-          } else if (data.status === "active" && (pathname === "/login" || pathname === "/pending")) {
-            router.push("/dashboard"); // اسمح له بالدخول
-          }
-        } else {
-          setUserData(null);
-        }
-      } else {
-        // إذا لم يكن مسجلاً
+      // 1. إذا لم يكن متصلاً بالشركة إطلاقاً، توجيهه لصفحة اللوجن
+      if (!currentUser) {
         setUser(null);
         setUserData(null);
+        sessionStorage.removeItem("active_session");
+        setLoading(false);
         if (pathname !== "/login") {
           router.push("/login");
         }
+        return;
       }
-      setLoading(false);
+
+      setUser(currentUser);
+
+      // 2. 🚨 الشرط الأهم: الفحص إن كان قد اختار الموظف أو المدير من القائمة
+      const activeSession = sessionStorage.getItem("active_session");
+
+      if (!activeSession) {
+        // إذا لم يحدد الموظف أو المدير بعد، ابقه في صفحة اللوجن ولا تحوله أبداً للداشبورد!
+        setUserData(null);
+        setLoading(false);
+        if (pathname !== "/login") {
+          router.push("/login");
+        }
+        return;
+      }
+
+      // 3. إذا اختار حسابه، يكتمل تسجيل دخوله للوحة التحكم وتحديد الصفحة المناسبة
+      try {
+        const empObj = JSON.parse(activeSession);
+        
+        if (empObj.role === "admin") {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            setUserData({ ...userDoc.data(), role: "admin", status: "active" });
+          } else {
+            setUserData({ role: "admin", status: "active" });
+          }
+
+          if (pathname === "/login" || pathname === "/pending") {
+            router.replace("/dashboard");
+          }
+        } else {
+          // حساب الموظف
+          setUserData({
+            ...empObj,
+            status: "active",
+            role: "employee",
+          });
+
+          if (pathname === "/login" || pathname === "/pending") {
+            // 🎯 توجيه الموظف الذكي لأول قسم يملك صلاحية دخوله بدلاً من التوجيه الإجباري للداشبورد
+            const perms = empObj.permissions || {};
+            let targetPath = "/dashboard";
+
+            if (perms.canViewDashboard) {
+              targetPath = "/dashboard";
+            } else if (perms.canManageCustomers) {
+              targetPath = "/customers";
+            } else if (perms.canManageStore) {
+              targetPath = "/inventory";
+            } else if (perms.canViewTreasury) {
+              targetPath = "/treasury";
+            } else {
+              targetPath = "/customers"; // صفحة افتراضية للعملاء
+            }
+
+            router.replace(targetPath);
+          }
+        }
+      } catch (error) {
+        console.error("خطأ قراءة الجلسة:", error);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
-  }, [pathname, router]);
+  }, [pathname]);
 
   if (loading) {
     return (

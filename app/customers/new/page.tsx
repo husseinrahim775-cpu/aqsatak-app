@@ -1,10 +1,18 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock } from "lucide-react";
+import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock, Package, Camera, FileText, Image as ImageIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { addInstallmentRecord, getUserInstallments, InstallmentData } from "../../../services/firestore";
+import { 
+  addInstallmentRecord, 
+  getUserInstallments, 
+  getAvailableInventory, 
+  bindProductToContract, 
+  uploadCustomerDocument,
+  InstallmentData, 
+  InventoryItem 
+} from "@/services/firestore";
 import { useAuth } from "../../../components/AuthProvider";
 
 interface ExistingCustomer {
@@ -21,6 +29,22 @@ export default function NewInstallmentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingCustomers, setExistingCustomers] = useState<ExistingCustomer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // حالات المخزن المالي
+  const [availableProducts, setAvailableProducts] = useState<InventoryItem[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>("");
+
+  // حالات ملفات الصور
+  const [idCardFile, setIdCardFile] = useState<File | null>(null);
+  const [contractFile, setContractFile] = useState<File | null>(null);
+  const [personalPhotoFile, setPersonalPhotoFile] = useState<File | null>(null);
+
+  // جلب السلع المتوفرة بالمخزن
+  useEffect(() => {
+    getAvailableInventory()
+      .then((items) => setAvailableProducts(items || []))
+      .catch((err) => console.error("خطأ في جلب بيانات المخزن:", err));
+  }, []);
 
   // جلب العملاء الحاليين لخاصية الإكمال التلقائي
   useEffect(() => {
@@ -58,18 +82,38 @@ export default function NewInstallmentPage() {
     guarantorName: "",
     guarantorPhone: "",
     productName: "",
-    purchasePrice: "" as number | "", // سعر الشراء (التكلفة)
-    productPrice: "" as number | "",  // سعر البيع الكلي
-    downPayment: "" as number | "",   // الدفعة المقدمة
-    profitMargin: "" as number | "",  // نسبة الربح %
-    months: "" as number | "",        // عدد الأشهر
-    monthlyInstallment: "" as number | "", // القسط الشهري اليدوي
-    startDate: defaultStartDate,
+    purchasePrice: "" as number | "",
+    profitMargin: "50" as number | string,
+    productPrice: "" as number | "",
+    downPayment: "" as number | "",
+    paymentPeriod: "monthly" as "daily" | "weekly" | "monthly", // 👈 أسبوعي / شهري / يومي
+    months: "" as number | "",
+    monthlyInstallment: "" as number | "",
+    startDate: new Date().toISOString().split("T")[0],
   });
 
-  // ----------------------------------------------------
-  // 🟢 1. دبابيس التعديل المتبادل للأسعار ونسبة الربح
-  // ----------------------------------------------------
+  const handleSelectProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    if (!productId) return;
+
+    const product = availableProducts.find((p) => p.id === productId);
+    if (product) {
+      const formattedTitle = `${product.title} ${
+        product.specs?.chassisNumber ? `(شاصي: ${product.specs.chassisNumber})` : ""
+      }`;
+      const cost = product.price;
+
+      setFormData((prev) => ({
+        ...prev,
+        productName: formattedTitle,
+        purchasePrice: cost,
+        productPrice: prev.profitMargin !== "" && cost > 0 
+          ? cost + cost * (Number(prev.profitMargin) / 100) 
+          : cost,
+      }));
+    }
+  };
+
   const handlePurchasePriceChange = (val: number | "") => {
     const cost = val;
     let newSellPrice = formData.productPrice;
@@ -119,10 +163,6 @@ export default function NewInstallmentPage() {
     }));
   };
 
-  // ----------------------------------------------------
-  // 🟢 2. التعديل المتبادل لـ (عدد الأشهر ↔ القسط الشهري)
-  // ----------------------------------------------------
-  // عند كتابة عدد الأشهر -> تصفير القسط الشهري اليدوي ليعتمد الحساب التلقائي
   const handleMonthsChange = (val: number | "") => {
     setFormData((prev) => ({
       ...prev,
@@ -131,7 +171,6 @@ export default function NewInstallmentPage() {
     }));
   };
 
-  // عند كتابة القسط الشهري اليدوي -> يمسح الأشهر الثابتة ليحسبها بكسور دقيقة
   const handleMonthlyInstallmentChange = (val: number | "") => {
     setFormData((prev) => ({
       ...prev,
@@ -140,9 +179,6 @@ export default function NewInstallmentPage() {
     }));
   };
 
-  // ----------------------------------------------------
-  // 🧮 الحسابات المالية الدقيقة والوقت الإضافي بالأيام
-  // ----------------------------------------------------
   const calculation = useMemo(() => {
     const productPrice = Number(formData.productPrice) || 0;
     const purchasePrice = Number(formData.purchasePrice) || 0;
@@ -158,17 +194,15 @@ export default function NewInstallmentPage() {
     let calculatedDays = 0;
     let finalMonthlyInstallment = 0;
 
-    // حالة 1: العميل أدخل القسط الشهري يدويًا
     if (formData.monthlyInstallment !== "" && Number(formData.monthlyInstallment) > 0) {
       finalMonthlyInstallment = Number(formData.monthlyInstallment);
       if (totalDue > 0) {
         const exactMonths = totalDue / finalMonthlyInstallment;
-        calculatedMonths = Math.floor(exactMonths); // الأشهر الكاملة
+        calculatedMonths = Math.floor(exactMonths);
         const remainingFraction = exactMonths - calculatedMonths;
-        calculatedDays = Math.round(remainingFraction * 30); // الأيام الإضافية
+        calculatedDays = Math.round(remainingFraction * (formData.paymentPeriod === "daily" ? 1 : formData.paymentPeriod === "weekly" ? 7 : 30));
       }
     } 
-    // حالة 2: العميل أدخل عدد الأشهر
     else {
       calculatedMonths = Number(formData.months) || 1;
       calculatedDays = 0;
@@ -185,7 +219,6 @@ export default function NewInstallmentPage() {
     };
   }, [formData]);
 
-  // تصفية اقتراحات العملاء
   const filteredSuggestions = useMemo(() => {
     if (!formData.customerName.trim()) return [];
     return existingCustomers.filter(
@@ -217,34 +250,69 @@ export default function NewInstallmentPage() {
 
     setIsSubmitting(true);
 
-    const payload: Omit<InstallmentData, "id" | "createdAt"> = {
-      userId: user.uid,
-      customerName: formData.customerName,
-      phoneNumber: formData.phoneNumber,
-      address: formData.address,
-      guarantorName: formData.guarantorName,
-      guarantorPhone: formData.guarantorPhone,
-      productName: formData.productName,
-      productPrice: Number(formData.productPrice) || 0,
-      downPayment: Number(formData.downPayment) || 0,
-      profitMargin: Number(formData.profitMargin) || 0,
-      months: calculation.calculatedMonths || 1,
-      totalDue: calculation.totalDue,
-      totalProfit: calculation.totalProfit,
-      monthlyInstallment: calculation.monthlyInstallment,
-      startDate: formData.startDate,
-    };
+    try {
+      // 1. رفع الصور بالتوازي إن وجدت لتوفير الوقت
+      const uploadPromises = [
+        idCardFile ? uploadCustomerDocument(idCardFile, "id_cards") : Promise.resolve(""),
+        contractFile ? uploadCustomerDocument(contractFile, "contracts") : Promise.resolve(""),
+        personalPhotoFile ? uploadCustomerDocument(personalPhotoFile, "photos") : Promise.resolve(""),
+      ];
 
-    const result = await addInstallmentRecord(payload);
+      const [idCardUrl, contractUrl, personalPhotoUrl] = await Promise.all(uploadPromises);
 
-    if (result.success && result.id) {
-      alert("تم حفظ بيانات العميل والقسط بنجاح!");
-      router.push("/customers");
-    } else {
-      alert("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
+      // 2. إعداد البيانات مع المستندات ونوع فترة التسديد
+      const payload: Omit<InstallmentData, "id" | "createdAt"> = {
+        userId: user.uid,
+        customerName: formData.customerName,
+        phoneNumber: formData.phoneNumber,
+        address: formData.address,
+        guarantorName: formData.guarantorName,
+        guarantorPhone: formData.guarantorPhone,
+        productName: formData.productName,
+        productPrice: Number(formData.productPrice) || 0,
+        downPayment: Number(formData.downPayment) || 0,
+        profitMargin: Number(formData.profitMargin) || 0,
+        months: calculation.calculatedMonths || 1,
+        paymentPeriod: formData.paymentPeriod,
+        totalDue: calculation.totalDue,
+        totalProfit: calculation.totalProfit,
+        monthlyInstallment: calculation.monthlyInstallment,
+        startDate: formData.startDate,
+        documents: {
+          idCardUrl,
+          contractUrl,
+          personalPhotoUrl,
+        },
+      };
+
+      const result = await addInstallmentRecord(payload);
+
+      if (result.success && result.id) {
+        if (selectedProductId) {
+          await bindProductToContract(
+            selectedProductId,
+            result.id,
+            formData.customerName,
+            result.id
+          );
+        }
+
+        alert("تم حفظ بيانات العميل والقسط وربط المادة بالمخزن بنجاح!");
+        router.push("/customers");
+      } else {
+        alert("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
+      }
+    } catch (error) {
+      console.error("خطأ أثناء الرفع والحفظ:", error);
+      alert("حدث خطأ في رفع الصور أو حفظ البيانات.");
+    } finally {
       setIsSubmitting(false);
     }
   };
+
+  // مسمى الفترة المباشر لاستخدامه في الشاشة
+  const periodLabel = formData.paymentPeriod === "daily" ? "يومي" : formData.paymentPeriod === "weekly" ? "أسبوعي" : "شهري";
+  const periodUnitLabel = formData.paymentPeriod === "daily" ? "يوم" : formData.paymentPeriod === "weekly" ? "أسبوع" : "شهر";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
@@ -256,8 +324,8 @@ export default function NewInstallmentPage() {
           <ArrowRight className="w-5 h-5 text-foreground" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">إضافة قسط جديد</h1>
-          <p className="text-gray-500 text-sm mt-1">أدخل بيانات العميل والمنتج لحساب القسط الشهري وتواريخ الدفع.</p>
+          <h1 className="text-2xl font-bold text-foreground">إضافة قسط وعقد جديد</h1>
+          <p className="text-gray-500 text-sm mt-1">أدخل بيانات العميل، الأوراق الثبوتية، والمنتج لحساب وتوثيق القسط.</p>
         </div>
       </div>
 
@@ -360,12 +428,101 @@ export default function NewInstallmentPage() {
             </div>
           </div>
 
+          {/* 📸 قسم مرفقات الأوراق الثبوتية والعقد */}
+          <div className="md:col-span-2 bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 mb-2 text-primary">
+              <Camera className="w-5 h-5" />
+              <h2 className="font-bold text-lg">المستندات والأوراق الثبوتية (اختياري)</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 1. صورة الهوية / البطاقة الموحدة */}
+              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
+                <ImageIcon className="w-8 h-8 text-primary mx-auto" />
+                <span className="block text-xs font-bold text-foreground">صورة الهوية / البطاقة الموحدة</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="idCard"
+                  className="hidden"
+                  onChange={(e) => setIdCardFile(e.target.files?.[0] || null)}
+                />
+                <label
+                  htmlFor="idCard"
+                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                >
+                  {idCardFile ? "تم اختيار الملف ✓" : "اختر صورة الهوية"}
+                </label>
+                {idCardFile && <p className="text-[10px] text-gray-400 truncate">{idCardFile.name}</p>}
+              </div>
+
+              {/* 2. صورة العقد المكتوب */}
+              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
+                <FileText className="w-8 h-8 text-primary mx-auto" />
+                <span className="block text-xs font-bold text-foreground">صورة العقد الورقي</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="contractDoc"
+                  className="hidden"
+                  onChange={(e) => setContractFile(e.target.files?.[0] || null)}
+                />
+                <label
+                  htmlFor="contractDoc"
+                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                >
+                  {contractFile ? "تم اختيار الملف ✓" : "اختر صورة العقد"}
+                </label>
+                {contractFile && <p className="text-[10px] text-gray-400 truncate">{contractFile.name}</p>}
+              </div>
+
+              {/* 3. صورة العميل الشحصية */}
+              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
+                <User className="w-8 h-8 text-primary mx-auto" />
+                <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="personalPhoto"
+                  className="hidden"
+                  onChange={(e) => setPersonalPhotoFile(e.target.files?.[0] || null)}
+                />
+                <label
+                  htmlFor="personalPhoto"
+                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                >
+                  {personalPhotoFile ? "تم اختيار الملف ✓" : "اختر صورة العميل"}
+                </label>
+                {personalPhotoFile && <p className="text-[10px] text-gray-400 truncate">{personalPhotoFile.name}</p>}
+              </div>
+            </div>
+          </div>
+
           {/* قسم تفاصيل المنتج والتقسيط */}
           <div className="md:col-span-2 bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
             <div className="flex items-center gap-2 mb-4 text-primary">
               <Box className="w-5 h-5" />
               <h2 className="font-bold text-lg">تفاصيل المنتج وخطة التسديد</h2>
             </div>
+
+            <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 mb-2 space-y-2">
+              <label className="text-sm font-bold text-primary flex items-center gap-2">
+                <Package className="w-4 h-4" /> اختر مادة متوفرة بالمخزن المالي (تعبئة تلقائية للأسعار)
+              </label>
+              <select
+                value={selectedProductId}
+                onChange={(e) => handleSelectProduct(e.target.value)}
+                className="w-full p-3 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary/50 outline-none text-sm"
+              >
+                <option value="">-- اضغط هنا لاختيار مادة من المخزن --</option>
+                {availableProducts.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    [{item.category}] {item.title} - ${item.price} {item.specs?.chassisNumber ? `| شاصي: ${item.specs.chassisNumber}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               <div className="sm:col-span-2 md:col-span-3">
                 <label className="block text-sm font-medium mb-1">نوع المنتج</label>
@@ -378,7 +535,6 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* سعر الشراء */}
               <div>
                 <label className="block text-sm font-medium mb-1">سعر الشراء (التكلفة)</label>
                 <input
@@ -394,7 +550,6 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* نسبة الربح (%) */}
               <div>
                 <label className="block text-sm font-medium mb-1">نسبة الربح (%)</label>
                 <input
@@ -411,7 +566,6 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* سعر البيع الكلي */}
               <div>
                 <label className="block text-sm font-medium mb-1">سعر البيع الكلي (د.ع)</label>
                 <input
@@ -428,7 +582,6 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* الدفعة المقدمة */}
               <div>
                 <label className="block text-sm font-medium mb-1">الدفعة المقدمة (د.ع)</label>
                 <input
@@ -446,14 +599,27 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* عدد الأشهر (تفاعلي) */}
+              {/* 🔄 اختيار نظام فترة التسديد */}
               <div>
-                <label className="block text-sm font-medium mb-1">عدد الأشهر</label>
+                <label className="block text-sm font-medium mb-1 text-primary font-bold">فترة التسديد (نوع القسط)</label>
+                <select
+                  value={formData.paymentPeriod}
+                  onChange={(e) => setFormData({ ...formData, paymentPeriod: e.target.value as "daily" | "weekly" | "monthly" })}
+                  className="w-full p-3 rounded-lg border border-primary/50 bg-background text-foreground focus:ring-2 focus:ring-primary font-bold outline-none"
+                >
+                  <option value="monthly">قسط شهري</option>
+                  <option value="weekly">قسط أسبوعي</option>
+                  <option value="daily">قسط يومي</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">عدد الدفعات ({periodUnitLabel})</label>
                 <input
                   type="number"
                   min="1"
                   step="any"
-                  placeholder="مثال: 12"
+                  placeholder={`مثال: ${formData.paymentPeriod === "daily" ? "30" : formData.paymentPeriod === "weekly" ? "12" : "12"}`}
                   className="w-full p-3 rounded-lg border border-border bg-background"
                   value={formData.months}
                   onChange={(e) =>
@@ -462,10 +628,9 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* القسط الشهري المباشر (تفاعلي) */}
               <div>
                 <label className="block text-sm font-medium mb-1 text-primary font-bold">
-                  أو أدخل القسط الشهري (د.ع)
+                  أو أدخل القسط الـ{periodLabel} (د.ع)
                 </label>
                 <input
                   type="number"
@@ -480,7 +645,6 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* تاريخ أول قسط */}
               <div>
                 <label className="block text-sm font-medium mb-1 flex items-center gap-1">
                   <Calendar className="w-4 h-4 text-primary" />
@@ -515,14 +679,13 @@ export default function NewInstallmentPage() {
             </div>
           </div>
 
-          {/* تفاصيل المدة المحسوبة بالأشهر والأيام */}
           <div className="z-10 w-full md:w-auto border-y md:border-y-0 md:border-x border-primary-foreground/20 py-4 md:py-0 md:px-8 space-y-2">
             <p className="text-primary-foreground/80 text-xs flex items-center justify-center md:justify-start gap-1">
               <Clock className="w-3.5 h-3.5" />
               <span>مدة التسديد المحسوبة</span>
             </p>
             <div className="text-xl font-extrabold text-amber-300">
-              {calculation.calculatedMonths} شهر
+              {calculation.calculatedMonths} {periodUnitLabel}
               {calculation.calculatedDays > 0 && ` و ${calculation.calculatedDays} يوم`}
             </div>
             <p className="text-xs text-primary-foreground/70">
@@ -531,7 +694,7 @@ export default function NewInstallmentPage() {
           </div>
 
           <div className="z-10 bg-background text-foreground px-6 py-4 rounded-xl shadow-inner w-full md:w-auto text-center border-2 border-primary/20">
-            <p className="text-sm font-medium text-gray-500 mb-1">القسط الشهري المطلوب</p>
+            <p className="text-sm font-medium text-gray-500 mb-1">القسط الـ{periodLabel} المطلوب</p>
             <p className="text-3xl font-extrabold text-primary">
               {Math.round(calculation.monthlyInstallment).toLocaleString()} د.ع
             </p>
@@ -545,7 +708,7 @@ export default function NewInstallmentPage() {
             className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-4 rounded-xl hover:bg-primary/90 transition-all shadow-md font-bold text-lg disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
-            <span>{isSubmitting ? "جاري الحفظ..." : "حفظ القسط وإنشاء سجل"}</span>
+            <span>{isSubmitting ? "جاري رفع الصور والحفظ..." : "حفظ القسط وإنشاء سجل"}</span>
           </button>
         </div>
       </form>
