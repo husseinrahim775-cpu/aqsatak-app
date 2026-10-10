@@ -1,7 +1,20 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { InstallmentData, PaymentRecord } from "@/services/firestore";
+import { InstallmentData, PaymentRecord, getCompanySettings } from "@/services/firestore";
+import { auth } from "@/services/firebase";
+
+// دالة مساعدة لجلب ownerUid الحقيقي (سواء كان المسجل مديراً أو موظفاً)
+const getOwnerUid = () => {
+  const activeSession = sessionStorage.getItem("active_session");
+  if (activeSession) {
+    try {
+      const parsed = JSON.parse(activeSession);
+      if (parsed.ownerUid) return parsed.ownerUid;
+    } catch (e) {}
+  }
+  return auth.currentUser?.uid || null;
+};
 
 // ==========================================
 // 📄 1. قالب طباعة عقد التقسيط
@@ -18,19 +31,52 @@ export const ContractPrintTemplate = React.forwardRef<
   });
 
   useEffect(() => {
-    // قراءة البيانات من الإعدادات المحفوظة في localStorage
-    const savedName = localStorage.getItem("app_store_name") || "نظام أقساطك للتقسيط والخدمات المالية";
-    const savedPhone = localStorage.getItem("app_store_phone") || "";
-    const savedAddress = localStorage.getItem("app_store_address") || "";
-    const savedTerms = localStorage.getItem("app_contract_terms") ||
-      "1. يتعهد الطرف الثاني بتسديد المبالغ المستحقة في مواعيدها المحددة أعلاه دون تأخير.\n2. في حال التأخير عن التسديد، يحق للطرف الأول اتخاذ الإجراءات القانونية المترتبة على ذلك.\n3. يعتبر هذا العقد وثيقة رسمية ملزمة للطرفين وللكفيل الضامن.";
+    const fetchStoreSettings = async () => {
+      const ownerUid = getOwnerUid();
+      
+      // الشروط الافتراضية للعقد
+      const defaultTerms = 
+        "1. يتعهد الطرف الثاني بتسديد المبالغ المستحقة في مواعيدها المحددة أعلاه دون تأخير.\n2. في حال التأخير عن التسديد، يحق للطرف الأول اتخاذ الإجراءات القانونية المترتبة على ذلك.\n3. يعتبر هذا العقد وثيقة رسمية ملزمة للطرفين وللكفيل الضامن.";
 
-    setStoreInfo({
-      name: savedName,
-      phone: savedPhone,
-      address: savedAddress,
-      terms: savedTerms.split("\n").filter((t) => t.trim() !== ""),
-    });
+      let savedName = "نظام أقساطك للتقسيط والخدمات المالية";
+      let savedPhone = "";
+      let savedAddress = "";
+      let savedTerms = defaultTerms;
+
+      if (ownerUid) {
+        // 1. فحص التخزين المحلي السريع الخاص بالشركة
+        const cached = localStorage.getItem(`company_settings_${ownerUid}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed.companyName) savedName = parsed.companyName;
+            if (parsed.phone) savedPhone = parsed.phone;
+            if (parsed.address) savedAddress = parsed.address;
+            if (parsed.notes) savedTerms = parsed.notes;
+          } catch (e) {}
+        }
+
+        // 2. الجلب المباشر من Firestore لضمان الدقة وتفادي أي تداخل
+        const settings = await getCompanySettings(ownerUid);
+        if (settings) {
+          if (settings.companyName) savedName = settings.companyName;
+          if (settings.phone) savedPhone = settings.phone;
+          if (settings.address) savedAddress = settings.address;
+          if (settings.notes) savedTerms = settings.notes;
+
+          localStorage.setItem(`company_settings_${ownerUid}`, JSON.stringify(settings));
+        }
+      }
+
+      setStoreInfo({
+        name: savedName,
+        phone: savedPhone,
+        address: savedAddress,
+        terms: savedTerms.split("\n").filter((t) => t.trim() !== ""),
+      });
+    };
+
+    fetchStoreSettings();
   }, [installment]);
 
   const periodLabel =
@@ -42,14 +88,14 @@ export const ContractPrintTemplate = React.forwardRef<
 
   return (
     <div ref={ref} className="p-8 bg-white text-black font-sans space-y-6 text-right dir-rtl leading-relaxed">
-      {/* هيدر العقد بدون خط سفلي تحت العنوان */}
+      {/* هيدر العقد */}
       <div className="text-center border-b-2 border-black pb-4 space-y-1">
         <h1 className="text-2xl font-black">{storeInfo.name}</h1>
         <h2 className="text-xl font-bold">عقد بيع بالتقسيط والتزام تسديد</h2>
         <p className="text-xs text-gray-600">تاريخ المحرر: {new Date().toLocaleDateString("ar-IQ")}</p>
       </div>
 
-      {/* الطرف الأول والطرف الثاني بدون خطوط سفلية */}
+      {/* الطرف الأول والطرف الثاني */}
       <div className="grid grid-cols-2 gap-4 text-sm border p-4 rounded-lg bg-gray-50 border-gray-300">
         <div>
           <p className="font-bold text-gray-900 mb-1">الطرف الأول (الدائن / البائع):</p>
@@ -92,7 +138,7 @@ export const ContractPrintTemplate = React.forwardRef<
         </table>
       </div>
 
-      {/* بيانات الكفيل الضامن بدون خط سفلي */}
+      {/* بيانات الكفيل الضامن */}
       <div className="border p-4 rounded-lg border-gray-300 space-y-1 text-sm">
         <p className="font-bold text-gray-900">بيانات الكفيل الضامن:</p>
         <p>اسم الكفيل: <span className="font-bold">{installment.guarantorName || "لا يوجد"}</span></p>
@@ -137,8 +183,25 @@ export const PaymentReceiptPrintTemplate = React.forwardRef<
   const [storeName, setStoreName] = useState("نظام أقساطك");
 
   useEffect(() => {
-    const savedName = localStorage.getItem("app_store_name");
-    if (savedName) setStoreName(savedName);
+    const fetchStoreName = async () => {
+      const ownerUid = getOwnerUid();
+      if (ownerUid) {
+        const cached = localStorage.getItem(`company_settings_${ownerUid}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed.companyName) setStoreName(parsed.companyName);
+          } catch (e) {}
+        }
+
+        const settings = await getCompanySettings(ownerUid);
+        if (settings && settings.companyName) {
+          setStoreName(settings.companyName);
+        }
+      }
+    };
+
+    fetchStoreName();
   }, [payment]);
 
   const dateStr = payment.paidAt

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, Plus, User, ExternalLink, X } from "lucide-react";
+import { Package, Plus, User, ExternalLink, X, Edit3, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { 
   getSoldInventory, 
   getAvailableInventory, 
   addInventoryItem,
+  updateInventoryItem,
+  deleteInventoryItem,
   InventoryItem 
 } from "../../services/firestore";
 
@@ -15,18 +17,20 @@ export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // حالة النافذة المنبثقة لإضافة مادة جديدة
+  // حالة نافذة الإضافة والتعديل
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [newItem, setNewItem] = useState({
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+
+  const [formData, setFormData] = useState({
     title: "",
-    category: "دراجات",
+    category: "هواتف",
     price: "",
     chassisNumber: "",
     color: "",
     modelYear: "",
   });
 
-  // تحميل البيانات حسب التبويب المختار
+  // تحميل البيانات
   const loadData = async () => {
     setLoading(true);
     try {
@@ -43,38 +47,83 @@ export default function InventoryPage() {
     loadData();
   }, [activeTab]);
 
-  // دالة حفظ المادة الجديدة في Firestore
+  // فتح نافذة التعديل مع تعبئة البيانات القديمة
+  const handleOpenEdit = (item: InventoryItem) => {
+    setEditingItem(item);
+    setFormData({
+      title: item.title || "",
+      category: item.category || "هواتف",
+      price: String(item.price || ""),
+      chassisNumber: item.specs?.chassisNumber || "",
+      color: item.specs?.color || "",
+      modelYear: item.specs?.modelYear || "",
+    });
+    setIsAddOpen(true);
+  };
+
+  // إغلاق النافذة وتنظيف النموذج
+  const handleCloseModal = () => {
+    setIsAddOpen(false);
+    setEditingItem(null);
+    setFormData({ title: "", category: "هواتف", price: "", chassisNumber: "", color: "", modelYear: "" });
+  };
+
+  // دالة الحفظ (إضافة أو تعديل)
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItem.title || !newItem.price) {
+    if (!formData.title || !formData.price) {
       alert("يرجى إدخال اسم المنتج والسعر على الأقل");
       return;
     }
 
     try {
-      await addInventoryItem({
-        title: newItem.title,
-        category: newItem.category,
-        price: Number(newItem.price),
-        status: "available",
+      const payload = {
+        title: formData.title,
+        category: formData.category,
+        price: Number(formData.price),
         specs: {
-          chassisNumber: newItem.chassisNumber,
-          color: newItem.color,
-          modelYear: newItem.modelYear,
+          chassisNumber: formData.chassisNumber,
+          color: formData.color,
+          modelYear: formData.modelYear,
         },
-      });
+      };
 
-      setIsAddOpen(false);
-      setNewItem({ title: "", category: "دراجات", price: "", chassisNumber: "", color: "", modelYear: "" });
-      loadData(); // إعادة تحميل القائمة تلقائياً بعد الحفظ
+      if (editingItem && editingItem.id) {
+        // تعديل منتج قائم
+        await updateInventoryItem(editingItem.id, payload);
+      } else {
+        // إضافة منتج جديد
+        await addInventoryItem({
+          ...payload,
+          status: "available",
+        });
+      }
+
+      handleCloseModal();
+      loadData();
     } catch (error) {
       console.error("خطأ في حفظ المنتج:", error);
-      alert("حدث خطأ أثناء حفظ المنتج في المخزن.");
+      alert("حدث خطأ أثناء حفظ التغيرات.");
+    }
+  };
+
+  // دالة الحذف
+  const handleDeleteItem = async (item: InventoryItem) => {
+    if (!item.id) return;
+    
+    if (confirm(`هل أنت تأكد من رغبتك بحذف المنتج (${item.title}) نهائياً من المخزن؟`)) {
+      try {
+        await deleteInventoryItem(item.id);
+        loadData();
+      } catch (error) {
+        console.error("خطأ في حذف المنتج:", error);
+        alert("حدث خطأ أثناء محاولة حذف المنتج.");
+      }
     }
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-6">
       {/* الهيدر والأزرار */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -86,9 +135,12 @@ export default function InventoryPage() {
 
         <div className="flex items-center gap-3">
           <button
-            type="button"
-            onClick={() => setIsAddOpen(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition active:scale-95 shadow-sm"
+            onClick={() => {
+              setEditingItem(null);
+              setFormData({ title: "", category: "هواتف", price: "", chassisNumber: "", color: "", modelYear: "" });
+              setIsAddOpen(true);
+            }}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة منتج جديد</span>
@@ -96,22 +148,20 @@ export default function InventoryPage() {
 
           <div className="flex items-center gap-1 bg-[#1e293b] p-1 rounded-xl border border-[#334155]">
             <button
-              type="button"
               onClick={() => setActiveTab("available")}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 activeTab === "available" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
               }`}
             >
-              المتوفر بالمخزن
+              المتوفر
             </button>
             <button
-              type="button"
               onClick={() => setActiveTab("sold")}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 activeTab === "sold" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"
               }`}
             >
-              سجل المبيعات والحركات
+              المباع
             </button>
           </div>
         </div>
@@ -120,25 +170,45 @@ export default function InventoryPage() {
       {/* قائمة المواد المعروضة */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading ? (
-          <div className="col-span-full card-glass p-8 text-center text-slate-400">جاري تحميل مواد المخزن...</div>
+          <div className="col-span-full card-glass p-8 text-center text-slate-400">جاري تحميل المخزن...</div>
         ) : items.length === 0 ? (
           <div className="col-span-full card-glass p-8 text-center text-slate-400">
             {activeTab === "available" ? "لا توجد منتجات متوفرة حالياً في المخزن." : "لم يتم بيع أي منتجات بعد."}
           </div>
         ) : (
           items.map((item, index) => (
-            <div key={item.id || index} className="card-glass p-5 space-y-4 flex flex-col justify-between border-t-2 border-t-blue-500 rounded-2xl bg-card border border-border">
+            <div key={item.id || index} className="card-glass p-5 space-y-4 flex flex-col justify-between border-t-2 border-t-blue-500 relative group">
               <div>
                 <div className="flex justify-between items-start">
                   <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     {item.category}
                   </span>
-                  <span className="text-lg font-bold text-emerald-400">${item.price}</span>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-bold text-emerald-400">${item.price}</span>
+                    
+                    {/* أزرار التعديل والحذف */}
+                    <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700/60 mr-2">
+                      <button
+                        onClick={() => handleOpenEdit(item)}
+                        title="تعديل المنتج"
+                        className="text-slate-400 hover:text-blue-400 p-1 transition"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(item)}
+                        title="حذف المنتج"
+                        className="text-slate-400 hover:text-rose-400 p-1 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <h3 className="font-bold text-slate-100 text-lg mt-3">{item.title}</h3>
 
-                {/* المواصفات التفصيلية */}
                 <div className="mt-3 space-y-1.5 text-xs text-slate-300 bg-[#0f172a]/60 p-3 rounded-lg border border-slate-800">
                   {item.specs?.chassisNumber && (
                     <div className="flex justify-between">
@@ -161,7 +231,6 @@ export default function InventoryPage() {
                 </div>
               </div>
 
-              {/* إذا كانت المادة مباعة */}
               {item.status === "sold" && item.soldToClientId && (
                 <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
                   <div className="flex items-center gap-1.5 text-slate-300">
@@ -183,13 +252,15 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* النافذة المنبثقة لإضافة مادة جديدة */}
+      {/* النافذة المنبثقة للإضافة والتعديل */}
       {isAddOpen && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#1e293b] border border-[#334155] rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl">
+          <div className="bg-[#1e293b] border border-[#334155] rounded-2xl w-full max-w-lg p-6 space-y-5">
             <div className="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 className="text-lg font-bold text-white">إضافة مادة جديدة للمخزن</h3>
-              <button type="button" onClick={() => setIsAddOpen(false)} className="text-slate-400 hover:text-white">
+              <h3 className="text-lg font-bold text-white">
+                {editingItem ? "تعديل بيانيات المنتج" : "إضافة مادة جديدة للمخزن"}
+              </h3>
+              <button onClick={handleCloseModal} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -200,9 +271,9 @@ export default function InventoryPage() {
                 <input
                   type="text"
                   required
-                  placeholder="مثال: دراجة ياماها 2024 أو أيفون 15"
-                  value={newItem.title}
-                  onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
+                  placeholder="مثال: ايفون 17 أو دراجة ياماها"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -211,13 +282,13 @@ export default function InventoryPage() {
                 <div>
                   <label className="text-xs text-slate-300 block mb-1">القسم / التصنيف</label>
                   <select
-                    value={newItem.category}
-                    onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                     className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   >
+                    <option value="هواتف">هواتف / أجهزة</option>
                     <option value="دراجات">دراجات</option>
                     <option value="سيارات">سيارات</option>
-                    <option value="هواتف">هواتف / أجهزة</option>
                     <option value="كهربائيات">كهربائيات</option>
                     <option value="أخرى">أخرى</option>
                   </select>
@@ -229,8 +300,8 @@ export default function InventoryPage() {
                     type="number"
                     required
                     placeholder="0"
-                    value={newItem.price}
-                    onChange={(e) => setNewItem({ ...newItem, price: e.target.value })}
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                     className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -241,8 +312,8 @@ export default function InventoryPage() {
                 <input
                   type="text"
                   placeholder="رقم الشاصي أو Serial Number"
-                  value={newItem.chassisNumber}
-                  onChange={(e) => setNewItem({ ...newItem, chassisNumber: e.target.value })}
+                  value={formData.chassisNumber}
+                  onChange={(e) => setFormData({ ...formData, chassisNumber: e.target.value })}
                   className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
                 />
               </div>
@@ -252,9 +323,9 @@ export default function InventoryPage() {
                   <label className="text-xs text-slate-300 block mb-1">اللون</label>
                   <input
                     type="text"
-                    placeholder="أسود، أحمر..."
-                    value={newItem.color}
-                    onChange={(e) => setNewItem({ ...newItem, color: e.target.value })}
+                    placeholder="أسود، ابيض..."
+                    value={formData.color}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
                     className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -263,9 +334,9 @@ export default function InventoryPage() {
                   <label className="text-xs text-slate-300 block mb-1">الموديل / السنة</label>
                   <input
                     type="text"
-                    placeholder="2024"
-                    value={newItem.modelYear}
-                    onChange={(e) => setNewItem({ ...newItem, modelYear: e.target.value })}
+                    placeholder="2026"
+                    value={formData.modelYear}
+                    onChange={(e) => setFormData({ ...formData, modelYear: e.target.value })}
                     className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -274,7 +345,7 @@ export default function InventoryPage() {
               <div className="flex gap-3 pt-3">
                 <button
                   type="button"
-                  onClick={() => setIsAddOpen(false)}
+                  onClick={handleCloseModal}
                   className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 rounded-xl font-medium transition"
                 >
                   إلغاء
@@ -283,7 +354,7 @@ export default function InventoryPage() {
                   type="submit"
                   className="w-1/2 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-medium transition"
                 >
-                  حفظ المنتج
+                  {editingItem ? "حفظ التعديلات" : "حفظ المنتج"}
                 </button>
               </div>
             </form>

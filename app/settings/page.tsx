@@ -34,6 +34,8 @@ import {
   addSystemUser,
   getSystemUsers,
   deleteSystemUser,
+  getCompanySettings,
+  saveCompanySettings,
   SystemUser
 } from "../../services/firestore";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
@@ -87,45 +89,56 @@ export default function SettingsPage() {
     canDeleteOrEdit: false,
   });
 
-  // جلب قائمة الموظفين ورمز PIN الخاص بحساب الأدمن
+  // معرف المالك الحقيقي (سواء كان المسجل أدمن أو موظفاً)
+  const getOwnerUid = () => {
+    const activeSession = sessionStorage.getItem("active_session");
+    if (activeSession) {
+      try {
+        const parsed = JSON.parse(activeSession);
+        if (parsed.ownerUid) return parsed.ownerUid;
+      } catch (e) {}
+    }
+    return user?.uid || null;
+  };
+
+  // جلب قائمة الموظفين وإعدادات الشركة المسجلة
   const fetchUsersAndSettings = async () => {
-    if (user?.uid) {
+    const ownerUid = getOwnerUid();
+    if (ownerUid) {
       setLoadingUsers(true);
-      const list = await getSystemUsers(user.uid);
+      const list = await getSystemUsers(ownerUid);
       setUsersList(list);
       setLoadingUsers(false);
 
-      // جلب رمز PIN المالك من Firestore
+      // جلب إعدادات الشركة الخاصة بـ ownerUid من Firestore
       try {
-        const userDocRef = doc(db, "users", user.uid);
+        const companyData = await getCompanySettings(ownerUid);
+        if (companyData) {
+          if (companyData.companyName) setStoreName(companyData.companyName);
+          if (companyData.phone) setStorePhone(companyData.phone);
+          if (companyData.address) setStoreAddress(companyData.address);
+          if (companyData.notes) setContractTerms(companyData.notes);
+        }
+
+        const userDocRef = doc(db, "users", ownerUid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
           setAdminPin(userDocSnap.data().adminPin || "1234");
         }
       } catch (err) {
-        console.error("خطأ في جلب رمز المالك:", err);
+        console.error("خطأ في جلب بيانات الشركة والمالك:", err);
       }
     }
   };
 
-  // تحميل الإعدادات من LocalStorage والموظفين
+  // تحميل الإعدادات عند فتح الصفحة
   useEffect(() => {
-    const savedStoreName = localStorage.getItem("app_store_name");
-    const savedStorePhone = localStorage.getItem("app_store_phone");
-    const savedStoreAddress = localStorage.getItem("app_store_address");
-    const savedContractTerms = localStorage.getItem("app_contract_terms");
-
     const savedProfitRate = localStorage.getItem("app_default_profit_rate");
     const savedAutoApi = localStorage.getItem("app_wa_use_api") === "true";
     const savedInstance = localStorage.getItem("app_wa_instance_id");
     const savedToken = localStorage.getItem("app_wa_token");
     const savedTemplate = localStorage.getItem("app_whatsapp_template");
     const savedTheme = localStorage.getItem("theme");
-
-    if (savedStoreName) setStoreName(savedStoreName);
-    if (savedStorePhone) setStorePhone(savedStorePhone);
-    if (savedStoreAddress) setStoreAddress(savedStoreAddress);
-    if (savedContractTerms) setContractTerms(savedContractTerms);
 
     if (savedProfitRate) setDefaultProfitRate(Number(savedProfitRate));
     setUseAutoApi(savedAutoApi);
@@ -180,7 +193,8 @@ export default function SettingsPage() {
 
   // 🔑 حفظ رمز PIN الخفي الخاص بمدير الشركة في Firestore
   const handleUpdateAdminPin = async () => {
-    if (!user?.uid) return;
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return;
     if (!adminPin.trim()) {
       alert("يرجى كتابة رمز PIN جديد أولاً.");
       return;
@@ -188,7 +202,7 @@ export default function SettingsPage() {
 
     try {
       setSavingPin(true);
-      await setDoc(doc(db, "users", user.uid), { adminPin: adminPin.trim() }, { merge: true });
+      await setDoc(doc(db, "users", ownerUid), { adminPin: adminPin.trim() }, { merge: true });
       alert("تم حفظ وتحديث رمز PIN الخاص بحساب المالك بنجاح!");
     } catch (error) {
       console.error("خطأ في حفظ رمز PIN المالك:", error);
@@ -201,7 +215,8 @@ export default function SettingsPage() {
   // 🎯 إضافة الموظف باسم مستخدم عادي
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.uid || !empForm.name || !empForm.username || !empForm.password) return;
+    const ownerUid = getOwnerUid();
+    if (!ownerUid || !empForm.name || !empForm.username || !empForm.password) return;
 
     try {
       setSubmittingUser(true);
@@ -209,9 +224,9 @@ export default function SettingsPage() {
 
       // حفظ بيانات الموظف مباشرة في Firestore
       await addSystemUser({
-        ownerUid: user.uid,
+        ownerUid: ownerUid,
         name: empForm.name,
-        email: `${cleanUsername}@local.app`, // بريد إلكتروني افتراضي للمنظومة
+        email: `${cleanUsername}@local.app`,
         username: cleanUsername,
         password: empForm.password,
         role: "employee" as const,
@@ -254,37 +269,64 @@ export default function SettingsPage() {
     }
   };
 
-  // حفظ الإعدادات العامة
-  const handleSaveSettings = (e: React.FormEvent) => {
+  // حفظ الإعدادات العامة للشركة في Firestore
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("app_store_name", storeName);
-    localStorage.setItem("app_store_phone", storePhone);
-    localStorage.setItem("app_store_address", storeAddress);
-    localStorage.setItem("app_contract_terms", contractTerms);
+    const ownerUid = getOwnerUid();
+    
+    if (!ownerUid) {
+      alert("تعذر التعرف على حساب الشركة المسجل.");
+      return;
+    }
 
-    localStorage.setItem("app_default_profit_rate", defaultProfitRate.toString());
-    localStorage.setItem("app_wa_use_api", useAutoApi ? "true" : "false");
-    localStorage.setItem("app_wa_instance_id", waInstanceId);
-    localStorage.setItem("app_wa_token", waToken);
-    localStorage.setItem("app_whatsapp_template", whatsappTemplate);
+    setLoadingAction(true);
+    try {
+      // 1. الحفظ الشامل في Firestore باسم الشركة الفريد
+      await saveCompanySettings(ownerUid, {
+        companyName: storeName,
+        phone: storePhone,
+        address: storeAddress,
+        notes: contractTerms,
+      });
 
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+      // 2. تحديث التخزين المحلي كنسخة مؤقتة لسرعة العرض
+      localStorage.setItem(`company_settings_${ownerUid}`, JSON.stringify({
+        companyName: storeName,
+        phone: storePhone,
+        address: storeAddress,
+        notes: contractTerms,
+      }));
+
+      localStorage.setItem("app_default_profit_rate", defaultProfitRate.toString());
+      localStorage.setItem("app_wa_use_api", useAutoApi ? "true" : "false");
+      localStorage.setItem("app_wa_instance_id", waInstanceId);
+      localStorage.setItem("app_wa_token", waToken);
+      localStorage.setItem("app_whatsapp_template", whatsappTemplate);
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error("خطأ في حفظ الإعدادات:", err);
+      alert("حدث خطأ أثناء حفظ تفاصيل الشركة.");
+    } finally {
+      setLoadingAction(false);
+    }
   };
 
   // تصدير واستعادة النسخ الاحتياطية
   const handleExportBackup = async () => {
-    if (!user?.uid) return;
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return;
     try {
       setLoadingAction(true);
       const [installments, payments] = await Promise.all([
-        getUserInstallments(user.uid),
-        getUserPayments(user.uid),
+        getUserInstallments(ownerUid),
+        getUserPayments(ownerUid),
       ]);
 
       const backupData = {
         exportDate: new Date().toISOString(),
-        userId: user.uid,
+        userId: ownerUid,
         installments,
         payments,
       };
@@ -321,13 +363,14 @@ export default function SettingsPage() {
             return;
           }
 
-          if (!user?.uid) return;
+          const ownerUid = getOwnerUid();
+          if (!ownerUid) return;
 
           for (const inst of content.installments) {
             const { id, createdAt, ...cleanInst } = inst;
             await addInstallmentRecord({
               ...cleanInst,
-              userId: user.uid,
+              userId: ownerUid,
             });
           }
 
@@ -336,7 +379,7 @@ export default function SettingsPage() {
               const { id, createdAt, ...cleanPay } = pay;
               await addPaymentRecord({
                 ...cleanPay,
-                userId: user.uid,
+                userId: ownerUid,
               });
             }
           }
@@ -367,7 +410,7 @@ export default function SettingsPage() {
       {saved && (
         <div className="p-3 md:p-4 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 rounded-xl flex items-center gap-2 md:gap-3 text-xs md:text-sm font-bold animate-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
-          <span>تم حفظ الإعدادات بنجاح!</span>
+          <span>تم حفظ الإعدادات وتحديث بيانات الشركة بنجاح!</span>
         </div>
       )}
 

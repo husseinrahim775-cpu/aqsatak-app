@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../services/firebase";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight } from "lucide-react";
@@ -22,30 +22,44 @@ export default function LoginPage() {
   const [empPinCode, setEmpPinCode] = useState("");
   
   // 🔒 رمز PIN الخاص بمدير الشركة يجلب من Firestore
-  const [companyAdminPin, setCompanyAdminPin] = useState<string | null>(null);
+  const [companyAdminPin, setCompanyAdminPin] = useState<string>("1234");
 
   const [loading, setLoading] = useState(false);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
 
-  // جلب بيانات الشركة (بما فيها رمز الأدمن الخاص بها) وقائمة الموظفين
+  // جلب بيانات الشركة وضمان وجود رمز PIN للأدمن
   const loadCompanyData = async (ownerUid: string) => {
     try {
       setLoadingEmployees(true);
       setError("");
 
-      // أ. جلب رمز الأدمن المحدد من قبل الشركة
+      // أ. جلب فحص رمز الأدمن المخصص
       const userDocRef = doc(db, "users", ownerUid);
       const userDocSnap = await getDoc(userDocRef);
+
       if (userDocSnap.exists()) {
         const data = userDocSnap.data();
-        setCompanyAdminPin(data.adminPin || "1234"); // الرمز المخصص أو 1234 افتراضياً
+        if (data.adminPin) {
+          setCompanyAdminPin(String(data.adminPin));
+        } else {
+          // إذا كان حساباً قديماً ولا يملك adminPin، نضع 1234 افتراضياً ونحدثه بـ Firestore
+          await updateDoc(userDocRef, { adminPin: "1234" });
+          setCompanyAdminPin("1234");
+        }
       } else {
+        // في حال عدم وجود وثيقة مستخدم، أنشئ الوثيقة برموز افتراضية
+        await setDoc(userDocRef, {
+          email: auth.currentUser?.email || "",
+          adminPin: "1234",
+          status: "active",
+          createdAt: serverTimestamp(),
+        }, { merge: true });
         setCompanyAdminPin("1234");
       }
 
-      // ب. جلب الموظفين التابعين للشركة
+      // ب. جلب الموظفين التابعين لهذه الشركة حصراً عبر ownerUid
       const q = query(collection(db, "system_users"), where("ownerUid", "==", ownerUid));
       const snap = await getDocs(q);
 
@@ -53,13 +67,6 @@ export default function LoginPage() {
       snap.forEach((docSnap) => {
         list.push({ id: docSnap.id, ...docSnap.data() } as SystemUser);
       });
-
-      if (list.length === 0) {
-        const fallbackSnap = await getDocs(collection(db, "system_users"));
-        fallbackSnap.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as SystemUser);
-        });
-      }
 
       setEmployees(list);
     } catch (err: any) {
@@ -78,6 +85,7 @@ export default function LoginPage() {
       } else {
         setIsCompanyAuthenticated(false);
         sessionStorage.removeItem("active_session");
+        localStorage.removeItem("current_employee");
       }
     });
 
@@ -90,6 +98,9 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
+    sessionStorage.removeItem("active_session");
+    localStorage.removeItem("current_employee");
+
     try {
       const cleanEmail = companyEmail.trim().toLowerCase();
 
@@ -101,7 +112,7 @@ export default function LoginPage() {
           email: user.email,
           status: "pending",
           role: "user",
-          adminPin: "1234", // رمز افتراضي عند إنشاء الحساب
+          adminPin: "1234",
           createdAt: serverTimestamp(),
         });
 
@@ -126,8 +137,9 @@ export default function LoginPage() {
           }
         }
 
-        sessionStorage.removeItem("active_session");
         setIsCompanyAuthenticated(true);
+        setSelectedEmpId("admin_owner");
+        setEmpPinCode("");
         await loadCompanyData(user.uid);
       }
     } catch (err: any) {
@@ -138,7 +150,7 @@ export default function LoginPage() {
     }
   };
 
-  // 🎯 دخول المستخدم وتوجيهه حسب صلاحياته
+  // دخول المستخدم
   const handleEmployeeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -148,10 +160,11 @@ export default function LoginPage() {
       return;
     }
 
-    // 🔒 1. في حال اختيار مدير النظام (المالك): يتم فحص الـ adminPin للشركة وتوجيهه للداشبورد
+    // 1. دخول مدير النظام (المالك)
     if (selectedEmpId === "admin_owner") {
-      if (empPinCode.trim() !== (companyAdminPin || "1234")) {
-        setError("الرمز السرّي الخاص بالمالك غير صحيح!");
+      const validPin = companyAdminPin || "1234";
+      if (empPinCode.trim() !== validPin) {
+        setError("الرمز السرّي الخاص بالمالك غير صحيح! (الرمز الافتراضي: 1234)");
         return;
       }
 
@@ -160,7 +173,7 @@ export default function LoginPage() {
       return;
     }
 
-    // 🔒 2. في حال اختيار موظف: يتم فحص الرمز وتوجيهه لصفحته المتاحة
+    // 2. دخول موظف
     const matchedEmp = employees.find((emp) => emp.id === selectedEmpId);
 
     if (!matchedEmp) {
@@ -175,19 +188,13 @@ export default function LoginPage() {
 
     sessionStorage.setItem("active_session", JSON.stringify(matchedEmp));
 
-    // 🎯 التوجيه المباشر لأول قسم يملك الموظف صلاحية دخوله
     const perms = matchedEmp.permissions || {};
     let targetRoute = "/customers";
 
-    if (perms.canViewDashboard) {
-      targetRoute = "/dashboard";
-    } else if (perms.canManageStore) {
-      targetRoute = "/inventory";
-    } else if (perms.canManageCustomers) {
-      targetRoute = "/customers";
-    } else if (perms.canViewTreasury) {
-      targetRoute = "/treasury";
-    }
+    if (perms.canViewDashboard) targetRoute = "/dashboard";
+    else if (perms.canManageStore) targetRoute = "/inventory";
+    else if (perms.canManageCustomers) targetRoute = "/customers";
+    else if (perms.canViewTreasury) targetRoute = "/treasury";
 
     router.push(targetRoute);
   };
@@ -195,7 +202,9 @@ export default function LoginPage() {
   const handleSwitchCompany = async () => {
     await signOut(auth);
     sessionStorage.removeItem("active_session");
+    localStorage.removeItem("current_employee");
     setIsCompanyAuthenticated(false);
+    setSelectedEmpId("admin_owner");
     setEmpPinCode("");
     setError("");
   };

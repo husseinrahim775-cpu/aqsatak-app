@@ -1,4 +1,4 @@
-import { db, storage } from "./firebase";
+import { db, storage, auth } from "./firebase";
 import { 
   collection, 
   addDoc, 
@@ -56,7 +56,7 @@ export interface PaymentRecord {
   paidAt?: any;
   createdAt?: any;
   targetMonth?: string; 
-  notes?: string;    
+  notes?: string;     
   isPenalty?: boolean;     
 }
 
@@ -73,6 +73,7 @@ export interface DebtData {
 
 export interface InventoryItem {
   id?: string;
+  ownerUid?: string;          // ID الشركة الممالكة للمنتج
   title: string;          
   category: string;       
   price: number;          
@@ -467,22 +468,67 @@ export const deleteDebt = async (debtId: string) => {
 // ==========================================
 
 export const addInventoryItem = async (item: Omit<InventoryItem, "id">) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("غير مصرح - لم يتم تسجيل الدخول");
+
   const docRef = await addDoc(collection(db, "inventory"), {
     ...item,
+    ownerUid: user.uid, // ربط المنتج بالشركة المسجلة
     status: "available",
     createdAt: serverTimestamp(),
   });
   return docRef.id;
 };
 
+// ✏️ دالة تعديل مادة في المخزن
+export const updateInventoryItem = async (itemId: string, updatedData: Partial<InventoryItem>) => {
+  try {
+    const itemRef = doc(db, "inventory", itemId);
+    await updateDoc(itemRef, {
+      ...updatedData,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch (error) {
+    console.error("خطأ في تعديل المنتج:", error);
+    throw error;
+  }
+};
+
+// 🗑️ دالة حذف مادة من المخزن
+export const deleteInventoryItem = async (itemId: string) => {
+  try {
+    const itemRef = doc(db, "inventory", itemId);
+    await deleteDoc(itemRef);
+    return true;
+  } catch (error) {
+    console.error("خطأ في حذف المنتج:", error);
+    throw error;
+  }
+};
+
 export const getAvailableInventory = async (): Promise<InventoryItem[]> => {
-  const q = query(collection(db, "inventory"), where("status", "==", "available"));
+  const user = auth.currentUser;
+  if (!user) return [];
+
+  const q = query(
+    collection(db, "inventory"),
+    where("ownerUid", "==", user.uid),
+    where("status", "==", "available")
+  );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
 };
 
 export const getSoldInventory = async (): Promise<InventoryItem[]> => {
-  const q = query(collection(db, "inventory"), where("status", "==", "sold"));
+  const user = auth.currentUser;
+  if (!user) return [];
+
+  const q = query(
+    collection(db, "inventory"),
+    where("ownerUid", "==", user.uid),
+    where("status", "==", "sold")
+  );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
 };
@@ -519,7 +565,6 @@ export const unbindProductFromContract = async (itemId: string) => {
     throw error;
   }
 };
-
 // ==========================================
 // 🏦 أنواع بيانات ودوال الخزينة والصندوق (Treasury)
 // ==========================================
@@ -644,6 +689,58 @@ export const deleteSystemUser = async (id: string) => {
     await deleteDoc(doc(db, "system_users", id));
   } catch (error) {
     console.error("خطأ في حذف الموظف:", error);
+    throw error;
+  }
+};
+// ==========================================
+// ⚙️ إعدادات الطباعة ومعلومات الشركة
+// ==========================================
+
+export interface CompanySettings {
+  companyName: string;
+  phone: string;
+  address: string;
+  logoUrl?: string;
+  notes?: string;
+}
+
+// 1. جلب إعدادات الشركة الخاصة بـ ownerUid
+export const getCompanySettings = async (ownerUid: string): Promise<CompanySettings | null> => {
+  try {
+    const docRef = doc(db, "users", ownerUid);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        companyName: data.companyName || "",
+        phone: data.phone || "",
+        address: data.address || "",
+        logoUrl: data.logoUrl || "",
+        notes: data.notes || "",
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("خطأ في جلب إعدادات الشركة:", error);
+    return null;
+  }
+};
+
+// 2. حفظ / تحديث إعدادات الشركة الخاصة بـ ownerUid
+export const saveCompanySettings = async (ownerUid: string, settings: CompanySettings) => {
+  try {
+    const docRef = doc(db, "users", ownerUid);
+    await updateDoc(docRef, {
+      companyName: settings.companyName,
+      phone: settings.phone,
+      address: settings.address,
+      logoUrl: settings.logoUrl || "",
+      notes: settings.notes || "",
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch (error) {
+    console.error("خطأ في حفظ إعدادات الشركة:", error);
     throw error;
   }
 };
