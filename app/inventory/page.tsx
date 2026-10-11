@@ -3,16 +3,19 @@
 import { useState, useEffect } from "react";
 import { Package, Plus, User, ExternalLink, X, Edit3, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "../../components/AuthProvider";
 import { 
   getSoldInventory, 
   getAvailableInventory, 
   addInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
+  addTreasuryTransaction,
   InventoryItem 
 } from "../../services/firestore";
 
 export default function InventoryPage() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"available" | "sold">("available");
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,11 +27,24 @@ export default function InventoryPage() {
   const [formData, setFormData] = useState({
     title: "",
     category: "هواتف",
-    price: "",
+    costPrice: "", // 🆕 سعر الشراء
+    price: "",     // سعر البيع
     chassisNumber: "",
     color: "",
     modelYear: "",
   });
+
+  // جلب ownerUid الخاص بالحساب المسجل
+  const getOwnerUid = () => {
+    const activeSession = sessionStorage.getItem("active_session");
+    if (activeSession) {
+      try {
+        const parsed = JSON.parse(activeSession);
+        if (parsed.ownerUid) return parsed.ownerUid;
+      } catch (e) {}
+    }
+    return user?.uid || null;
+  };
 
   // تحميل البيانات
   const loadData = async () => {
@@ -53,6 +69,7 @@ export default function InventoryPage() {
     setFormData({
       title: item.title || "",
       category: item.category || "هواتف",
+      costPrice: String(item.costPrice || ""),
       price: String(item.price || ""),
       chassisNumber: item.specs?.chassisNumber || "",
       color: item.specs?.color || "",
@@ -65,22 +82,26 @@ export default function InventoryPage() {
   const handleCloseModal = () => {
     setIsAddOpen(false);
     setEditingItem(null);
-    setFormData({ title: "", category: "هواتف", price: "", chassisNumber: "", color: "", modelYear: "" });
+    setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
   };
 
-  // دالة الحفظ (إضافة أو تعديل)
+  // دالة الحفظ (إضافة أو تعديل) مع الربط التلقائي بالخزينة
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.price) {
-      alert("يرجى إدخال اسم المنتج والسعر على الأقل");
+      alert("يرجى إدخال اسم المنتج وسعر البيع على الأقل");
       return;
     }
 
     try {
+      const costPriceNum = formData.costPrice ? Number(formData.costPrice) : 0;
+      const priceNum = Number(formData.price);
+
       const payload = {
         title: formData.title,
         category: formData.category,
-        price: Number(formData.price),
+        costPrice: costPriceNum,
+        price: priceNum,
         specs: {
           chassisNumber: formData.chassisNumber,
           color: formData.color,
@@ -92,17 +113,32 @@ export default function InventoryPage() {
         // تعديل منتج قائم
         await updateInventoryItem(editingItem.id, payload);
       } else {
-        // إضافة منتج جديد
+        // 1. إضافة منتج جديد للمخزن
         await addInventoryItem({
           ...payload,
           status: "available",
         });
+
+        // 2. ⚡ ربط تلقائي بالخزينة: تسجيل حركة شراء بضاعة ومخزن إذا وجد سعر شراء
+        if (costPriceNum > 0) {
+          const ownerUid = getOwnerUid();
+          if (ownerUid) {
+            await addTreasuryTransaction({
+              userId: ownerUid,
+              type: "outflow",
+              category: "inventory_purchase",
+              amount: costPriceNum,
+              description: `شراء بضاعة ومخزن: ${formData.title} ${formData.chassisNumber ? `(سيريال: ${formData.chassisNumber})` : ""}`,
+              date: new Date().toISOString(),
+            });
+          }
+        }
       }
 
       handleCloseModal();
       loadData();
     } catch (error) {
-      console.error("خطأ في حفظ المنتج:", error);
+      console.error("خطأ في حفظ المنتج والربط بالخزينة:", error);
       alert("حدث خطأ أثناء حفظ التغيرات.");
     }
   };
@@ -137,7 +173,7 @@ export default function InventoryPage() {
           <button
             onClick={() => {
               setEditingItem(null);
-              setFormData({ title: "", category: "هواتف", price: "", chassisNumber: "", color: "", modelYear: "" });
+              setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
               setIsAddOpen(true);
             }}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition"
@@ -185,7 +221,14 @@ export default function InventoryPage() {
                   </span>
                   
                   <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-emerald-400">${item.price}</span>
+                    <div className="text-left">
+                      <span className="text-lg font-bold text-emerald-400 block">${item.price}</span>
+                      {item.costPrice ? (
+                        <span className="text-[10px] text-amber-400/90 font-mono block">
+                          الشراء: ${item.costPrice}
+                        </span>
+                      ) : null}
+                    </div>
                     
                     {/* أزرار التعديل والحذف */}
                     <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700/60 mr-2">
@@ -258,7 +301,7 @@ export default function InventoryPage() {
           <div className="bg-[#1e293b] border border-[#334155] rounded-2xl w-full max-w-lg p-6 space-y-5">
             <div className="flex justify-between items-center border-b border-slate-700 pb-3">
               <h3 className="text-lg font-bold text-white">
-                {editingItem ? "تعديل بيانيات المنتج" : "إضافة مادة جديدة للمخزن"}
+                {editingItem ? "تعديل بيانات المنتج" : "إضافة مادة جديدة للمخزن"}
               </h3>
               <button onClick={handleCloseModal} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -278,31 +321,43 @@ export default function InventoryPage() {
                 />
               </div>
 
+              <div>
+                <label className="text-xs text-slate-300 block mb-1">القسم / التصنيف</label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="هواتف">هواتف / أجهزة</option>
+                  <option value="دراجات">دراجات</option>
+                  <option value="سيارات">سيارات</option>
+                  <option value="كهربائيات">كهربائيات</option>
+                  <option value="أخرى">أخرى</option>
+                </select>
+              </div>
+
+              {/* 🆕 حقلان منفصلان لسعر الشراء وسعر البيع */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">القسم / التصنيف</label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="هواتف">هواتف / أجهزة</option>
-                    <option value="دراجات">دراجات</option>
-                    <option value="سيارات">سيارات</option>
-                    <option value="كهربائيات">كهربائيات</option>
-                    <option value="أخرى">أخرى</option>
-                  </select>
+                  <label className="text-xs text-slate-300 block mb-1">سعر الشراء / التكلفة (USD)</label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={formData.costPrice}
+                    onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-amber-400 font-mono focus:outline-none focus:border-blue-500"
+                  />
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">السعر (USD)</label>
+                  <label className="text-xs text-slate-300 block mb-1">سعر البيع المطلوب (USD)</label>
                   <input
                     type="number"
                     required
                     placeholder="0"
                     value={formData.price}
                     onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-emerald-400 font-bold font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>

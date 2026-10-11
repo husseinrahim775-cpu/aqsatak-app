@@ -49,7 +49,7 @@ export default function SettingsPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   // حالات الإعدادات العامة
-  const [storeName, setStoreName] = useState("مكتب السلام");
+  const [storeName, setStoreName] = useState("");
   const [storePhone, setStorePhone] = useState("");
   const [storeAddress, setStoreAddress] = useState("");
   const [contractTerms, setContractTerms] = useState(
@@ -650,7 +650,7 @@ export default function SettingsPage() {
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
-                placeholder="مثال: مكتب السلام للتجارة والتقسيط"
+                placeholder="مثال: أقساطك  للتجارة والتقسيط"
                 className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
               />
             </div>

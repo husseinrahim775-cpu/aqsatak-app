@@ -8,12 +8,11 @@ import {
   deleteTreasuryTransaction,
   getUserPayments,
   getUserInstallments,
+  clearUserTreasuryData, // 🆕 استيراد دالة التصفير
   TreasuryTransaction 
 } from "@/services/firestore";
 import { 
   Vault, 
-  ArrowDownLeft, 
-  ArrowUpRight, 
   PlusCircle, 
   MinusCircle, 
   Loader2, 
@@ -23,15 +22,42 @@ import {
   TrendingDown, 
   Trash2, 
   X,
-  Building2,
   Receipt
 } from "lucide-react";
+
+// 🛠️ دالة مساعدة معالجة وحسب نوع التاريخ بأمان بدون أخطاء
+const parseDateString = (dateVal: any): string => {
+  if (!dateVal) return "";
+  try {
+    // 1. إذا كان التاريخ كائن Firebase Timestamp
+    if (typeof dateVal === "object" && typeof dateVal.toDate === "function") {
+      return dateVal.toDate().toISOString().slice(0, 10);
+    }
+    // 2. إذا كان كائن Date عادية
+    if (dateVal instanceof Date) {
+      return dateVal.toISOString().slice(0, 10);
+    }
+    // 3. إذا كان نصاً String أو رقم Number
+    const parsedDate = new Date(dateVal);
+    if (!isNaN(parsedDate.getTime())) {
+      return parsedDate.toISOString().slice(0, 10);
+    }
+    return String(dateVal).slice(0, 10);
+  } catch (e) {
+    return "";
+  }
+};
 
 export default function TreasuryPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TreasuryTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // 📅 حالات فلترة التاريخ
+  const [dateFilterType, setDateFilterType] = useState<"all" | "today" | "month" | "year" | "custom">("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   // حالات نافذة إضافة حركة إيداع / مصاريف يدوية
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -44,25 +70,37 @@ export default function TreasuryPage() {
     description: "",
   });
 
+  // معرف المالك الحقيقي (سواء كان المسجل مديراً أو موظفاً)
+  const getOwnerUid = useCallback(() => {
+    const activeSession = sessionStorage.getItem("active_session");
+    if (activeSession) {
+      try {
+        const parsed = JSON.parse(activeSession);
+        if (parsed.ownerUid) return parsed.ownerUid;
+      } catch (e) {}
+    }
+    return user?.uid || null;
+  }, [user]);
+
   // جلب حركات الخزينة مع ربط تلقائي للمقبوضات السابقة
   const fetchData = useCallback(async () => {
-    if (!user?.uid) return;
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return;
     try {
       setLoading(true);
       const [manualTx, payments, installments] = await Promise.all([
-        getUserTreasuryTransactions(user.uid),
-        getUserPayments(user.uid),
-        getUserInstallments(user.uid),
+        getUserTreasuryTransactions(ownerUid),
+        getUserPayments(ownerUid),
+        getUserInstallments(ownerUid),
       ]);
 
-      // دمج دفعات الأقساط والمقدمات التلقائية مع حركات الخزينة اليدوية
       const autoInflows: TreasuryTransaction[] = [];
 
       // 1. إضافة الدفعات المستلمة
       payments.forEach((p) => {
         autoInflows.push({
           id: `pay_${p.id}`,
-          userId: user.uid,
+          userId: ownerUid,
           type: "inflow",
           category: "installment_payment",
           amount: Number(p.amount) || 0,
@@ -76,7 +114,7 @@ export default function TreasuryPage() {
         if (inst.downPayment && inst.downPayment > 0) {
           autoInflows.push({
             id: `down_${inst.id}`,
-            userId: user.uid,
+            userId: ownerUid,
             type: "inflow",
             category: "down_payment",
             amount: Number(inst.downPayment) || 0,
@@ -87,9 +125,11 @@ export default function TreasuryPage() {
       });
 
       // دمج وتثبيت وترتيب جميع الحركات بالخزينة
-      const allTx = [...manualTx, ...autoInflows].sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
+      const allTx = [...manualTx, ...autoInflows].sort((a, b) => {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        return timeB - timeA;
+      });
 
       setTransactions(allTx);
     } catch (error) {
@@ -97,18 +137,51 @@ export default function TreasuryPage() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [getOwnerUid]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // 🎯 حساب ميزانية الخزينة والسيولة الحية
+  // 🎯 تصفية الحركات بناءً على البحث وتاريخ الفلتر المختار بأمان
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      // 1. تصفية البحث النصي
+      const matchesSearch =
+        (tx.description && tx.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (tx.category && tx.category.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      if (!matchesSearch) return false;
+
+      // 2. تصفية التواريخ باستخدام الدالة الآمنة
+      const txDateStr = parseDateString(tx.date);
+      const now = new Date();
+
+      if (dateFilterType === "today") {
+        const todayStr = now.toISOString().slice(0, 10);
+        return txDateStr === todayStr;
+      } else if (dateFilterType === "month") {
+        const monthStr = now.toISOString().slice(0, 7); // YYYY-MM
+        return txDateStr.startsWith(monthStr);
+      } else if (dateFilterType === "year") {
+        const yearStr = now.getFullYear().toString();
+        return txDateStr.startsWith(yearStr);
+      } else if (dateFilterType === "custom") {
+        if (startDate && txDateStr < startDate) return false;
+        if (endDate && txDateStr > endDate) return false;
+        return true;
+      }
+
+      return true; // في حالة "all"
+    });
+  }, [transactions, searchQuery, dateFilterType, startDate, endDate]);
+
+  // 🎯 حساب ميزانية الخزينة والسيولة الحية حسب النطاق الزمني المحدد
   const summary = useMemo(() => {
     let totalInflow = 0;
     let totalOutflow = 0;
 
-    transactions.forEach((tx) => {
+    filteredTransactions.forEach((tx) => {
       if (tx.type === "inflow") totalInflow += Number(tx.amount) || 0;
       else totalOutflow += Number(tx.amount) || 0;
     });
@@ -116,18 +189,9 @@ export default function TreasuryPage() {
     return {
       totalInflow,
       totalOutflow,
-      netBalance: totalInflow - totalOutflow, // الرصيد الصافي المباشر للسيولة
+      netBalance: totalInflow - totalOutflow,
     };
-  }, [transactions]);
-
-  // تصفية الحركات بناءً على البحث
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter(
-      (tx) =>
-        tx.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.category.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [transactions, searchQuery]);
+  }, [filteredTransactions]);
 
   // فتح نافذة الإضافة
   const handleOpenModal = (type: "inflow" | "outflow") => {
@@ -143,7 +207,8 @@ export default function TreasuryPage() {
   // حفظ الحركة النقدية
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.uid || !form.amount || Number(form.amount) <= 0) {
+    const ownerUid = getOwnerUid();
+    if (!ownerUid || !form.amount || Number(form.amount) <= 0) {
       alert("يرجى إدخال مبلغ صحيح.");
       return;
     }
@@ -151,7 +216,7 @@ export default function TreasuryPage() {
     try {
       setSubmitting(true);
       await addTreasuryTransaction({
-        userId: user.uid,
+        userId: ownerUid,
         type: modalType,
         category: form.category,
         amount: Number(form.amount),
@@ -167,6 +232,35 @@ export default function TreasuryPage() {
       alert("حدث خطأ أثناء معالجة العملية.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // 🗑️ دالة تصفية ومسح كافة حركات الصندوق والدفعات
+  const handleClearAllData = async () => {
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return;
+
+    const confirmFirst = window.confirm(
+      "تحذير هام: هل أنت متأكد من رغبتك بمسح كافة حركات الصندوق وسجلات الدفعات المالية لهذا الحساب؟"
+    );
+
+    if (confirmFirst) {
+      const confirmSecond = window.prompt(
+        'لتأكيد المسح النهائياً، يرجى كتابة كلمة "مسح" في الخانة التالية:'
+      );
+
+      if (confirmSecond === "مسح") {
+        try {
+          setLoading(true);
+          await clearUserTreasuryData(ownerUid);
+          await fetchData();
+          alert("تم مسح وتنظيف كافة حركات الخزينة والصندوق بنجاح!");
+        } catch (err) {
+          alert("حدث خطأ أثناء محاولة مسح البيانات.");
+        } finally {
+          setLoading(false);
+        }
+      }
     }
   };
 
@@ -223,7 +317,17 @@ export default function TreasuryPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* 🆕 زر تصفير الصندوق */}
+          <button
+            onClick={handleClearAllData}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 px-3 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 shadow-sm"
+            title="مسح وتنظيف كافة سجلات حركات الحساب"
+          >
+            <Trash2 className="w-4 h-4 text-rose-400" />
+            <span>تصفير الصندوق</span>
+          </button>
+
           <button
             onClick={() => handleOpenModal("inflow")}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-colors shadow-sm"
@@ -231,6 +335,7 @@ export default function TreasuryPage() {
             <PlusCircle className="w-4 h-4" />
             <span>إيداع سيولة (+)</span>
           </button>
+          
           <button
             onClick={() => handleOpenModal("outflow")}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-colors shadow-sm"
@@ -251,7 +356,7 @@ export default function TreasuryPage() {
             <p className={`text-2xl md:text-3xl font-black ${summary.netBalance >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600"}`}>
               {summary.netBalance.toLocaleString()} د.ع
             </p>
-            <p className="text-[10px] text-muted-foreground mt-1">الرصيد الفعلي المتوفر بالخزينة الآن</p>
+            <p className="text-[10px] text-muted-foreground mt-1">الرصيد المتوفر في الفترة المحددة</p>
           </div>
           <div className="p-3.5 bg-primary/10 text-primary rounded-2xl">
             <Vault className="w-7 h-7" />
@@ -288,16 +393,99 @@ export default function TreasuryPage() {
 
       </div>
 
-      {/* 3. مربع البحث كشف الحركة */}
-      <div className="relative">
-        <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="ابحث في سجل كشف الخزينة والمصاريف..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pr-10 pl-4 py-2.5 rounded-xl border border-border bg-card text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary outline-none transition-all"
-        />
+      {/* 3. شريط البحث والتصفية بالتاريخ */}
+      <div className="bg-card border border-border p-4 rounded-2xl shadow-sm space-y-3">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+          
+          {/* البحث النصي */}
+          <div className="relative w-full md:w-80">
+            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="ابحث في سجل كشف الخزينة والمصاريف..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pr-10 pl-4 py-2 rounded-xl border border-border bg-background text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary outline-none transition-all"
+            />
+          </div>
+
+          {/* أزرار اختيار نطاق التاريخ */}
+          <div className="flex items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border w-full md:w-auto overflow-x-auto">
+            <button
+              onClick={() => setDateFilterType("all")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
+                dateFilterType === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              الكل ({transactions.length})
+            </button>
+            <button
+              onClick={() => setDateFilterType("today")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
+                dateFilterType === "today" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              اليوم
+            </button>
+            <button
+              onClick={() => setDateFilterType("month")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
+                dateFilterType === "month" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              هذا الشهر
+            </button>
+            <button
+              onClick={() => setDateFilterType("year")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
+                dateFilterType === "year" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              هذه السنة
+            </button>
+            <button
+              onClick={() => setDateFilterType("custom")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 flex items-center gap-1 ${
+                dateFilterType === "custom" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>مخصص</span>
+            </button>
+          </div>
+        </div>
+
+        {/* مدخلات التواريخ في حال اختيار مخصص */}
+        {dateFilterType === "custom" && (
+          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border text-xs animate-in fade-in duration-200">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">من تاريخ:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-background border border-border rounded-lg px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">إلى تاريخ:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-background border border-border rounded-lg px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+            </div>
+            {(startDate || endDate) && (
+              <button
+                onClick={() => { setStartDate(""); setEndDate(""); }}
+                className="text-rose-500 hover:underline text-xs font-bold mr-auto"
+              >
+                مسح التواريخ
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 4. كشف حساب حركة الصندوق الخزينة */}
@@ -314,7 +502,7 @@ export default function TreasuryPage() {
 
         {filteredTransactions.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground text-xs font-bold">
-            لا توجد حركات نقدية مسجلة في الخزينة بعد.
+            لا توجد حركات نقدية مسجلة في هذا النطاق الزمني المحدد.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -333,13 +521,13 @@ export default function TreasuryPage() {
                   <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
                     
                     <td className="p-3.5 text-muted-foreground font-mono text-xs">
-                      {new Date(tx.date).toLocaleDateString("ar-IQ", {
+                      {tx.date ? new Date(tx.date).toLocaleDateString("ar-IQ", {
                         year: "numeric",
                         month: "numeric",
                         day: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
-                      })}
+                      }) : "---"}
                     </td>
 
                     <td className="p-3.5">

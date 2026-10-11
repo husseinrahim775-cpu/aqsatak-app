@@ -76,7 +76,8 @@ export interface InventoryItem {
   ownerUid?: string;          // ID الشركة الممالكة للمنتج
   title: string;          
   category: string;       
-  price: number;          
+  price: number;   
+  costPrice?: number;     // 👈 أضف هذا السطر هنا ليختفي الخط الأحمر فوراً       
   status: "available" | "sold";
   specs?: {
     chassisNumber?: string;
@@ -741,6 +742,37 @@ export const saveCompanySettings = async (ownerUid: string, settings: CompanySet
     return true;
   } catch (error) {
     console.error("خطأ في حفظ إعدادات الشركة:", error);
+    throw error;
+  }
+};
+
+// 🧹 دالة مسح كافة حركات الخزينة والدفعات الخاصة بالحساب الحالي
+export const clearUserTreasuryData = async (ownerUid: string) => {
+  try {
+    // 1. جلب وحذف حركات الخزينة اليدوية
+    const qTreasury = query(
+      collection(db, "treasury_transactions"),
+      where("userId", "==", ownerUid)
+    );
+    const treasurySnap = await getDocs(qTreasury);
+    const deleteTreasuryPromises = treasurySnap.docs.map((docSnap) =>
+      deleteDoc(doc(db, "treasury_transactions", docSnap.id))
+    );
+
+    // 2. جلب وحذف سجلات الدفعات المقبوضة
+    const qPayments = query(
+      collection(db, "payments"),
+      where("userId", "==", ownerUid)
+    );
+    const paymentsSnap = await getDocs(qPayments);
+    const deletePaymentsPromises = paymentsSnap.docs.map((docSnap) =>
+      deleteDoc(doc(db, "payments", docSnap.id))
+    );
+
+    await Promise.all([...deleteTreasuryPromises, ...deletePaymentsPromises]);
+    return true;
+  } catch (error) {
+    console.error("خطأ في مسح حركات الخزينة والدفعات:", error);
     throw error;
   }
 };
