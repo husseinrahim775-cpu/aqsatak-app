@@ -24,7 +24,10 @@ import {
   Trash2,
   Mail,
   Lock,
-  UserCheck
+  UserCheck,
+  CloudUpload,
+  CloudDownload,
+  Check
 } from "lucide-react";
 import { 
   getUserInstallments, 
@@ -47,6 +50,9 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const [saved, setSaved] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
+  const [uploadingToDrive, setUploadingToDrive] = useState(false);
+  const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
+  const [isDriveConnected, setIsDriveConnected] = useState(false);
 
   // حالات الإعدادات العامة
   const [storeName, setStoreName] = useState("");
@@ -100,7 +106,7 @@ export default function SettingsPage() {
     return user?.uid || null;
   };
 
-  // ⚡ تحميل البيانات مع التجاوز المباشر لأي تعليق شبكي
+  // ⚡ تحميل البيانات
   const fetchUsersAndSettings = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) {
@@ -110,11 +116,9 @@ export default function SettingsPage() {
 
     setLoadingUsers(true);
     try {
-      // 1. جلب قائمة الموظفين
       const list = await getSystemUsers(ownerUid);
       setUsersList(list || []);
 
-      // 2. جلب إعدادات الشركة
       const companyData = await getCompanySettings(ownerUid);
       if (companyData) {
         if (companyData.companyName) setStoreName(companyData.companyName);
@@ -123,7 +127,6 @@ export default function SettingsPage() {
         if (companyData.notes) setContractTerms(companyData.notes);
       }
 
-      // 3. جلب رمز الـ PIN الخاص بالحساب
       const userDocRef = doc(db, "users", ownerUid);
       const userDocSnap = await getDoc(userDocRef);
       if (userDocSnap.exists()) {
@@ -132,28 +135,203 @@ export default function SettingsPage() {
     } catch (err) {
       console.error("خطأ في جلب البيانات:", err);
     } finally {
-      setLoadingUsers(false); // 👈 ينتهي التحميل دائماً وبسرعة
+      setLoadingUsers(false);
+    }
+  };
+
+  // 📥 دالة معالجة واستعادة ملف بيانات JSON إلى Firestore بدون تكرار
+  const processBackupJSON = async (content: any) => {
+    if (!content.installments || !Array.isArray(content.installments)) {
+      throw new Error("ملف النسخة الاحتياطية غير صالح!");
+    }
+
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return;
+
+    // 1. استعادة الأقساط
+    for (const inst of content.installments) {
+      if (inst.id) {
+        const instRef = doc(db, "installments", inst.id);
+        await setDoc(instRef, { ...inst, userId: ownerUid, updatedAt: new Date().toISOString() }, { merge: true });
+      } else {
+        const { id, createdAt, ...cleanInst } = inst;
+        await addInstallmentRecord({ ...cleanInst, userId: ownerUid });
+      }
+    }
+
+    // 2. استعادة الدفعات
+    if (content.payments && Array.isArray(content.payments)) {
+      for (const pay of content.payments) {
+        if (pay.id) {
+          const payRef = doc(db, "payments", pay.id);
+          await setDoc(payRef, { ...pay, userId: ownerUid, updatedAt: new Date().toISOString() }, { merge: true });
+        } else {
+          const { id, createdAt, ...cleanPay } = pay;
+          await addPaymentRecord({ ...cleanPay, userId: ownerUid });
+        }
+      }
+    }
+
+    await fetchUsersAndSettings();
+  };
+
+  // ☁️ 🔄 جلب واستعادة أحدث نسخة من Google Drive تلقائياً
+  const handleDownloadFromGoogleDrive = async (tokenParam?: string, isSilent = false) => {
+    const token = tokenParam || localStorage.getItem("google_drive_access_token");
+    if (!token) return;
+
+    try {
+      if (!isSilent) setDownloadingFromDrive(true);
+
+      const searchRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files?q=name+contains+'aqsatk_backup_'&orderBy=createdTime+desc&pageSize=1",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!searchRes.ok) throw new Error("فشل البحث عن النسخ الاحتياطية.");
+
+      const searchData = await searchRes.json();
+      if (!searchData.files || searchData.files.length === 0) {
+        if (!isSilent) toast.info("لم يتم العثور على نسخ احتياطية سابقة على Google Drive.");
+        return;
+      }
+
+      const fileId = searchData.files[0].id;
+
+      const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!fileRes.ok) throw new Error("فشل قراءة الملف من Google Drive.");
+
+      const backupContent = await fileRes.json();
+      await processBackupJSON(backupContent);
+
+      toast.success("تم استرجاع واستعادة أحدث نسخة احتياطية من Google Drive بنجاح!");
+    } catch (error) {
+      console.error("خطأ في استعادة النسخة من Google Drive:", error);
+      if (!isSilent) toast.error("تعذر استرجاع النسخة الاحتياطية من Google Drive.");
+    } finally {
+      if (!isSilent) setDownloadingFromDrive(false);
+    }
+  };
+
+  // ☁️ ⬆️ رفع النسخة الاحتياطية إلى Google Drive
+  const handleUploadToGoogleDrive = async (isSilent = false) => {
+    const ownerUid = getOwnerUid();
+    const googleAccessToken = localStorage.getItem("google_drive_access_token");
+    if (!ownerUid || !googleAccessToken) return;
+
+    try {
+      if (!isSilent) setUploadingToDrive(true);
+
+      const [installments, payments] = await Promise.all([
+        getUserInstallments(ownerUid),
+        getUserPayments(ownerUid),
+      ]);
+
+      const backupData = {
+        exportDate: new Date().toISOString(),
+        userId: ownerUid,
+        installments,
+        payments,
+      };
+
+      const fileName = `aqsatk_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      const fileContent = JSON.stringify(backupData, null, 2);
+
+      const metadata = { name: fileName, mimeType: "application/json" };
+      const formData = new FormData();
+      formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      formData.append("file", new Blob([fileContent], { type: "application/json" }));
+
+      const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+        body: formData,
+      });
+
+      if (response.ok) {
+        localStorage.setItem("last_auto_drive_backup", new Date().toISOString());
+        if (!isSilent) toast.success("تم رفع النسخة الاحتياطية بنجاح إلى حساب Google Drive!");
+      } else if (response.status === 401) {
+        localStorage.removeItem("google_drive_access_token");
+        setIsDriveConnected(false);
+        if (!isSilent) toast.error("انتهت صلاحية الجلسة، يرجى إعادة الضغط على (ربط الحساب).");
+      }
+    } catch (error) {
+      console.error("خطأ في الرفع:", error);
+      if (!isSilent) toast.error("تعذر الرفع إلى Google Drive.");
+    } finally {
+      if (!isSilent) setUploadingToDrive(false);
     }
   };
 
   useEffect(() => {
-    const savedProfitRate = localStorage.getItem("app_default_profit_rate");
-    const savedAutoApi = localStorage.getItem("app_wa_use_api") === "true";
-    const savedInstance = localStorage.getItem("app_wa_instance_id");
-    const savedToken = localStorage.getItem("app_wa_token");
-    const savedTemplate = localStorage.getItem("app_whatsapp_template");
-    const savedTheme = localStorage.getItem("theme");
+    if (typeof window !== "undefined") {
+      // ⚡ 1. إذا كانت هذه النافذة منبثقة واستلمت الـ access_token من جوجل
+      if (window.location.hash && window.location.hash.includes("access_token=")) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const token = hashParams.get("access_token");
 
-    if (savedProfitRate) setDefaultProfitRate(Number(savedProfitRate));
-    setUseAutoApi(savedAutoApi);
-    if (savedInstance) setWaInstanceId(savedInstance);
-    if (savedToken) setWaToken(savedToken);
-    if (savedTemplate) setWhatsappTemplate(savedTemplate);
-    if (savedTheme === "dark" || document.documentElement.classList.contains("dark")) {
-      setIsDarkMode(true);
+        if (token) {
+          localStorage.setItem("google_drive_access_token", token);
+          // إرسال الرسالة للنافذة الرئيسية وإغلاق هذه النافذة فوراً
+          if (window.opener) {
+            window.opener.postMessage({ type: "GOOGLE_AUTH_SUCCESS", token }, "*");
+            window.close();
+            return;
+          }
+        }
+      }
+
+      // ⚡ 2. الاستماع للرسائل القادمة من النافذة المنبثقة في النافذة الرئيسية
+      const handleAuthMessage = async (event: MessageEvent) => {
+        if (event.data?.type === "GOOGLE_AUTH_SUCCESS") {
+          const token = event.data.token;
+          localStorage.setItem("google_drive_access_token", token);
+          setIsDriveConnected(true);
+          toast.success("تم تسجيل الدخول وربط Google Drive بنجاح!");
+          await handleDownloadFromGoogleDrive(token, false);
+        }
+      };
+
+      window.addEventListener("message", handleAuthMessage);
+
+      // ⚡ 3. فحص التوكن المحفوظ مسبقاً والتزامن الآلي
+      const savedToken = localStorage.getItem("google_drive_access_token");
+      if (savedToken) {
+        setIsDriveConnected(true);
+
+        const lastBackup = localStorage.getItem("last_auto_drive_backup");
+        const now = new Date().getTime();
+        if (!lastBackup || now - new Date(lastBackup).getTime() > 24 * 60 * 60 * 1000) {
+          handleUploadToGoogleDrive(true);
+        }
+      }
+
+      const savedProfitRate = localStorage.getItem("app_default_profit_rate");
+      const savedAutoApi = localStorage.getItem("app_wa_use_api") === "true";
+      const savedInstance = localStorage.getItem("app_wa_instance_id");
+      const savedTokenSetting = localStorage.getItem("app_wa_token");
+      const savedTemplate = localStorage.getItem("app_whatsapp_template");
+      const savedTheme = localStorage.getItem("theme");
+
+      if (savedProfitRate) setDefaultProfitRate(Number(savedProfitRate));
+      setUseAutoApi(savedAutoApi);
+      if (savedInstance) setWaInstanceId(savedInstance);
+      if (savedTokenSetting) setWaToken(savedTokenSetting);
+      if (savedTemplate) setWhatsappTemplate(savedTemplate);
+      if (savedTheme === "dark" || document.documentElement.classList.contains("dark")) {
+        setIsDarkMode(true);
+      }
+
+      fetchUsersAndSettings();
+
+      return () => {
+        window.removeEventListener("message", handleAuthMessage);
+      };
     }
-
-    fetchUsersAndSettings();
   }, [user]);
 
   const toggleTheme = () => {
@@ -349,42 +527,71 @@ export default function SettingsPage() {
         try {
           setLoadingAction(true);
           const content = JSON.parse(e.target?.result as string);
-
-          if (!content.installments || !Array.isArray(content.installments)) {
-            toast.error("ملف النسخة الاحتياطية غير صالح!");
-            return;
-          }
-
-          const ownerUid = getOwnerUid();
-          if (!ownerUid) return;
-
-          for (const inst of content.installments) {
-            const { id, createdAt, ...cleanInst } = inst;
-            await addInstallmentRecord({
-              ...cleanInst,
-              userId: ownerUid,
-            });
-          }
-
-          if (content.payments && Array.isArray(content.payments)) {
-            for (const pay of content.payments) {
-              const { id, createdAt, ...cleanPay } = pay;
-              await addPaymentRecord({
-                ...cleanPay,
-                userId: ownerUid,
-              });
-            }
-          }
-
-          toast.success("تمت استعادة البيانات بنجاح إلى حسابك!");
+          await processBackupJSON(content);
+          toast.success("تمت استعادة وتحديث البيانات بنجاح بدون تكرار!");
         } catch (err) {
           console.error(err);
           toast.error("خطأ في قراءة ملف النسخة الاحتياطية.");
         } finally {
           setLoadingAction(false);
+          event.target.value = "";
         }
       };
     }
+  };
+
+  // 🔑 دالة فتح نافذة ربط Google Drive
+  const handleConnectGoogleDrive = () => {
+    const CLIENT_ID = "42704920630-fh1e8kni3er2bhc6ejjj2kkhcgi01nvc.apps.googleusercontent.com"; 
+    const REDIRECT_URI = "https://aqsatak-app.vercel.app/settings";
+    const SCOPE = "https://www.googleapis.com/auth/drive.file";
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
+      REDIRECT_URI
+    )}&response_type=token&scope=${encodeURIComponent(SCOPE)}`;
+
+    const width = 500;
+    const height = 650;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const authWindow = window.open(
+      authUrl,
+      "GoogleDriveAuth",
+      `width=${width},height=${height},top=${top},left=${left}`
+    );
+
+    // ⚡ فحص عنوان النافذة كخط احتياطي أوتوماتيكي
+    const checkTokenInterval = setInterval(() => {
+      try {
+        if (!authWindow || authWindow.closed) {
+          clearInterval(checkTokenInterval);
+          return;
+        }
+
+        const currentUrl = authWindow.location.href;
+        if (currentUrl && currentUrl.includes("access_token=")) {
+          const hashString = currentUrl.split("#")[1];
+          if (hashString) {
+            const hashParams = new URLSearchParams(hashString);
+            const token = hashParams.get("access_token");
+
+            if (token) {
+              localStorage.setItem("google_drive_access_token", token);
+              setIsDriveConnected(true);
+              toast.success("تم تسجيل الدخول وربط Google Drive بنجاح!");
+
+              authWindow.close();
+              clearInterval(checkTokenInterval);
+
+              handleDownloadFromGoogleDrive(token, false);
+            }
+          }
+        }
+      } catch (e) {
+        // التجاهل عند تحويل Google بين النطاقات
+      }
+    }, 300);
   };
 
   return (
@@ -808,14 +1015,15 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 💾 7. النسخ الاحتياطي */}
+        {/* 💾 7. إدارة النسخ الاحتياطية و Google Drive */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Database className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">إدارة النسخ الاحتياطية</h2>
+            <h2 className="font-bold text-base md:text-lg">إدارة النسخ الاحتياطية والتخزين السحابي</h2>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+            {/* تصدير JSON محلي */}
             <button
               type="button"
               onClick={handleExportBackup}
@@ -823,20 +1031,92 @@ export default function SettingsPage() {
               className="p-4 bg-background border border-border rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-right flex flex-col justify-between space-y-2 md:space-y-3 group"
             >
               <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">تصدير نسخة احتياطية (JSON)</span>
+                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">تصدير نسخة (JSON)</span>
                 <Download className="w-5 h-5 text-primary opacity-80 group-hover:opacity-100 group-hover:-translate-y-1 transition-all" />
               </div>
               <p className="text-[10px] md:text-xs text-gray-500">حفظ كافة بيانات الأقساط والدفعات في ملف لضمان عدم ضياعها.</p>
             </button>
 
+            {/* استعادة بدون تكرار محلي */}
             <label className="p-4 bg-background border border-border rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-right flex flex-col justify-between space-y-2 md:space-y-3 cursor-pointer group">
               <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">استعادة نسخة احتياطية</span>
+                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">استعادة نسخة محليّة</span>
                 <Upload className="w-5 h-5 text-primary opacity-80 group-hover:opacity-100 group-hover:-translate-y-1 transition-all" />
               </div>
-              <p className="text-[10px] md:text-xs text-gray-500">استرجاع البيانات من ملف JSON سابق بكل سهولة.</p>
+              <p className="text-[10px] md:text-xs text-gray-500">استرجاع وتحديث البيانات من ملف .json محلي.</p>
               <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction} className="hidden" />
             </label>
+
+            {/* ☁️ رفع واستعادة سحابية آليّة من Google Drive */}
+            <div className="p-4 bg-background border border-blue-500/20 rounded-xl flex flex-col justify-between space-y-3">
+              <div className="flex items-center justify-between w-full">
+                <span className="font-bold text-sm text-blue-600 dark:text-blue-400">تخزين Google Drive الآلي</span>
+                <CloudUpload className="w-5 h-5 text-blue-500" />
+              </div>
+              <p className="text-[10px] md:text-xs text-gray-500">
+                مزامنة أوتوماتيكية يومية واستعادة فورية عند تسجيل الدخول.
+              </p>
+
+              <div className="flex flex-col gap-2 pt-1">
+                {/* زر ربط الحساب وتحديد الحالة تلقائياً */}
+                {isDriveConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem("google_drive_access_token");
+                      setIsDriveConnected(false);
+                      toast.info("تم إلغاء ربط Google Drive.");
+                    }}
+                    className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                    title="اضغط لإلغاء الربط"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>تم الربط بنجاح (مُتصل)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConnectGoogleDrive}
+                    className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    <Key className="w-3.5 h-3.5" />
+                    <span>ربط الحساب للتزامن الآلي</span>
+                  </button>
+                )}
+
+                <div className="flex items-center gap-2">
+                  {/* زر الرفع اليدوي */}
+                  <button
+                    type="button"
+                    onClick={() => handleUploadToGoogleDrive(false)}
+                    disabled={uploadingToDrive || loadingAction || !isDriveConnected}
+                    className="flex-1 py-1.5 px-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                  >
+                    {uploadingToDrive ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                    ) : (
+                      <CloudUpload className="w-3.5 h-3.5 text-blue-500" />
+                    )}
+                    <span>رفع الآن</span>
+                  </button>
+
+                  {/* زر الاستعادة من Drive */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
+                    disabled={downloadingFromDrive || loadingAction || !isDriveConnected}
+                    className="flex-1 py-1.5 px-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                  >
+                    {downloadingFromDrive ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                    ) : (
+                      <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    <span>استعادة من Drive</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
