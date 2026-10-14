@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../services/firebase";
-import { useRouter } from "next/navigation";
 import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight } from "lucide-react";
 import { SystemUser } from "../../services/firestore";
 
@@ -27,7 +26,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [error, setError] = useState("");
-  const router = useRouter();
 
   // جلب بيانات الشركة وضمان وجود رمز PIN للأدمن
   const loadCompanyData = async (ownerUid: string) => {
@@ -116,7 +114,7 @@ export default function LoginPage() {
           createdAt: serverTimestamp(),
         });
 
-        router.push("/pending");
+        window.location.href = "/pending";
       } else {
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, companyPassword);
         const user = userCredential.user;
@@ -168,8 +166,12 @@ export default function LoginPage() {
         return;
       }
 
-      sessionStorage.setItem("active_session", JSON.stringify({ role: "admin", name: "مدير النظام" }));
-      router.push("/dashboard");
+      const sessionData = JSON.stringify({ role: "admin", name: "مدير النظام" });
+      sessionStorage.setItem("active_session", sessionData);
+      localStorage.setItem("active_session", sessionData);
+
+      // التوجيه المباشر المضمن مع Electron Static Export
+      window.location.href = "/dashboard";
       return;
     }
 
@@ -186,7 +188,9 @@ export default function LoginPage() {
       return;
     }
 
-    sessionStorage.setItem("active_session", JSON.stringify(matchedEmp));
+    const empData = JSON.stringify(matchedEmp);
+    sessionStorage.setItem("active_session", empData);
+    localStorage.setItem("active_session", empData);
 
     const perms = matchedEmp.permissions || {};
     let targetRoute = "/customers";
@@ -196,12 +200,13 @@ export default function LoginPage() {
     else if (perms.canManageCustomers) targetRoute = "/customers";
     else if (perms.canViewTreasury) targetRoute = "/treasury";
 
-    router.push(targetRoute);
+    window.location.href = targetRoute;
   };
 
   const handleSwitchCompany = async () => {
     await signOut(auth);
     sessionStorage.removeItem("active_session");
+    localStorage.removeItem("active_session");
     localStorage.removeItem("current_employee");
     setIsCompanyAuthenticated(false);
     setSelectedEmpId("admin_owner");

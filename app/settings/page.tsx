@@ -41,12 +41,12 @@ import {
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../../services/firebase";
+import { toast } from "sonner";
 
 export default function SettingsPage() {
   const { user } = useAuth();
   const [saved, setSaved] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   // حالات الإعدادات العامة
   const [storeName, setStoreName] = useState("");
@@ -89,7 +89,6 @@ export default function SettingsPage() {
     canDeleteOrEdit: false,
   });
 
-  // معرف المالك الحقيقي (سواء كان المسجل أدمن أو موظفاً)
   const getOwnerUid = () => {
     const activeSession = sessionStorage.getItem("active_session");
     if (activeSession) {
@@ -101,37 +100,42 @@ export default function SettingsPage() {
     return user?.uid || null;
   };
 
-  // جلب قائمة الموظفين وإعدادات الشركة المسجلة
+  // ⚡ تحميل البيانات مع التجاوز المباشر لأي تعليق شبكي
   const fetchUsersAndSettings = async () => {
     const ownerUid = getOwnerUid();
-    if (ownerUid) {
-      setLoadingUsers(true);
-      const list = await getSystemUsers(ownerUid);
-      setUsersList(list);
+    if (!ownerUid) {
       setLoadingUsers(false);
+      return;
+    }
 
-      // جلب إعدادات الشركة الخاصة بـ ownerUid من Firestore
-      try {
-        const companyData = await getCompanySettings(ownerUid);
-        if (companyData) {
-          if (companyData.companyName) setStoreName(companyData.companyName);
-          if (companyData.phone) setStorePhone(companyData.phone);
-          if (companyData.address) setStoreAddress(companyData.address);
-          if (companyData.notes) setContractTerms(companyData.notes);
-        }
+    setLoadingUsers(true);
+    try {
+      // 1. جلب قائمة الموظفين
+      const list = await getSystemUsers(ownerUid);
+      setUsersList(list || []);
 
-        const userDocRef = doc(db, "users", ownerUid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          setAdminPin(userDocSnap.data().adminPin || "1234");
-        }
-      } catch (err) {
-        console.error("خطأ في جلب بيانات الشركة والمالك:", err);
+      // 2. جلب إعدادات الشركة
+      const companyData = await getCompanySettings(ownerUid);
+      if (companyData) {
+        if (companyData.companyName) setStoreName(companyData.companyName);
+        if (companyData.phone) setStorePhone(companyData.phone);
+        if (companyData.address) setStoreAddress(companyData.address);
+        if (companyData.notes) setContractTerms(companyData.notes);
       }
+
+      // 3. جلب رمز الـ PIN الخاص بالحساب
+      const userDocRef = doc(db, "users", ownerUid);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists()) {
+        setAdminPin(userDocSnap.data().adminPin || "1234");
+      }
+    } catch (err) {
+      console.error("خطأ في جلب البيانات:", err);
+    } finally {
+      setLoadingUsers(false); // 👈 ينتهي التحميل دائماً وبسرعة
     }
   };
 
-  // تحميل الإعدادات عند فتح الصفحة
   useEffect(() => {
     const savedProfitRate = localStorage.getItem("app_default_profit_rate");
     const savedAutoApi = localStorage.getItem("app_wa_use_api") === "true";
@@ -152,7 +156,6 @@ export default function SettingsPage() {
     fetchUsersAndSettings();
   }, [user]);
 
-  // دالة تبديل المظهر
   const toggleTheme = () => {
     const nextState = !isDarkMode;
     setIsDarkMode(nextState);
@@ -165,54 +168,45 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔒 إرسال رابط إعادة تعيين رمز الدخول إلى الجيميل
   const handleSendPasswordReset = async () => {
     if (!user?.email) {
-      alert("تعذر العثور على البريد الإلكتروني للحساب الحالي.");
+      toast.error("تعذر العثور على البريد الإلكتروني للحساب الحالي.");
       return;
     }
 
-    const confirmSend = window.confirm(
-      `هل ترغب بإرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني التالي:\n(${user.email})؟`
-    );
-
-    if (confirmSend) {
-      try {
-        setIsSendingReset(true);
-        const auth = getAuth();
-        await sendPasswordResetEmail(auth, user.email);
-        alert(`تم إرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني (${user.email}). يرجى فحص صندوق الوارد بريدك الإلكتروني.`);
-      } catch (error: any) {
-        console.error("خطأ في إرسال رابط التعيين:", error);
-        alert("حدث خطأ أثناء إرسال البريد الإلكتروني. يرجى التأكد من الاتصال بالإنترنت.");
-      } finally {
-        setIsSendingReset(false);
-      }
+    try {
+      setIsSendingReset(true);
+      const authInstance = getAuth();
+      await sendPasswordResetEmail(authInstance, user.email);
+      toast.success(`تم إرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني (${user.email}).`);
+    } catch (error: any) {
+      console.error("خطأ في إرسال رابط التعيين:", error);
+      toast.error("حدث خطأ أثناء إرسال البريد الإلكتروني.");
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
-  // 🔑 حفظ رمز PIN الخفي الخاص بمدير الشركة في Firestore
   const handleUpdateAdminPin = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
     if (!adminPin.trim()) {
-      alert("يرجى كتابة رمز PIN جديد أولاً.");
+      toast.error("يرجى كتابة رمز PIN جديد أولاً.");
       return;
     }
 
     try {
       setSavingPin(true);
       await setDoc(doc(db, "users", ownerUid), { adminPin: adminPin.trim() }, { merge: true });
-      alert("تم حفظ وتحديث رمز PIN الخاص بحساب المالك بنجاح!");
+      toast.success("تم حفظ وتحديث رمز PIN الخاص بحساب المالك بنجاح!");
     } catch (error) {
       console.error("خطأ في حفظ رمز PIN المالك:", error);
-      alert("حدث خطأ أثناء حفظ الرمز.");
+      toast.error("حدث خطأ أثناء حفظ الرمز.");
     } finally {
       setSavingPin(false);
     }
   };
 
-  // 🎯 إضافة الموظف باسم مستخدم عادي
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     const ownerUid = getOwnerUid();
@@ -222,7 +216,6 @@ export default function SettingsPage() {
       setSubmittingUser(true);
       const cleanUsername = empForm.username.trim().toLowerCase();
 
-      // حفظ بيانات الموظف مباشرة في Firestore
       await addSystemUser({
         ownerUid: ownerUid,
         name: empForm.name,
@@ -241,7 +234,7 @@ export default function SettingsPage() {
         createdAt: new Date().toISOString(),
       });
 
-      alert("تم إنشاء حساب الموظف بنجاح! يمكنه الآن استخدام اسم المستخدم والرمز للتسجيل.");
+      toast.success("تم إنشاء حساب الموظف بنجاح!");
       setEmpForm({
         name: "",
         username: "",
@@ -255,33 +248,34 @@ export default function SettingsPage() {
       await fetchUsersAndSettings();
     } catch (error: any) {
       console.error(error);
-      alert("حدث خطأ أثناء إضافة الموظف: " + (error.message || ""));
+      toast.error("حدث خطأ أثناء إضافة الموظف.");
     } finally {
       setSubmittingUser(false);
     }
   };
 
-  // حذف الموظف
   const handleDeleteEmp = async (id: string, name: string) => {
-    if (confirm(`هل أنت متأكد من حذف الموظف (${name}) وإلغاء صلاحية دخوله؟`)) {
+    try {
       await deleteSystemUser(id);
+      toast.success(`تم حذف الموظف (${name}) وإلغاء صلاحية دخوله.`);
       await fetchUsersAndSettings();
+    } catch (error) {
+      console.error("خطأ أثناء حذف الموظف:", error);
+      toast.error("حدث خطأ أثناء حذف الموظف.");
     }
   };
 
-  // حفظ الإعدادات العامة للشركة في Firestore
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const ownerUid = getOwnerUid();
     
     if (!ownerUid) {
-      alert("تعذر التعرف على حساب الشركة المسجل.");
+      toast.error("تعذر التعرف على حساب الشركة المسجل.");
       return;
     }
 
     setLoadingAction(true);
     try {
-      // 1. الحفظ الشامل في Firestore باسم الشركة الفريد
       await saveCompanySettings(ownerUid, {
         companyName: storeName,
         phone: storePhone,
@@ -289,7 +283,6 @@ export default function SettingsPage() {
         notes: contractTerms,
       });
 
-      // 2. تحديث التخزين المحلي كنسخة مؤقتة لسرعة العرض
       localStorage.setItem(`company_settings_${ownerUid}`, JSON.stringify({
         companyName: storeName,
         phone: storePhone,
@@ -304,16 +297,16 @@ export default function SettingsPage() {
       localStorage.setItem("app_whatsapp_template", whatsappTemplate);
 
       setSaved(true);
+      toast.success("تم حفظ وتحديث إعدادات الشركة بنجاح!");
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error("خطأ في حفظ الإعدادات:", err);
-      alert("حدث خطأ أثناء حفظ تفاصيل الشركة.");
+      toast.error("حدث خطأ أثناء حفظ تفاصيل الشركة.");
     } finally {
       setLoadingAction(false);
     }
   };
 
-  // تصدير واستعادة النسخ الاحتياطية
   const handleExportBackup = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
@@ -339,13 +332,12 @@ export default function SettingsPage() {
       downloadAnchor.click();
       downloadAnchor.remove();
 
-      setActionMessage("تم تحميل النسخة الاحتياطية بنجاح!");
+      toast.success("تم تصدير وتحميل النسخة الاحتياطية بنجاح!");
     } catch (error) {
       console.error(error);
-      setActionMessage("حدث خطأ أثناء تصدير البيانات.");
+      toast.error("حدث خطأ أثناء تصدير البيانات.");
     } finally {
       setLoadingAction(false);
-      setTimeout(() => setActionMessage(null), 4000);
     }
   };
 
@@ -359,7 +351,7 @@ export default function SettingsPage() {
           const content = JSON.parse(e.target?.result as string);
 
           if (!content.installments || !Array.isArray(content.installments)) {
-            alert("ملف النسخة الاحتياطية غير صالح!");
+            toast.error("ملف النسخة الاحتياطية غير صالح!");
             return;
           }
 
@@ -384,13 +376,12 @@ export default function SettingsPage() {
             }
           }
 
-          setActionMessage("تمت استعادة البيانات بنجاح إلى حسابك!");
+          toast.success("تمت استعادة البيانات بنجاح إلى حسابك!");
         } catch (err) {
           console.error(err);
-          alert("خطأ في قراءة ملف النسخة الاحتياطية.");
+          toast.error("خطأ في قراءة ملف النسخة الاحتياطية.");
         } finally {
           setLoadingAction(false);
-          setTimeout(() => setActionMessage(null), 4000);
         }
       };
     }
@@ -398,7 +389,6 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-12">
-      {/* الهيدر */}
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام وإدارة الموظفين</h1>
         <p className="text-gray-500 text-xs md:text-sm mt-1">
@@ -406,7 +396,6 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* تنبيهات النجاح */}
       {saved && (
         <div className="p-3 md:p-4 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 rounded-xl flex items-center gap-2 md:gap-3 text-xs md:text-sm font-bold animate-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
@@ -414,14 +403,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {actionMessage && (
-        <div className="p-3 md:p-4 bg-primary/10 border border-primary/20 text-primary rounded-xl flex items-center gap-2 md:gap-3 text-xs md:text-sm font-bold animate-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
-          <span>{actionMessage}</span>
-        </div>
-      )}
-
-      {/* 🔒 1. قسم حماية حساب الأدمن وتغيير الرمز عبر الجيميل وتعيين الـ PIN */}
+      {/* 🔒 1. أمان وحماية حساب الشركة والرمز السرّي */}
       <div className="bg-card border border-primary/30 rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
           <Key className="w-4 h-4 md:w-5 md:h-5" />
@@ -451,7 +433,6 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {/* 🔑 حقل تعيين رمز PIN السريع الخاص بالمالك */}
         <div className="pt-3 border-t border-border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/20 p-4 rounded-xl">
           <div>
             <p className="text-xs md:text-sm font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
@@ -480,7 +461,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* 👥 2. قسم إضافة وتحديد صلاحيات الموظفين */}
+      {/* 👥 2. إضافة وتحديد صلاحيات الموظفين */}
       <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
           <UserPlus className="w-4 h-4 md:w-5 md:h-5" />
@@ -593,7 +574,6 @@ export default function SettingsPage() {
           </button>
         </form>
 
-        {/* قائمة الموظفين النشطين */}
         <div className="pt-4 border-t border-border space-y-3">
           <h3 className="font-bold text-sm flex items-center gap-2">
             <Shield className="w-4 h-4 text-primary" />
@@ -650,7 +630,7 @@ export default function SettingsPage() {
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
-                placeholder="مثال: أقساطك  للتجارة والتقسيط"
+                placeholder="مثال: أقساطك للتجارة والتقسيط"
                 className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
               />
             </div>
@@ -860,7 +840,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* زر الحفظ النهائي */}
         <button
           type="submit"
           disabled={loadingAction}

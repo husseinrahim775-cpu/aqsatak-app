@@ -36,49 +36,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(auth);
     setUser(null);
     setUserData(null);
-    router.push("/login");
+    router.replace("/login");
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      // 1. إذا لم يكن متصلاً بالشركة إطلاقاً، توجيهه لصفحة اللوجن
+      // 1. إذا لم يكن متصلاً، التوجيه لصفحة اللوجن فوراً بدون تكرار
       if (!currentUser) {
         setUser(null);
         setUserData(null);
         sessionStorage.removeItem("active_session");
         setLoading(false);
         if (pathname !== "/login") {
-          router.push("/login");
+          router.replace("/login");
         }
         return;
       }
 
       setUser(currentUser);
 
-      // 2. 🚨 الشرط الأهم: الفحص إن كان قد اختار الموظف أو المدير من القائمة
+      // 2. الفحص إن كان قد اختار الموظف أو المدير من القائمة
       const activeSession = sessionStorage.getItem("active_session");
 
       if (!activeSession) {
-        // إذا لم يحدد الموظف أو المدير بعد، ابقه في صفحة اللوجن ولا تحوله أبداً للداشبورد!
         setUserData(null);
         setLoading(false);
         if (pathname !== "/login") {
-          router.push("/login");
+          router.replace("/login");
         }
         return;
       }
 
-      // 3. إذا اختار حسابه، يكتمل تسجيل دخوله للوحة التحكم وتحديد الصفحة المناسبة
+      // 3. معالجة بيانات الحساب والجلسة بدون تجميد الواجهة
       try {
         const empObj = JSON.parse(activeSession);
         
         if (empObj.role === "admin") {
-          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-          if (userDoc.exists()) {
-            setUserData({ ...userDoc.data(), role: "admin", status: "active" });
-          } else {
-            setUserData({ role: "admin", status: "active" });
-          }
+          setUserData({ role: "admin", status: "active" });
+          
+          // محاولة جلب مستند المستخدم بدون تعطيل التحميل أونلاين
+          getDoc(doc(db, "users", currentUser.uid))
+            .then((userDoc) => {
+              if (userDoc.exists()) {
+                setUserData((prev: any) => ({ ...prev, ...userDoc.data() }));
+              }
+            })
+            .catch((err) => console.warn("تنبيه جلب بيانات المسؤول:", err));
 
           if (pathname === "/login" || pathname === "/pending") {
             router.replace("/dashboard");
@@ -92,7 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
 
           if (pathname === "/login" || pathname === "/pending") {
-            // 🎯 توجيه الموظف الذكي لأول قسم يملك صلاحية دخوله بدلاً من التوجيه الإجباري للداشبورد
             const perms = empObj.permissions || {};
             let targetPath = "/dashboard";
 
@@ -105,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } else if (perms.canViewTreasury) {
               targetPath = "/treasury";
             } else {
-              targetPath = "/customers"; // صفحة افتراضية للعملاء
+              targetPath = "/customers";
             }
 
             router.replace(targetPath);
@@ -119,12 +121,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [pathname]);
+  }, [pathname, router]);
 
   if (loading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-background text-primary">
-        <Loader2 className="w-12 h-12 animate-spin" />
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
       </div>
     );
   }

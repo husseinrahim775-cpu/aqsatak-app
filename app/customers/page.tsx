@@ -13,6 +13,7 @@ import {
 } from "../../services/firestore";
 import Link from "next/link";
 import { Plus, Search, Eye, Edit, Trash2, X, Loader2, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { toast } from "sonner";
 
 interface GroupedCustomer {
   customerName: string;
@@ -140,9 +141,10 @@ export default function CustomersPage() {
       await Promise.all(updatePromises);
       await fetchData(); 
       setEditingCustomer(null); 
+      toast.success("تم حفظ تعديلات بيانات العميل بنجاح!");
     } catch (error) {
       console.error("خطأ في التعديل:", error);
-      alert("حدث خطأ أثناء حفظ التعديلات.");
+      toast.error("حدث خطأ أثناء حفظ التعديلات.");
     } finally {
       setIsSaving(false);
     }
@@ -179,33 +181,27 @@ export default function CustomersPage() {
       await fetchData(); 
       setIsFineModalOpen(false);
       setFineCustomer(null);
-      alert("تمت إضافة الغرامة وحفظ السجل بنجاح!");
+      toast.success("تمت إضافة الغرامة وحفظ السجل بنجاح!");
     } catch (error) {
       console.error("خطأ في إضافة الغرامة:", error);
-      alert("حدث خطأ أثناء إضافة الغرامة.");
+      toast.error("حدث خطأ أثناء إضافة الغرامة.");
     } finally {
       setIsSavingFine(false);
     }
   };
 
   const handleDeleteCustomer = async (customer: GroupedCustomer) => {
-    const confirmDelete = window.confirm(
-      `هل أنت متأكد من حذف العميل "${customer.customerName}" وجميع أقساطه (${customer.installments.length})؟\n\nتنبيه: ستتم إعادة أي منتجات مربوطة بهذه العقود إلى حالة "متوفر" بالمخزن تلقائياً!`
-    );
-
-    if (confirmDelete) {
-      try {
-        const deletePromises = customer.installments.map((inst) => 
-          deleteInstallment(inst.id!)
-        );
-        
-        await Promise.all(deletePromises);
-        await fetchData(); 
-        alert("تم حذف العميل وإرجاع المواد للمخزن بنجاح!");
-      } catch (error) {
-        console.error("خطأ في الحذف:", error);
-        alert("حدث خطأ أثناء حذف العميل.");
-      }
+    try {
+      const deletePromises = customer.installments.map((inst) => 
+        deleteInstallment(inst.id!)
+      );
+      
+      await Promise.all(deletePromises);
+      await fetchData(); 
+      toast.success("تم حذف العميل وإرجاع المواد للمخزن بنجاح!");
+    } catch (error) {
+      console.error("خطأ في الحذف:", error);
+      toast.error("حدث خطأ أثناء حذف العميل.");
     }
   };
 

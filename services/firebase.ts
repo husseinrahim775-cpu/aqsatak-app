@@ -3,12 +3,13 @@ import {
   getFirestore, 
   initializeFirestore, 
   persistentLocalCache, 
-  persistentMultipleTabManager 
+  persistentMultipleTabManager,
+  CACHE_SIZE_UNLIMITED 
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage"; // 👈 استيراد مكتبة Storage
+import { getStorage } from "firebase/storage";
 
-// جلب المفاتيح من ملف .env.local
+// جلب المفاتيح من إعدادات Firebase الخاص بك
 const firebaseConfig = {
   apiKey: "AIzaSyC23GI1JxW_tc-7iCB3wNqGHaB_ePVY5fY",
   authDomain: "aqsatak-team.firebaseapp.com",
@@ -19,19 +20,28 @@ const firebaseConfig = {
   measurementId: "G-SQJ0VB9399"
 };
 
-// تهيئة Firebase (التأكد من عدم تهيئته أكثر من مرة في Next.js)
+// تهيئة تطبيق Firebase الأساسي
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// تفعيل التخزين المؤقت لدعم العمل بدون إنترنت وسرعة جلب البيانات
-export const db = typeof window !== "undefined"
-  ? initializeFirestore(app, {
+// تفعيل الكاش والتخزين المحلي غير المحدود لسرعة استجابة فائقة
+let firestoreDb;
+
+if (typeof window !== "undefined") {
+  try {
+    firestoreDb = initializeFirestore(app, {
       localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager() // يدعم فتح أكثر من تبويب في المتصفح بنفس الوقت
+        tabManager: persistentMultipleTabManager(),
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED // 👈 يمنع حظر البيانات القديمة ويجعل العرض فورياً
       })
-    })
-  : getFirestore(app);
+    });
+  } catch (e) {
+    // في حال تم التهيئة مسبقاً يتم جلب النسخة القائمة مباشرة
+    firestoreDb = getFirestore(app);
+  }
+} else {
+  firestoreDb = getFirestore(app);
+}
 
+export const db = firestoreDb;
 export const auth = getAuth(app);
-
-// 👈 تصدير خدمة Storage لرفع الأوراق الثبوتية والصور
 export const storage = getStorage(app);

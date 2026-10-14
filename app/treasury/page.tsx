@@ -8,7 +8,7 @@ import {
   deleteTreasuryTransaction,
   getUserPayments,
   getUserInstallments,
-  clearUserTreasuryData, // 🆕 استيراد دالة التصفير
+  clearUserTreasuryData,
   TreasuryTransaction 
 } from "@/services/firestore";
 import { 
@@ -24,20 +24,18 @@ import {
   X,
   Receipt
 } from "lucide-react";
+import { toast } from "sonner";
 
 // 🛠️ دالة مساعدة معالجة وحسب نوع التاريخ بأمان بدون أخطاء
 const parseDateString = (dateVal: any): string => {
   if (!dateVal) return "";
   try {
-    // 1. إذا كان التاريخ كائن Firebase Timestamp
     if (typeof dateVal === "object" && typeof dateVal.toDate === "function") {
       return dateVal.toDate().toISOString().slice(0, 10);
     }
-    // 2. إذا كان كائن Date عادية
     if (dateVal instanceof Date) {
       return dateVal.toISOString().slice(0, 10);
     }
-    // 3. إذا كان نصاً String أو رقم Number
     const parsedDate = new Date(dateVal);
     if (!isNaN(parsedDate.getTime())) {
       return parsedDate.toISOString().slice(0, 10);
@@ -70,7 +68,6 @@ export default function TreasuryPage() {
     description: "",
   });
 
-  // معرف المالك الحقيقي (سواء كان المسجل مديراً أو موظفاً)
   const getOwnerUid = useCallback(() => {
     const activeSession = sessionStorage.getItem("active_session");
     if (activeSession) {
@@ -82,22 +79,32 @@ export default function TreasuryPage() {
     return user?.uid || null;
   }, [user]);
 
-  // جلب حركات الخزينة مع ربط تلقائي للمقبوضات السابقة
+ // ⚡ جلب بيانات الخزينة السريع بدون تعليق الواجهة
   const fetchData = useCallback(async () => {
     const ownerUid = getOwnerUid();
-    if (!ownerUid) return;
+    if (!ownerUid) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     try {
-      setLoading(true);
-      const [manualTx, payments, installments] = await Promise.all([
-        getUserTreasuryTransactions(ownerUid),
-        getUserPayments(ownerUid),
-        getUserInstallments(ownerUid),
+      // 1. جلب حركات الخزينة اليدوية فوراً من الكاش
+      const manualTx = await getUserTreasuryTransactions(ownerUid).catch(() => []);
+      
+      // 🚀 إظهار البيانات وإغلاق التحميل فوراً في جزء من الثانية
+      setTransactions(manualTx || []);
+      setLoading(false);
+
+      // 2. جلب الدفعات والأقساط في الخلفية لتجميع المقبوضات التلقائية بدون إعاقة الشاشة
+      const [payments, installments] = await Promise.all([
+        getUserPayments(ownerUid).catch(() => []),
+        getUserInstallments(ownerUid).catch(() => []),
       ]);
 
       const autoInflows: TreasuryTransaction[] = [];
 
-      // 1. إضافة الدفعات المستلمة
-      payments.forEach((p) => {
+      (payments || []).forEach((p) => {
         autoInflows.push({
           id: `pay_${p.id}`,
           userId: ownerUid,
@@ -109,8 +116,7 @@ export default function TreasuryPage() {
         });
       });
 
-      // 2. إضافة الدفعات المقدمة من العقود
-      installments.forEach((inst) => {
+      (installments || []).forEach((inst) => {
         if (inst.downPayment && inst.downPayment > 0) {
           autoInflows.push({
             id: `down_${inst.id}`,
@@ -124,17 +130,16 @@ export default function TreasuryPage() {
         }
       });
 
-      // دمج وتثبيت وترتيب جميع الحركات بالخزينة
-      const allTx = [...manualTx, ...autoInflows].sort((a, b) => {
+      const allTx = [...(manualTx || []), ...autoInflows].sort((a, b) => {
         const timeA = a.date ? new Date(a.date).getTime() : 0;
         const timeB = b.date ? new Date(b.date).getTime() : 0;
         return timeB - timeA;
       });
 
+      // تحديث القائمة الشاملة فور اكتمالها
       setTransactions(allTx);
     } catch (error) {
       console.error("خطأ في جلب بيانات الخزينة:", error);
-    } finally {
       setLoading(false);
     }
   }, [getOwnerUid]);
@@ -142,18 +147,15 @@ export default function TreasuryPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // 🎯 تصفية الحركات بناءً على البحث وتاريخ الفلتر المختار بأمان
+  
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
-      // 1. تصفية البحث النصي
       const matchesSearch =
         (tx.description && tx.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (tx.category && tx.category.toLowerCase().includes(searchQuery.toLowerCase()));
 
       if (!matchesSearch) return false;
 
-      // 2. تصفية التواريخ باستخدام الدالة الآمنة
       const txDateStr = parseDateString(tx.date);
       const now = new Date();
 
@@ -161,7 +163,7 @@ export default function TreasuryPage() {
         const todayStr = now.toISOString().slice(0, 10);
         return txDateStr === todayStr;
       } else if (dateFilterType === "month") {
-        const monthStr = now.toISOString().slice(0, 7); // YYYY-MM
+        const monthStr = now.toISOString().slice(0, 7);
         return txDateStr.startsWith(monthStr);
       } else if (dateFilterType === "year") {
         const yearStr = now.getFullYear().toString();
@@ -172,11 +174,10 @@ export default function TreasuryPage() {
         return true;
       }
 
-      return true; // في حالة "all"
+      return true;
     });
   }, [transactions, searchQuery, dateFilterType, startDate, endDate]);
 
-  // 🎯 حساب ميزانية الخزينة والسيولة الحية حسب النطاق الزمني المحدد
   const summary = useMemo(() => {
     let totalInflow = 0;
     let totalOutflow = 0;
@@ -193,7 +194,6 @@ export default function TreasuryPage() {
     };
   }, [filteredTransactions]);
 
-  // فتح نافذة الإضافة
   const handleOpenModal = (type: "inflow" | "outflow") => {
     setModalType(type);
     setForm({
@@ -204,12 +204,11 @@ export default function TreasuryPage() {
     setIsModalOpen(true);
   };
 
-  // حفظ الحركة النقدية
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     const ownerUid = getOwnerUid();
     if (!ownerUid || !form.amount || Number(form.amount) <= 0) {
-      alert("يرجى إدخال مبلغ صحيح.");
+      toast.error("يرجى إدخال مبلغ صحيح.");
       return;
     }
 
@@ -224,61 +223,46 @@ export default function TreasuryPage() {
         date: new Date().toISOString(),
       });
 
-      await fetchData();
+      toast.success("تم تسجيل الحركة في الخزينة بنجاح!");
       setIsModalOpen(false);
-      alert("تم تسجيل الحركة في الخزينة بنجاح!");
+      await fetchData();
     } catch (error) {
       console.error("خطأ أثناء حفظ الحركة:", error);
-      alert("حدث خطأ أثناء معالجة العملية.");
+      toast.error("حدث خطأ أثناء معالجة العملية.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // 🗑️ دالة تصفية ومسح كافة حركات الصندوق والدفعات
   const handleClearAllData = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
 
-    const confirmFirst = window.confirm(
-      "تحذير هام: هل أنت متأكد من رغبتك بمسح كافة حركات الصندوق وسجلات الدفعات المالية لهذا الحساب؟"
-    );
-
-    if (confirmFirst) {
-      const confirmSecond = window.prompt(
-        'لتأكيد المسح النهائياً، يرجى كتابة كلمة "مسح" في الخانة التالية:'
-      );
-
-      if (confirmSecond === "مسح") {
-        try {
-          setLoading(true);
-          await clearUserTreasuryData(ownerUid);
-          await fetchData();
-          alert("تم مسح وتنظيف كافة حركات الخزينة والصندوق بنجاح!");
-        } catch (err) {
-          alert("حدث خطأ أثناء محاولة مسح البيانات.");
-        } finally {
-          setLoading(false);
-        }
-      }
+    try {
+      setLoading(true);
+      await clearUserTreasuryData(ownerUid);
+      toast.success("تم مسح وتنظيف كافة حركات الخزينة والصندوق بنجاح!");
+      await fetchData();
+    } catch (err) {
+      toast.error("حدث خطأ أثناء محاولة مسح البيانات.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  // حذف الحركة (للحركات اليدوية فقط)
   const handleDeleteTx = async (tx: TreasuryTransaction) => {
     if (tx.id?.startsWith("pay_") || tx.id?.startsWith("down_")) {
-      alert("تنبيه: لا يمكن حذف الدفعات التلقائية المربوطة بالأقساط من الخزينة مباشرة. يجب تعديلها أو حذفها من قسم الحسابات أو العميل.");
+      toast.error("لا يمكن حذف الدفعات التلقائية من الخزينة. يجب حذفها من قسم الحسابات.");
       return;
     }
 
-    if (window.confirm(`هل أنت متأكد من حذف هذه الحركة بقيمة (${tx.amount.toLocaleString()} د.ع)؟`)) {
-      try {
-        await deleteTreasuryTransaction(tx.id!);
-        await fetchData();
-      } catch (error) {
-        console.error("خطأ في الحذف:", error);
-        alert("تعذر حذف الحركة.");
-      }
+    try {
+      await deleteTreasuryTransaction(tx.id!);
+      toast.success("تم حذف الحركة المالية بنجاح.");
+      await fetchData();
+    } catch (error) {
+      console.error("خطأ في الحذف:", error);
+      toast.error("تعذر حذف الحركة.");
     }
   };
 
@@ -318,7 +302,6 @@ export default function TreasuryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          {/* 🆕 زر تصفير الصندوق */}
           <button
             onClick={handleClearAllData}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 px-3 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 shadow-sm"
@@ -348,8 +331,6 @@ export default function TreasuryPage() {
 
       {/* 2. البطاقات المالية الرئيسية للسيولة */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        
-        {/* رصيد الخزينة الصافي */}
         <div className="bg-card border border-primary/30 p-5 rounded-2xl shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-bold text-muted-foreground mb-1">صافي السيولة النقدية بالصندوق</p>
@@ -363,7 +344,6 @@ export default function TreasuryPage() {
           </div>
         </div>
 
-        {/* إجمالي الإيداعات والمقبوضات */}
         <div className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-bold text-muted-foreground mb-1">إجمالي المقبوضات والداخل</p>
@@ -377,7 +357,6 @@ export default function TreasuryPage() {
           </div>
         </div>
 
-        {/* إجمالي المصاريف والسحوبات */}
         <div className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-bold text-muted-foreground mb-1">إجمالي الخروج والمصاريف</p>
@@ -390,14 +369,11 @@ export default function TreasuryPage() {
             <TrendingDown className="w-7 h-7" />
           </div>
         </div>
-
       </div>
 
       {/* 3. شريط البحث والتصفية بالتاريخ */}
       <div className="bg-card border border-border p-4 rounded-2xl shadow-sm space-y-3">
         <div className="flex flex-col md:flex-row items-center justify-between gap-3">
-          
-          {/* البحث النصي */}
           <div className="relative w-full md:w-80">
             <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -409,7 +385,6 @@ export default function TreasuryPage() {
             />
           </div>
 
-          {/* أزرار اختيار نطاق التاريخ */}
           <div className="flex items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border w-full md:w-auto overflow-x-auto">
             <button
               onClick={() => setDateFilterType("all")}
@@ -455,7 +430,6 @@ export default function TreasuryPage() {
           </div>
         </div>
 
-        {/* مدخلات التواريخ في حال اختيار مخصص */}
         {dateFilterType === "custom" && (
           <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border text-xs animate-in fade-in duration-200">
             <div className="flex items-center gap-2">
@@ -519,7 +493,6 @@ export default function TreasuryPage() {
               <tbody className="divide-y divide-border">
                 {filteredTransactions.map((tx, idx) => (
                   <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
-                    
                     <td className="p-3.5 text-muted-foreground font-mono text-xs">
                       {tx.date ? new Date(tx.date).toLocaleDateString("ar-IQ", {
                         year: "numeric",
@@ -563,7 +536,6 @@ export default function TreasuryPage() {
                         <span className="text-[10px] text-muted-foreground italic">آلي من الأقساط</span>
                       )}
                     </td>
-
                   </tr>
                 ))}
               </tbody>
@@ -576,7 +548,6 @@ export default function TreasuryPage() {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 md:p-4 backdrop-blur-sm">
           <div className="bg-card rounded-2xl w-full max-w-md p-4 md:p-6 shadow-2xl border border-border animate-in zoom-in-95 duration-200">
-            
             <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
               <h2 className={`text-base md:text-lg font-bold flex items-center gap-2 ${
                 modalType === "inflow" ? "text-emerald-600" : "text-rose-600"
@@ -590,7 +561,6 @@ export default function TreasuryPage() {
             </div>
 
             <form onSubmit={handleSaveTransaction} className="space-y-4">
-              
               <div>
                 <label className="block text-xs font-bold text-muted-foreground mb-1">تصنيف الحركة</label>
                 <select
@@ -655,9 +625,7 @@ export default function TreasuryPage() {
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>تأكيد الحفظ</span>}
                 </button>
               </div>
-
             </form>
-
           </div>
         </div>
       )}

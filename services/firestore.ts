@@ -10,7 +10,8 @@ import {
   orderBy, 
   serverTimestamp,
   updateDoc,
-  deleteDoc 
+  deleteDoc,
+  getDocsFromCache
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -30,11 +31,11 @@ export interface InstallmentData {
   productPrice: number;
   downPayment: number;
   profitMargin: number;
-  months: number; // يمثل عدد الدفعات (عدد الأيام / الأسابيع / الأشهر)
-  paymentPeriod?: "daily" | "weekly" | "monthly"; // (يومي / أسبوعي / شهري)
+  months: number; 
+  paymentPeriod?: "daily" | "weekly" | "monthly"; 
   totalDue: number;
   totalProfit: number;
-  monthlyInstallment: number; // المبلغ المطلوب في كل دفعة
+  monthlyInstallment: number; 
   startDate?: string;
   createdAt?: any;
   paidMonths?: string[];
@@ -73,11 +74,11 @@ export interface DebtData {
 
 export interface InventoryItem {
   id?: string;
-  ownerUid?: string;          // ID الشركة الممالكة للمنتج
+  ownerUid?: string;          
   title: string;          
   category: string;       
   price: number;   
-  costPrice?: number;     // 👈 أضف هذا السطر هنا ليختفي الخط الأحمر فوراً       
+  costPrice?: number;     
   status: "available" | "sold";
   specs?: {
     chassisNumber?: string;
@@ -90,6 +91,19 @@ export interface InventoryItem {
   contractId?: string;
   soldAt?: string;
 }
+
+// Helper لتسهيل القراءة السريعة من الـ Cache
+const fetchWithCacheFirst = async (q: any) => {
+  try {
+    const cacheSnap = await getDocsFromCache(q);
+    if (!cacheSnap.empty) {
+      return cacheSnap;
+    }
+  } catch (e) {
+    // الكاش غير متوفر، سنتوجه للشبكة
+  }
+  return await getDocs(q);
+};
 
 // ==========================================
 // ====== 0. دالة رفع الصور والمستندات ======
@@ -128,10 +142,10 @@ export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "c
 export const getUserInstallments = async (userId: string) => {
   try {
     const q = query(collection(db, "installments"), where("userId", "==", userId));
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await fetchWithCacheFirst(q);
     const installments: InstallmentData[] = [];
     
-    querySnapshot.forEach((docSnap) => {
+    querySnapshot.forEach((docSnap: any) => {
       installments.push({
         id: docSnap.id,
         ...docSnap.data(),
@@ -141,7 +155,7 @@ export const getUserInstallments = async (userId: string) => {
     return installments;
   } catch (error) {
     console.error("خطأ في جلب بيانات الأقساط:", error);
-    throw error;
+    return [];
   }
 };
 
@@ -175,14 +189,12 @@ export const updateInstallment = async (installmentId: string, updatedData: Part
 
 export const deleteInstallment = async (installmentId: string) => {
   try {
-    // 1. البحث في المخزن عن أي مادة مرتبطة بهذا العقد
     const q = query(
       collection(db, "inventory"), 
       where("contractId", "==", installmentId)
     );
     const querySnapshot = await getDocs(q);
 
-    // 2. إرجاع المواد المرتبطة إلى حالة "متوفر" وإلغاء بيانات البيع
     const resetPromises = querySnapshot.docs.map((docSnap) => {
       const itemRef = doc(db, "inventory", docSnap.id);
       return updateDoc(itemRef, {
@@ -196,7 +208,6 @@ export const deleteInstallment = async (installmentId: string) => {
 
     await Promise.all(resetPromises);
 
-    // 3. حذف القسط نفسه من قاعدة البيانات
     const docRef = doc(db, "installments", installmentId);
     await deleteDoc(docRef);
 
@@ -214,9 +225,9 @@ export const getInstallmentsByPhone = async (userId: string, phoneNumber: string
       where("userId", "==", userId),
       where("phoneNumber", "==", phoneNumber)
     );
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await fetchWithCacheFirst(q);
     const list: InstallmentData[] = [];
-    querySnapshot.forEach((doc) => {
+    querySnapshot.forEach((doc: any) => {
       list.push({ id: doc.id, ...doc.data() } as InstallmentData);
     });
     return list;
@@ -284,15 +295,15 @@ export const recordPayment = async (installmentId: string, userId: string, amoun
 export const getUserPayments = async (userId: string) => {
   try {
     const q = query(collection(db, "payments"), where("userId", "==", userId));
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await fetchWithCacheFirst(q);
     const payments: PaymentRecord[] = [];
-    querySnapshot.forEach((docSnap) => {
+    querySnapshot.forEach((docSnap: any) => {
       payments.push({ id: docSnap.id, ...docSnap.data() } as PaymentRecord);
     });
     return payments;
   } catch (error) {
     console.error("خطأ في جلب السجلات:", error);
-    throw error;
+    return [];
   }
 };
 
@@ -429,8 +440,8 @@ export const getUserDebts = async (userId: string) => {
       where("userId", "==", userId),
       orderBy("createdAt", "desc")
     );
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map((doc) => ({
+    const querySnapshot = await fetchWithCacheFirst(q);
+    return querySnapshot.docs.map((doc: any) => ({
       id: doc.id,
       ...doc.data(),
     })) as DebtData[];
@@ -474,14 +485,13 @@ export const addInventoryItem = async (item: Omit<InventoryItem, "id">) => {
 
   const docRef = await addDoc(collection(db, "inventory"), {
     ...item,
-    ownerUid: user.uid, // ربط المنتج بالشركة المسجلة
+    ownerUid: user.uid, 
     status: "available",
     createdAt: serverTimestamp(),
   });
   return docRef.id;
 };
 
-// ✏️ دالة تعديل مادة في المخزن
 export const updateInventoryItem = async (itemId: string, updatedData: Partial<InventoryItem>) => {
   try {
     const itemRef = doc(db, "inventory", itemId);
@@ -496,7 +506,6 @@ export const updateInventoryItem = async (itemId: string, updatedData: Partial<I
   }
 };
 
-// 🗑️ دالة حذف مادة من المخزن
 export const deleteInventoryItem = async (itemId: string) => {
   try {
     const itemRef = doc(db, "inventory", itemId);
@@ -517,8 +526,8 @@ export const getAvailableInventory = async (): Promise<InventoryItem[]> => {
     where("ownerUid", "==", user.uid),
     where("status", "==", "available")
   );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
+  const snapshot = await fetchWithCacheFirst(q);
+  return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as InventoryItem));
 };
 
 export const getSoldInventory = async (): Promise<InventoryItem[]> => {
@@ -530,8 +539,8 @@ export const getSoldInventory = async (): Promise<InventoryItem[]> => {
     where("ownerUid", "==", user.uid),
     where("status", "==", "sold")
   );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InventoryItem));
+  const snapshot = await fetchWithCacheFirst(q);
+  return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as InventoryItem));
 };
 
 export const bindProductToContract = async (
@@ -566,22 +575,22 @@ export const unbindProductFromContract = async (itemId: string) => {
     throw error;
   }
 };
+
 // ==========================================
-// 🏦 أنواع بيانات ودوال الخزينة والصندوق (Treasury)
+// 🏦 الخزينة والصندوق (Treasury)
 // ==========================================
 
 export interface TreasuryTransaction {
   id?: string;
   userId: string;
-  type: "inflow" | "outflow"; // inflow: دخل/إيداع | outflow: مصاريف/سحب
+  type: "inflow" | "outflow"; 
   category: "installment_payment" | "down_payment" | "capital_deposit" | "inventory_purchase" | "expense" | "withdrawal";
   amount: number;
   description: string;
-  date: string; // ISO String
-  relatedId?: string; // رقم القسط أو العميل المربوط (اختياري)
+  date: string; 
+  relatedId?: string; 
 }
 
-// 1. إضافة حركة جديدة للخزينة
 export const addTreasuryTransaction = async (transaction: Omit<TreasuryTransaction, "id">) => {
   try {
     const docRef = await addDoc(collection(db, "treasury_transactions"), {
@@ -595,19 +604,17 @@ export const addTreasuryTransaction = async (transaction: Omit<TreasuryTransacti
   }
 };
 
-// 2. جلب كافة حركات الخزينة للمستخدم
 export const getUserTreasuryTransactions = async (userId: string): Promise<TreasuryTransaction[]> => {
   try {
     const q = query(
       collection(db, "treasury_transactions"),
       where("userId", "==", userId)
     );
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await fetchWithCacheFirst(q);
     const list: TreasuryTransaction[] = [];
-    querySnapshot.forEach((doc) => {
+    querySnapshot.forEach((doc: any) => {
       list.push({ id: doc.id, ...doc.data() } as TreasuryTransaction);
     });
-    // ترتيب الحركات من الأحدث للأقدم
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   } catch (error) {
     console.error("خطأ في جلب حركات الخزينة:", error);
@@ -615,7 +622,6 @@ export const getUserTreasuryTransactions = async (userId: string): Promise<Treas
   }
 };
 
-// 3. حذف حركة من الخزينة
 export const deleteTreasuryTransaction = async (id: string) => {
   try {
     await deleteDoc(doc(db, "treasury_transactions", id));
@@ -626,31 +632,30 @@ export const deleteTreasuryTransaction = async (id: string) => {
 };
 
 // ==========================================
-// 👥 أنواع بيانات ودوال إدارة الموظفين والصلاحيات
+// 👥 الموظفين والصلاحيات
 // ==========================================
 
 export type UserRole = "admin" | "employee";
 
 export interface SystemUser {
   id?: string;
-  ownerUid: string; // UID المدير الأساسي مالك النظام
+  ownerUid: string; 
   name: string;
   email: string;
-  username?: string; // اسم المستخدم المباشر
-  password?: string; // للعرض في جدول الموظفين للمدير
+  username?: string; 
+  password?: string; 
   role: UserRole;
-  isApproved?: boolean; // الموافقة المباشرة للحساب
+  isApproved?: boolean; 
   permissions: {
     canViewDashboard: boolean;
-    canManageCustomers: boolean; // إضافة وتسديد عملاء
-    canViewTreasury: boolean;    // الاطلاع على الخزينة والصندوق
-    canManageStore: boolean;     // المخزن والمبيعات
-    canDeleteOrEdit: boolean;    // تعديل وحذف الأقساط
+    canManageCustomers: boolean; 
+    canViewTreasury: boolean;    
+    canManageStore: boolean;     
+    canDeleteOrEdit: boolean;    
   };
   createdAt: string;
 }
 
-// 1. إضافة موظف جديد
 export const addSystemUser = async (userObj: Omit<SystemUser, "id">) => {
   try {
     const docRef = await addDoc(collection(db, "system_users"), {
@@ -665,16 +670,15 @@ export const addSystemUser = async (userObj: Omit<SystemUser, "id">) => {
   }
 };
 
-// 2. جلب قائمة الموظفين التابعين للمدير
 export const getSystemUsers = async (ownerUid: string): Promise<SystemUser[]> => {
   try {
     const q = query(
       collection(db, "system_users"),
       where("ownerUid", "==", ownerUid)
     );
-    const snapshot = await getDocs(q);
+    const snapshot = await fetchWithCacheFirst(q);
     const list: SystemUser[] = [];
-    snapshot.forEach((docSnap) => {
+    snapshot.forEach((docSnap: any) => {
       list.push({ id: docSnap.id, ...docSnap.data() } as SystemUser);
     });
     return list;
@@ -684,7 +688,6 @@ export const getSystemUsers = async (ownerUid: string): Promise<SystemUser[]> =>
   }
 };
 
-// 3. حذف موظف
 export const deleteSystemUser = async (id: string) => {
   try {
     await deleteDoc(doc(db, "system_users", id));
@@ -693,6 +696,7 @@ export const deleteSystemUser = async (id: string) => {
     throw error;
   }
 };
+
 // ==========================================
 // ⚙️ إعدادات الطباعة ومعلومات الشركة
 // ==========================================
@@ -705,7 +709,6 @@ export interface CompanySettings {
   notes?: string;
 }
 
-// 1. جلب إعدادات الشركة الخاصة بـ ownerUid
 export const getCompanySettings = async (ownerUid: string): Promise<CompanySettings | null> => {
   try {
     const docRef = doc(db, "users", ownerUid);
@@ -727,7 +730,6 @@ export const getCompanySettings = async (ownerUid: string): Promise<CompanySetti
   }
 };
 
-// 2. حفظ / تحديث إعدادات الشركة الخاصة بـ ownerUid
 export const saveCompanySettings = async (ownerUid: string, settings: CompanySettings) => {
   try {
     const docRef = doc(db, "users", ownerUid);
@@ -746,10 +748,8 @@ export const saveCompanySettings = async (ownerUid: string, settings: CompanySet
   }
 };
 
-// 🧹 دالة مسح كافة حركات الخزينة والدفعات الخاصة بالحساب الحالي
 export const clearUserTreasuryData = async (ownerUid: string) => {
   try {
-    // 1. جلب وحذف حركات الخزينة اليدوية
     const qTreasury = query(
       collection(db, "treasury_transactions"),
       where("userId", "==", ownerUid)
@@ -759,7 +759,6 @@ export const clearUserTreasuryData = async (ownerUid: string) => {
       deleteDoc(doc(db, "treasury_transactions", docSnap.id))
     );
 
-    // 2. جلب وحذف سجلات الدفعات المقبوضة
     const qPayments = query(
       collection(db, "payments"),
       where("userId", "==", ownerUid)

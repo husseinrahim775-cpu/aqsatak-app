@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock, Package, Camera, FileText, Image as ImageIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { 
   addInstallmentRecord, 
   getUserInstallments, 
@@ -14,6 +13,7 @@ import {
   InventoryItem 
 } from "@/services/firestore";
 import { useAuth } from "../../../components/AuthProvider";
+import { toast } from "sonner";
 
 interface ExistingCustomer {
   customerName: string;
@@ -24,7 +24,6 @@ interface ExistingCustomer {
 }
 
 export default function NewInstallmentPage() {
-  const router = useRouter();
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingCustomers, setExistingCustomers] = useState<ExistingCustomer[]>([]);
@@ -51,7 +50,7 @@ export default function NewInstallmentPage() {
     if (user?.uid) {
       getUserInstallments(user.uid).then((list) => {
         const uniqueMap = new Map<string, ExistingCustomer>();
-        list.forEach((item) => {
+        (list || []).forEach((item) => {
           const key = item.phoneNumber?.trim() || item.customerName?.trim();
           if (key && !uniqueMap.has(key)) {
             uniqueMap.set(key, {
@@ -68,13 +67,6 @@ export default function NewInstallmentPage() {
     }
   }, [user]);
 
-  // التاريخ التلقائي لأول قسط (بعد شهر من اليوم)
-  const defaultStartDate = useMemo(() => {
-    const date = new Date();
-    date.setMonth(date.getMonth() + 1);
-    return date.toISOString().split("T")[0];
-  }, []);
-
   const [formData, setFormData] = useState({
     customerName: "",
     phoneNumber: "",
@@ -86,7 +78,7 @@ export default function NewInstallmentPage() {
     profitMargin: "50" as number | string,
     productPrice: "" as number | "",
     downPayment: "" as number | "",
-    paymentPeriod: "monthly" as "daily" | "weekly" | "monthly", // 👈 أسبوعي / شهري / يومي
+    paymentPeriod: "monthly" as "daily" | "weekly" | "monthly",
     months: "" as number | "",
     monthlyInstallment: "" as number | "",
     startDate: new Date().toISOString().split("T")[0],
@@ -240,27 +232,35 @@ export default function NewInstallmentPage() {
     setShowSuggestions(false);
   };
 
+  // ⚡ الحفظ الآمن والمستقر مع/بدون إنترنت
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!user?.uid) {
-      alert("لم يتم التعرف على حسابك، يرجى إعادة تسجيل الدخول.");
+      toast.error("لم يتم التعرف على حسابك، يرجى إعادة تسجيل الدخول.");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // 1. رفع الصور بالتوازي إن وجدت لتوفير الوقت
-      const uploadPromises = [
-        idCardFile ? uploadCustomerDocument(idCardFile, "id_cards") : Promise.resolve(""),
-        contractFile ? uploadCustomerDocument(contractFile, "contracts") : Promise.resolve(""),
-        personalPhotoFile ? uploadCustomerDocument(personalPhotoFile, "photos") : Promise.resolve(""),
-      ];
+      let idCardUrl = "";
+      let contractUrl = "";
+      let personalPhotoUrl = "";
 
-      const [idCardUrl, contractUrl, personalPhotoUrl] = await Promise.all(uploadPromises);
+      // 🌐 فحص الاتصال بالإنترنت قبل البدء برفع الصور
+      if (navigator.onLine) {
+        const uploadPromises = [
+          idCardFile ? uploadCustomerDocument(idCardFile, "id_cards") : Promise.resolve(""),
+          contractFile ? uploadCustomerDocument(contractFile, "contracts") : Promise.resolve(""),
+          personalPhotoFile ? uploadCustomerDocument(personalPhotoFile, "photos") : Promise.resolve(""),
+        ];
+        [idCardUrl, contractUrl, personalPhotoUrl] = await Promise.all(uploadPromises);
+      } else {
+        toast.info("أنت تعمل بدون إنترنت حالياً، سيتم حفظ العقد بدون رفع الصور.");
+      }
 
-      // 2. إعداد البيانات مع المستندات ونوع فترة التسديد
+      // إعداد بيانات القسط والعقد
       const payload: Omit<InstallmentData, "id" | "createdAt"> = {
         userId: user.uid,
         customerName: formData.customerName,
@@ -297,20 +297,19 @@ export default function NewInstallmentPage() {
           );
         }
 
-        alert("تم حفظ بيانات العميل والقسط وربط المادة بالمخزن بنجاح!");
-        router.push("/customers");
+        toast.success("تم حفظ بيانات العميل والقسط بنجاح!");
+        window.location.href = "/customers";
       } else {
-        alert("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
+        toast.error("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
       }
     } catch (error) {
       console.error("خطأ أثناء الرفع والحفظ:", error);
-      alert("حدث خطأ في رفع الصور أو حفظ البيانات.");
+      toast.error("حدث خطأ أثناء حفظ البيانات.");
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(false); // 👈 ينتهي التحميل ولا يظل معلقاً
     }
   };
 
-  // مسمى الفترة المباشر لاستخدامه في الشاشة
   const periodLabel = formData.paymentPeriod === "daily" ? "يومي" : formData.paymentPeriod === "weekly" ? "أسبوعي" : "شهري";
   const periodUnitLabel = formData.paymentPeriod === "daily" ? "يوم" : formData.paymentPeriod === "weekly" ? "أسبوع" : "شهر";
 
@@ -476,7 +475,7 @@ export default function NewInstallmentPage() {
                 {contractFile && <p className="text-[10px] text-gray-400 truncate">{contractFile.name}</p>}
               </div>
 
-              {/* 3. صورة العميل الشحصية */}
+              {/* 3. صورة العميل الشخصية */}
               <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
                 <User className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
@@ -708,7 +707,7 @@ export default function NewInstallmentPage() {
             className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-4 rounded-xl hover:bg-primary/90 transition-all shadow-md font-bold text-lg disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
-            <span>{isSubmitting ? "جاري رفع الصور والحفظ..." : "حفظ القسط وإنشاء سجل"}</span>
+            <span>{isSubmitting ? "جاري الحفظ..." : "حفظ القسط وإنشاء سجل"}</span>
           </button>
         </div>
       </form>

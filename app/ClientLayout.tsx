@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { onSnapshot, doc } from "firebase/firestore";
-import { auth, db } from "../services/firebase"; // تأكد من صحة مسار firebase لديك
+import { auth, db } from "../services/firebase";
 import { signOut } from "firebase/auth";
 import { 
   LayoutDashboard, 
@@ -30,51 +30,54 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
+  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك (مع مراعاة العمل أوفلاين)
   useEffect(() => {
     if (!user || isLoginPage) return;
 
-    // استماع حي لمستند المستخدم في Firestore
-    const userDocRef = doc(db, "users", user.uid);
-    const unsubscribeDoc = onSnapshot(userDocRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const now = new Date();
-        
-        // تحويل تاريخ الانتهاء سواء كان Timestamp أو Date
-        const expiryDate = data.expiresAt?.toDate 
-          ? data.expiresAt.toDate() 
-          : (data.expiresAt ? new Date(data.expiresAt) : null);
+    let unsubscribeDoc = () => {};
 
-        const status = data.status; // حالة الحساب
+    try {
+      const userDocRef = doc(db, "users", user.uid);
+      unsubscribeDoc = onSnapshot(userDocRef, { includeMetadataChanges: true }, async (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const now = new Date();
+          
+          const expiryDate = data.expiresAt?.toDate 
+            ? data.expiresAt.toDate() 
+            : (data.expiresAt ? new Date(data.expiresAt) : null);
 
-        // 🛡️ 1. إذا كان الحساب موقوفاً أو مرفوضاً أو انتهى اشتراكه
-        if (status === "suspended" || status === "rejected" || (expiryDate && now > expiryDate)) {
-          let message = "تم إيقاف حسابك. يرجى التواصل مع الإدارة للتجديد.";
-          if (expiryDate && now > expiryDate) message = "انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الاستمرار.";
-          if (status === "rejected") message = "تم رفض طلب انضمامك للنظام.";
+          const status = data.status;
 
-          alert(message);
-          if (logout) await logout();
-          await signOut(auth);
-          router.push("/login");
-        } 
-        // ⏳ 2. إذا لم تكن الحالة "active" (مثلاً pending أو غير معرفة) وكان يحاول التصفح
-        else if (status !== "active" && !isPendingPage) {
-          router.push("/pending");
+          if (status === "suspended" || status === "rejected" || (expiryDate && now > expiryDate)) {
+            let message = "تم إيقاف حسابك. يرجى التواصل مع الإدارة للتجديد.";
+            if (expiryDate && now > expiryDate) message = "انتهت مدة اشتراكك. يرجى تجديد الاشتراك للتمكن من الاستمرار.";
+            if (status === "rejected") message = "تم رفض طلب انضمامك للنظام.";
+
+            alert(message);
+            if (logout) await logout();
+            await signOut(auth);
+            router.replace("/login");
+          } 
+          else if (status !== "active" && !isPendingPage) {
+            router.replace("/pending");
+          }
+        } else {
+          // في حالة أوفلاين وعدم تنزيل المستند سابقاً لا نقوم بالتوجيه القسري لمنع التعليق
+          if (!isPendingPage && navigator.onLine) {
+            router.replace("/pending");
+          }
         }
-      } else {
-        // إذا كان المستخدم غير موجود أصلاً في قاعدة البيانات Firestore
-        if (!isPendingPage) {
-          router.push("/pending");
-        }
-      }
-    }, (error) => {
-      console.error("خطأ في المراقبة الحية للحساب:", error);
-    });
+      }, (error) => {
+        console.warn("تعذر الاتصال المباشر بـ Firebase (وضع الأوفلاين):", error);
+      });
+    } catch (e) {
+      console.warn("خطأ في تشغيل استماع Firestore:", e);
+    }
 
     return () => unsubscribeDoc();
   }, [user, pathname, router, logout, isLoginPage, isPendingPage]);
+
   // 2. التحكم في الوضع الليلي
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
@@ -120,7 +123,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       {/* 1. الشريط العلوي للموبايل */}
       <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-md border-b border-border p-4 shadow-sm sticky top-0 z-40">
         <div className="flex items-center gap-2 font-extrabold text-xl text-primary tracking-tight">
-          <img src="/logo.png" alt="أقساطك" className="w-7 h-7 rounded-lg object-cover" />
+          <img src="./logo.png" alt="أقساطك" className="w-7 h-7 rounded-lg object-cover" />
           <span>أقساطك</span>
         </div>
         <div className="flex items-center gap-2">

@@ -3,18 +3,24 @@
 import { MessageCircle, LogOut, Clock } from "lucide-react";
 import { auth } from "@/services/firebase";
 import { signOut } from "firebase/auth";
-import { useRouter } from "next/navigation";
 
 export default function ExpiredPage() {
-  const router = useRouter();
-
   // 🔴 ضع رقم الواتساب الخاص بك هنا (بدون + أو أصفار)
   const whatsappNumber = "9647700000000"; 
   const whatsappMessage = encodeURIComponent("مرحباً، أود تجديد اشتراكي في نظام أقساطك.");
 
   const handleLogout = async () => {
-    await signOut(auth);
-    router.push("/login");
+    try {
+      await signOut(auth);
+      window.location.href = "/login";
+    } catch (error) {
+      console.error("خطأ أثناء تسجيل الخروج:", error);
+    }
+  };
+
+  const handleRenewWhatsapp = () => {
+    const url = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`;
+    window.open(url, "_blank");
   };
 
   return (
@@ -32,15 +38,13 @@ export default function ExpiredPage() {
         </div>
 
         <div className="space-y-3 pt-2">
-          <a
-            href={`https://wa.me/${whatsappNumber}?text=${whatsappMessage}`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={handleRenewWhatsapp}
             className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all flex justify-center items-center gap-2 shadow-md"
           >
             <MessageCircle className="w-5 h-5" />
             تجديد الاشتراك عبر الواتساب
-          </a>
+          </button>
 
           <button
             onClick={handleLogout}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../components/AuthProvider";
 import { addDebt, getUserDebts, toggleDebtStatus, deleteDebt, DebtData } from "../../services/firestore";
 import { Plus, Search, CheckCircle, Circle, Trash2, X, Loader2, Wallet } from "lucide-react";
+import { toast } from "sonner";
 
 export default function DebtsPage() {
   const { user } = useAuth();
@@ -21,8 +22,13 @@ export default function DebtsPage() {
 
   const fetchDebts = async () => {
     if (user?.uid) {
-      const data = await getUserDebts(user.uid);
-      setDebts(data);
+      try {
+        const data = await getUserDebts(user.uid);
+        setDebts(data || []);
+      } catch (error) {
+        console.error("خطأ في جلب الديون:", error);
+        toast.error("حدث خطأ أثناء تحميل سجل الديون.");
+      }
     }
   };
 
@@ -32,7 +38,10 @@ export default function DebtsPage() {
 
   const handleAddDebt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.uid || !formData.customerName || !formData.amount) return;
+    if (!user?.uid || !formData.customerName || !formData.amount) {
+      toast.error("يرجى كتابة اسم العميل والمبلغ المطلوب.");
+      return;
+    }
 
     try {
       setIsSaving(true);
@@ -45,11 +54,13 @@ export default function DebtsPage() {
         isPaid: false,
       });
       
+      toast.success("تم تسجيل الدين الجديد بنجاح!");
       await fetchDebts();
       setIsModalOpen(false);
       setFormData({ customerName: "", phoneNumber: "", amount: "", reason: "" });
     } catch (error) {
-      alert("حدث خطأ أثناء إضافة الدين");
+      console.error("خطأ في إضافة الدين:", error);
+      toast.error("حدث خطأ أثناء إضافة الدين.");
     } finally {
       setIsSaving(false);
     }
@@ -58,20 +69,22 @@ export default function DebtsPage() {
   const handleToggleStatus = async (debt: DebtData) => {
     try {
       await toggleDebtStatus(debt.id!, debt.isPaid);
+      toast.success(debt.isPaid ? "تم تغيير الحالة إلى غير مسدد" : "تم تعيين الدين كمسدد بنجاح!");
       await fetchDebts();
     } catch (error) {
-      alert("حدث خطأ أثناء تحديث الحالة");
+      console.error("خطأ في تغيير حالة الدين:", error);
+      toast.error("حدث خطأ أثناء تحديث حالة الدين.");
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (window.confirm(`هل أنت متأكد من حذف دين العميل ${name}؟`)) {
-      try {
-        await deleteDebt(id);
-        await fetchDebts();
-      } catch (error) {
-        alert("حدث خطأ أثناء الحذف");
-      }
+    try {
+      await deleteDebt(id);
+      toast.success(`تم حذف دين العميل (${name}) بنجاح.`);
+      await fetchDebts();
+    } catch (error) {
+      console.error("خطأ أثناء حذف الدين:", error);
+      toast.error("حدث خطأ أثناء حذف الدين.");
     }
   };
 
@@ -153,6 +166,7 @@ export default function DebtsPage() {
               <button
                 onClick={() => handleDelete(debt.id!, debt.customerName)}
                 className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                title="حذف الدين"
               >
                 <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
               </button>

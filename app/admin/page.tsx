@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { db } from "@/services/firebase";
 import { collection, getDocs, doc, updateDoc, deleteDoc, query } from "firebase/firestore";
 import { CheckCircle2, XCircle, PauseCircle, PlayCircle, RefreshCw, UserCheck, ShieldAlert, Users, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 interface UserAccount {
   id: string;
@@ -39,6 +40,7 @@ export default function AdminDashboardPage() {
       setUsers(userList);
     } catch (error) {
       console.error("خطأ في جلب الحسابات:", error);
+      toast.error("حدث خطأ أثناء جلب قائمة الحسابات.");
     } finally {
       setLoading(false);
     }
@@ -61,9 +63,16 @@ export default function AdminDashboardPage() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, status: newStatus } : u))
       );
+
+      const statusLabels = {
+        active: "تفعيل",
+        disabled: "إيقاف",
+        rejected: "رفض"
+      };
+      toast.success(`تم ${statusLabels[newStatus]} الحساب بنجاح!`);
     } catch (error) {
       console.error("خطأ في تغيير حالة الحساب:", error);
-      alert("حدث خطأ أثناء تحديث حالة الحساب");
+      toast.error("حدث خطأ أثناء تحديث حالة الحساب.");
     } finally {
       setUpdatingId(null);
     }
@@ -71,10 +80,6 @@ export default function AdminDashboardPage() {
 
   // 🗑️ دالة حذف الحساب نهائياً من Firestore
   const handleDeleteUser = async (userId: string, userEmail: string) => {
-    const isConfirmed = window.confirm(`هل أنت متأكد من حذف حساب (${userEmail}) نهائياً؟\nلا يمكن التراجع عن هذا الإجراء.`);
-    
-    if (!isConfirmed) return;
-
     setUpdatingId(userId);
     try {
       const userRef = doc(db, "users", userId);
@@ -82,9 +87,10 @@ export default function AdminDashboardPage() {
 
       // تحديث الحالة محلياً وإزالته من القائمة
       setUsers((prev) => prev.filter((u) => u.id !== userId));
+      toast.success(`تم حذف حساب (${userEmail}) نهائياً من قاعدة البيانات.`);
     } catch (error) {
       console.error("خطأ في حذف الحساب:", error);
-      alert("حدث خطأ أثناء حذف الحساب، يرجى المحاولة لاحقاً.");
+      toast.error("حدث خطأ أثناء حذف الحساب، يرجى المحاولة لاحقاً.");
     } finally {
       setUpdatingId(null);
     }
@@ -264,7 +270,7 @@ export default function AdminDashboardPage() {
                             </button>
                           )}
 
-                          {/* 🗑️ زر الحذف النهائي (متاح لجميع الحالات) */}
+                          {/* 🗑️ زر الحذف النهائي */}
                           <button
                             disabled={isBusy}
                             onClick={() => handleDeleteUser(account.id, account.email)}

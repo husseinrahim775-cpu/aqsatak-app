@@ -13,6 +13,7 @@ import {
   addTreasuryTransaction,
   InventoryItem 
 } from "../../services/firestore";
+import { toast } from "sonner";
 
 export default function InventoryPage() {
   const { user } = useAuth();
@@ -27,7 +28,7 @@ export default function InventoryPage() {
   const [formData, setFormData] = useState({
     title: "",
     category: "هواتف",
-    costPrice: "", // 🆕 سعر الشراء
+    costPrice: "", // سعر الشراء
     price: "",     // سعر البيع
     chassisNumber: "",
     color: "",
@@ -54,6 +55,7 @@ export default function InventoryPage() {
       setItems(data || []);
     } catch (err) {
       console.error("خطأ في جلب بيانات المخزن:", err);
+      toast.error("حدث خطأ أثناء تحميل بيانات المخزن.");
     } finally {
       setLoading(false);
     }
@@ -89,7 +91,7 @@ export default function InventoryPage() {
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.price) {
-      alert("يرجى إدخال اسم المنتج وسعر البيع على الأقل");
+      toast.error("يرجى إدخال اسم المنتج وسعر البيع على الأقل");
       return;
     }
 
@@ -112,6 +114,7 @@ export default function InventoryPage() {
       if (editingItem && editingItem.id) {
         // تعديل منتج قائم
         await updateInventoryItem(editingItem.id, payload);
+        toast.success("تم تعديل بيانات المنتج بنجاح!");
       } else {
         // 1. إضافة منتج جديد للمخزن
         await addInventoryItem({
@@ -133,28 +136,28 @@ export default function InventoryPage() {
             });
           }
         }
+        toast.success("تمت إضافة المنتج للمخزن وتسجيل العملية بالخزينة بنجاح!");
       }
 
       handleCloseModal();
       loadData();
     } catch (error) {
       console.error("خطأ في حفظ المنتج والربط بالخزينة:", error);
-      alert("حدث خطأ أثناء حفظ التغيرات.");
+      toast.error("حدث خطأ أثناء حفظ التغيرات.");
     }
   };
 
-  // دالة الحذف
+  // دالة الحذف المباشرة
   const handleDeleteItem = async (item: InventoryItem) => {
     if (!item.id) return;
     
-    if (confirm(`هل أنت تأكد من رغبتك بحذف المنتج (${item.title}) نهائياً من المخزن؟`)) {
-      try {
-        await deleteInventoryItem(item.id);
-        loadData();
-      } catch (error) {
-        console.error("خطأ في حذف المنتج:", error);
-        alert("حدث خطأ أثناء محاولة حذف المنتج.");
-      }
+    try {
+      await deleteInventoryItem(item.id);
+      toast.success(`تم حذف المنتج (${item.title}) بنجاح من المخزن.`);
+      loadData();
+    } catch (error) {
+      console.error("خطأ في حذف المنتج:", error);
+      toast.error("حدث خطأ أثناء محاولة حذف المنتج.");
     }
   };
 
@@ -336,7 +339,7 @@ export default function InventoryPage() {
                 </select>
               </div>
 
-              {/* 🆕 حقلان منفصلان لسعر الشراء وسعر البيع */}
+              {/* حقلان منفصلان لسعر الشراء وسعر البيع */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-300 block mb-1">سعر الشراء / التكلفة (USD)</label>

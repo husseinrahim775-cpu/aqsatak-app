@@ -8,9 +8,8 @@ import {
   Loader2, MessageSquare, AlertTriangle, Activity, Target, Landmark, CalendarCheck, CalendarDays, CalendarRange
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
-import { getUserInstallments, getUserPayments, PaymentRecord, InstallmentData } from "@/services/firestore";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { auth } from "@/services/firebase";
+import { getUserInstallments, getUserPayments, PaymentRecord, InstallmentData } from "@/services/firestore";import Link from "next/link";
 
 interface UpcomingAlert {
   customerName: string;
@@ -26,28 +25,31 @@ type TimeRange = "today" | "week" | "month" | "all";
 export default function DashboardPage() {
   const { user, userData, loading: authLoading } = useAuth() as any;
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   // 🔒 حارس الحماية: منع الموظف الذي لا يملك صلاحية الداشبورد وتحويله لصفحته المتاحة فوراً
   useEffect(() => {
-    if (!authLoading && userData) {
-      const isEmployee = userData.role === "employee";
-      const canViewDashboard = userData.permissions?.canViewDashboard;
+    if (typeof window === "undefined") return;
+
+    // محاولة جلب بيانات الموظف محلياً في حال الأوفلاين
+    const localSessionStr = localStorage.getItem("active_session") || sessionStorage.getItem("active_session");
+    const activeUser = userData || (localSessionStr ? JSON.parse(localSessionStr) : null);
+
+    if (!authLoading && activeUser) {
+      const isEmployee = activeUser.role === "employee";
+      const canViewDashboard = activeUser.permissions?.canViewDashboard;
 
       if (isEmployee && !canViewDashboard) {
-        const perms = userData.permissions || {};
-        if (perms.canManageStore) {
-          router.replace("/inventory");
-        } else if (perms.canManageCustomers) {
-          router.replace("/customers");
-        } else if (perms.canViewTreasury) {
-          router.replace("/treasury");
-        } else {
-          router.replace("/customers");
-        }
+        const perms = activeUser.permissions || {};
+        let target = "/customers";
+
+        if (perms.canManageStore) target = "/inventory";
+        else if (perms.canManageCustomers) target = "/customers";
+        else if (perms.canViewTreasury) target = "/treasury";
+
+        window.location.href = target;
       }
     }
-  }, [userData, authLoading, router]);
+  }, [userData, authLoading]);
 
   // حالة فلتر الصندوق الزمني (اليوم / الأسبوع / الشهر / الكل)
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
@@ -76,14 +78,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function fetchDashboardData() {
-      if (!user?.uid) return;
+      const userId = user?.uid || auth?.currentUser?.uid;
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
 
         const [installments, payments] = await Promise.all([
-          getUserInstallments(user.uid),
-          getUserPayments(user.uid),
+          getUserInstallments(userId),
+          getUserPayments(userId),
         ]);
 
         setRawPayments(payments || []);
@@ -118,20 +124,15 @@ export default function DashboardPage() {
           const margin = Number(inst.profitMargin) || 0;
           const totalProfit = Number(inst.totalProfit) || 0;
 
-          // حساب مجموع ما دفعه العميل لهذا القسط بوضوح
-          const totalPaidForInst = payments
+          const totalPaidForInst = (payments || [])
             .filter((p) => p.installmentId === inst.id)
             .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-          // حساب الدين المتبقي الدقيق: إجمالي القسط - ما تم دفعه
           const calculatedRemainingDebt = Math.max(0, (Number(inst.totalDue) || 0));
 
           totalCollectedAllTime += totalPaidForInst;
           profitMarginSum += margin;
 
-          // ====================================================
-          // 🟢 حساب رأس المال والأرباح المتبقية
-          // ====================================================
           const remainingProfit = Math.min(totalProfit, calculatedRemainingDebt);
           const remainingCapital = Math.max(0, calculatedRemainingDebt - remainingProfit);
 
@@ -139,14 +140,10 @@ export default function DashboardPage() {
           remainingCapitalSum += remainingCapital;
           remainingProfitsSum += remainingProfit;
 
-          // الاحتفاظ بالعملاء الذين لديهم دين متبقي فقط
           if (calculatedRemainingDebt > 0 && inst.phoneNumber) {
             uniquePhones.add(inst.phoneNumber.trim());
           }
 
-          // ====================================================
-          // 🎯 تفصيل الوارد المتوقع (يستثني تلقائياً الحسابات المصفّرة)
-          // ====================================================
           if (calculatedRemainingDebt > 0) {
             const dueNow = Math.min(installmentAmount, calculatedRemainingDebt);
             if (inst.paymentPeriod === "daily") {
@@ -158,9 +155,6 @@ export default function DashboardPage() {
             }
           }
 
-          // ====================================================
-          // 🟢 حساب التنبيهات والأقساط المتأخرة (فقط للعقود غير المصفّرة)
-          // ====================================================
           if (!inst.startDate || calculatedRemainingDebt <= 0) return;
 
           const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
@@ -290,8 +284,8 @@ export default function DashboardPage() {
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
-  // شاشة التحميل أو حظر الموظف غير المصرح له
-  if (authLoading || loading || (userData?.role === "employee" && !userData?.permissions?.canViewDashboard)) {
+  // شاشة التحميل
+  if (loading) {
     return (
       <div className="h-[75vh] flex items-center justify-center text-primary">
         <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" />

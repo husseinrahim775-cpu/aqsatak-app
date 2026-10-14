@@ -27,6 +27,7 @@ import {
   Trash2,
   FileText
 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function AccountsPage() {
   const { user } = useAuth();
@@ -53,7 +54,7 @@ export default function AccountsPage() {
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [editPaymentAmount, setEditPaymentAmount] = useState<number | "">("");
 
-  const fetchData = useCallback(async () => {
+ const fetchData = useCallback(async () => {
     if (user?.uid) {
       try {
         setLoading(true);
@@ -61,10 +62,11 @@ export default function AccountsPage() {
           getUserPayments(user.uid),
           getUserInstallments(user.uid),
         ]);
-        setPayments(paymentsData);
-        setInstallments(installmentsData);
+        setPayments(paymentsData || []);
+        setInstallments(installmentsData || []);
       } catch (error) {
         console.error("خطأ في جلب البيانات المالية:", error);
+        toast.error("حدث خطأ أثناء تحميل الحسابات والمدفوعات.");
       } finally {
         setLoading(false);
       }
@@ -148,7 +150,7 @@ export default function AccountsPage() {
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.uid || !selectedInstallmentId || !paymentAmount) {
-      alert("يرجى اختيار العميل وتحديد المبلغ.");
+      toast.error("يرجى اختيار العميل وتحديد المبلغ.");
       return;
     }
 
@@ -168,12 +170,12 @@ export default function AccountsPage() {
         notes: paymentNotes || "",
       });
 
-      await fetchData();
-      alert("تم تسجيل الدفعة بنجاح!");
+      toast.success("تم تسجيل الدفعة بنجاح!");
       setIsModalOpen(false);
+      await fetchData();
     } catch (error) {
       console.error("خطأ أثناء تسجيل الدفعة:", error);
-      alert("حدث خطأ أثناء حفظ الدفعة، يرجى إعادة المحاولة.");
+      toast.error("حدث خطأ أثناء حفظ الدفعة، يرجى إعادة المحاولة.");
     } finally {
       setSubmitting(false);
     }
@@ -182,18 +184,13 @@ export default function AccountsPage() {
   const handleDeletePayment = async (p: PaymentRecord) => {
     if (!p.id || !p.installmentId) return;
     
-    const confirmDelete = window.confirm(
-      `هل أنت متأكد من حذف هذه الدفعة البالغة (${p.amount} د.ع)؟\nسيتم إرجاع هذا المبلغ إلى ذمة العميل والمتبقي للتقسيط.`
-    );
-    
-    if (confirmDelete) {
-      try {
-        await deletePaymentRecord(p.id, p.installmentId, p.amount);
-        await fetchData(); 
-      } catch (error) {
-        console.error("خطأ في الحذف:", error);
-        alert("حدث خطأ أثناء محاولة حذف الدفعة.");
-      }
+    try {
+      await deletePaymentRecord(p.id, p.installmentId, p.amount);
+      toast.success(`تم حذف الدفعة البالغة (${p.amount.toLocaleString()} د.ع) وإعادة إدراجها في الذمة.`);
+      await fetchData(); 
+    } catch (error) {
+      console.error("خطأ في الحذف:", error);
+      toast.error("حدث خطأ أثناء محاولة حذف الدفعة.");
     }
   };
 
@@ -219,12 +216,13 @@ export default function AccountsPage() {
         { amount: newAmount }
       );
 
-      await fetchData(); 
+      toast.success("تم تعديل الدفعة بنجاح!");
       setIsEditModalOpen(false);
       setEditingPayment(null);
+      await fetchData(); 
     } catch (error) {
       console.error("خطأ في التعديل:", error);
-      alert("حدث خطأ أثناء حفظ التعديلات.");
+      toast.error("حدث خطأ أثناء حفظ التعديلات.");
     } finally {
       setEditSubmitting(false);
     }
