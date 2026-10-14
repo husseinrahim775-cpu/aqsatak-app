@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { 
   getInstallmentsByPhone, 
   getInstallmentById, 
@@ -18,10 +18,23 @@ import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSq
 import Link from "next/link";
 import { ContractPrintTemplate, PaymentReceiptPrintTemplate } from "@/components/PrintTemplates";
 
-export default function CustomerDetailPage() {
-  const params = useParams();
+function CustomerDetailsContent() {
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const phoneOrId = decodeURIComponent(params.id as string);
+
+  const getParamId = () => {
+    const qId = searchParams.get("id");
+    if (qId) return qId;
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get("id") || "";
+    }
+    return "";
+  };
+
+  const rawParam = getParamId();
+  const phoneOrId = rawParam ? decodeURIComponent(rawParam) : "";
+
   const { user } = useAuth();
   
   const [installments, setInstallments] = useState<InstallmentData[]>([]);
@@ -29,11 +42,9 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
 
-  // --- حالات الطباعة ---
   const [printContractData, setPrintContractData] = useState<InstallmentData | null>(null);
   const [printPaymentData, setPrintPaymentData] = useState<PaymentRecord | null>(null);
 
-  // --- حالات تعديل القسط ---
   const [editingInstallment, setEditingInstallment] = useState<InstallmentData | null>(null);
   const [editForm, setEditForm] = useState({
     productName: "",
@@ -44,7 +55,6 @@ export default function CustomerDetailPage() {
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- حالات تعديل الدفعة/الغرامة ---
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({
     amount: 0,
@@ -53,7 +63,6 @@ export default function CustomerDetailPage() {
   });
   const [isSavingPayment, setIsSavingPayment] = useState(false);
 
-  // جلب البيانات
   const fetchData = useCallback(async () => {
     if (!phoneOrId || !user?.uid) return;
     try {
@@ -83,14 +92,12 @@ export default function CustomerDetailPage() {
     fetchData();
   }, [fetchData]);
 
-  // دالة إطلاق أمر الطباعة المباشرة
   const triggerPrint = () => {
     setTimeout(() => {
       window.print();
     }, 150);
   };
 
-  // --- دوال القسط (حذف وتعديل) ---
   const handleDeleteInstallment = async (id: string, productName: string) => {
     const confirmDelete = window.confirm(
       `هل أنت متأكد من حذف قسط "${productName}" بالكامل؟\n\nتنبيه: سيتم إرجاع السلعة المربوطة للمخزن تلقائياً.`
@@ -141,7 +148,6 @@ export default function CustomerDetailPage() {
     }
   };
 
-  // --- دوال الدفعة/الغرامة (حذف وتعديل) ---
   const handleDeletePayment = async (payment: PaymentRecord) => {
     const confirmDelete = window.confirm(
       `هل أنت متأكد من حذف هذه الدفعة بقيمة ${payment.amount} د.ع؟\nسيتم إرجاع المبلغ إلى ديون العميل وإلغاء حالة الدفع.`
@@ -191,7 +197,6 @@ export default function CustomerDetailPage() {
     }
   };
 
-  // 🎯 دالة التاريخ الرقمي YYYY-MM-DD المعدلة لتأخذ نوع القسط بعين الاعتبار (يومي/أسبوعي/شهري)
   const getDueDate = (startDateStr: string | undefined, index: number, period?: string) => {
     let date: Date;
 
@@ -290,7 +295,6 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12 relative">
-      {/* الهيدر */}
       <div className="flex items-center gap-4">
         <Link href="/customers" className="p-2 bg-card border border-border rounded-lg hover:bg-border/50 transition-colors">
           <ArrowRight className="w-5 h-5 text-foreground" />
@@ -303,7 +307,6 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* معلومات العميل والكفيل */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
@@ -344,7 +347,6 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* الأقساط والدفعات */}
       {installments.map((item, idx) => {
         const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
         const periodUnitName = item.paymentPeriod === "daily" ? "أيام" : item.paymentPeriod === "weekly" ? "أسابيع" : "أشهر";
@@ -368,7 +370,6 @@ export default function CustomerDetailPage() {
               </div>
               
               <div className="flex items-center gap-2">
-                {/* 🖨️ زر طباعة العقد */}
                 <button
                   type="button"
                   onClick={() => {
@@ -391,7 +392,6 @@ export default function CustomerDetailPage() {
               </div>
             </div>
 
-            {/* ملخص مالية القسط */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-4 rounded-xl text-sm border border-border">
               <div>
                 <p className="text-gray-500 text-xs">سعر المنتج</p>
@@ -411,7 +411,6 @@ export default function CustomerDetailPage() {
               </div>
             </div>
 
-            {/* جدول دفعات القسط */}
             <div className="border border-border rounded-xl overflow-hidden mt-4">
               <div className="p-4 bg-secondary/40 border-b border-border font-bold text-sm flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-primary" />
@@ -433,7 +432,6 @@ export default function CustomerDetailPage() {
                       const [year, month] = dueDateFormatted.split("-");
                       const targetMonthString = `${year}-${month}`;
                       
-                      // 🎯 فحص ديناميكي يدعم التواريخ الكاملة والأشهر في التسديد
                       const isPaid = currentInstPayments.some((p) => 
                         p.targetMonth === dueDateFormatted || p.targetMonth === targetMonthString
                       ) || item.paidMonths?.includes(dueDateFormatted) || item.paidMonths?.includes(targetMonthString);
@@ -487,7 +485,6 @@ export default function CustomerDetailPage() {
               </div>
             </div>
 
-            {/* سجل المقبوضات والغرامات */}
             <div className="border border-border rounded-xl overflow-hidden mt-6">
               <div className="p-4 bg-secondary/40 border-b border-border font-bold text-sm flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-primary" />
@@ -522,7 +519,6 @@ export default function CustomerDetailPage() {
                             </td>
                             <td className="p-3 text-center">
                               <div className="flex justify-center items-center gap-2">
-                                {/* 🖨️ زر طباعة الوصل */}
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -556,13 +552,11 @@ export default function CustomerDetailPage() {
         );
       })}
 
-      {/* 🖨️ منطقة الطباعة الخفية */}
       <div className="print-container">
         {printContractData && <ContractPrintTemplate installment={printContractData} />}
         {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}
       </div>
 
-      {/* نافذة تعديل القسط (Modal) */}
       {editingInstallment && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-card rounded-2xl w-full max-w-md p-6 shadow-xl border border-border animate-in zoom-in-95 duration-200">
@@ -645,7 +639,6 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
-      {/* نافذة تعديل الدفعة / الغرامة (Modal) */}
       {editingPayment && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-card rounded-2xl w-full max-w-md p-6 shadow-xl border border-border animate-in zoom-in-95 duration-200">
@@ -709,5 +702,17 @@ export default function CustomerDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CustomerDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="h-[80vh] flex items-center justify-center text-primary">
+        <Loader2 className="w-10 h-10 animate-spin" />
+      </div>
+    }>
+      <CustomerDetailsContent />
+    </Suspense>
   );
 }

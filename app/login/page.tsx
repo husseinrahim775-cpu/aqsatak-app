@@ -42,12 +42,10 @@ export default function LoginPage() {
         if (data.adminPin) {
           setCompanyAdminPin(String(data.adminPin));
         } else {
-          // إذا كان حساباً قديماً ولا يملك adminPin، نضع 1234 افتراضياً ونحدثه بـ Firestore
           await updateDoc(userDocRef, { adminPin: "1234" });
           setCompanyAdminPin("1234");
         }
       } else {
-        // في حال عدم وجود وثيقة مستخدم، أنشئ الوثيقة برموز افتراضية
         await setDoc(userDocRef, {
           email: auth.currentUser?.email || "",
           adminPin: "1234",
@@ -67,6 +65,17 @@ export default function LoginPage() {
       });
 
       setEmployees(list);
+
+      // 🎯 التعديل الجوهري: إذا كان الحساب جديداً أو بدون موظفين، ادخل مباشرة للوحة التحكم!
+      if (list.length === 0) {
+        const sessionData = JSON.stringify({ role: "admin", name: "مدير النظام" });
+        sessionStorage.setItem("active_session", sessionData);
+        localStorage.setItem("active_session", sessionData);
+        
+        window.location.href = "/dashboard";
+        return;
+      }
+
     } catch (err: any) {
       console.error("خطأ في جلب البيانات:", err);
       setError("حدث خطأ أثناء تحميل بيانات الشركة والموظفين.");
@@ -148,7 +157,7 @@ export default function LoginPage() {
     }
   };
 
-  // دخول المستخدم
+  // دخول المستخدم (في حال وجود موظفين)
   const handleEmployeeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -170,7 +179,6 @@ export default function LoginPage() {
       sessionStorage.setItem("active_session", sessionData);
       localStorage.setItem("active_session", sessionData);
 
-      // التوجيه المباشر المضمن مع Electron Static Export
       window.location.href = "/dashboard";
       return;
     }

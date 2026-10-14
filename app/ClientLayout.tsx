@@ -17,7 +17,12 @@ import {
   Moon, 
   Sun,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Vault,
+  Package,
+  BookOpen,
+  MoreHorizontal,
+  X
 } from "lucide-react";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -27,10 +32,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === "/login";
   const isPendingPage = pathname === "/pending";
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
+  // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك (مع مراعاة العمل أوفلاين)
+  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
   useEffect(() => {
     if (!user || isLoginPage) return;
 
@@ -63,7 +70,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             router.replace("/pending");
           }
         } else {
-          // في حالة أوفلاين وعدم تنزيل المستند سابقاً لا نقوم بالتوجيه القسري لمنع التعليق
           if (!isPendingPage && navigator.onLine) {
             router.replace("/pending");
           }
@@ -103,15 +109,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const navItems = [
+  // 📋 قائمة العناصر الرئيسية للشريط السفلي
+  const baseNavItems = [
     { name: "الرئيسية", href: "/dashboard", icon: LayoutDashboard },
     { name: "العملاء", href: "/customers", icon: Users },
     { name: "الحسابات", href: "/accounts", icon: Wallet },
+  ];
+
+  // 📋 قائمة العناصر الإضافية (تظهر داخل قائمة "المزيد")
+  const extraNavItems = [
+    { name: "الخزينة والصندوق", href: "/treasury", icon: Vault },
+    { name: "المخزن والمبيعات", href: "/inventory", icon: Package },
+    { name: "سجل الديون", href: "/debts", icon: BookOpen },
     { name: "الإعدادات", href: "/settings", icon: Settings },
   ];
 
-  if (user?.email === ADMIN_EMAIL) {
-    navItems.push({ name: "الإدارة", href: "/admin", icon: ShieldCheck });
+  // 🔒 إضافة قسم "الإدارة" فقط وحصرياً لمن يملك إيميل الأدمن
+  const isAdmin = user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  if (isAdmin) {
+    extraNavItems.push({ name: "لوحة الإدارة", href: "/admin", icon: ShieldCheck });
   }
 
   if (isLoginPage) {
@@ -155,10 +171,56 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
-      {/* 4. الشريط السفلي للموبايل */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-md border-t border-border shadow-lg z-50 px-2 pb-safe">
+      {/* 📱 4. النافذة المنبثقة لبقية الأقسام (عند الضغط على "المزيد" في الموبايل) */}
+      {showMoreMenu && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 md:hidden flex flex-col justify-end"
+          onClick={() => setShowMoreMenu(false)}
+        >
+          <div 
+            className="bg-card border-t border-border rounded-t-3xl p-5 space-y-4 animate-in slide-in-from-bottom duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-border pb-3">
+              <h3 className="font-bold text-foreground text-sm">بقية أقسام المنظومة</h3>
+              <button 
+                onClick={() => setShowMoreMenu(false)} 
+                className="p-1 rounded-full hover:bg-secondary text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              {extraNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setShowMoreMenu(false)}
+                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${
+                      isActive 
+                        ? "bg-primary/10 border-primary text-primary font-bold" 
+                        : "bg-secondary/40 border-border text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    <Icon className="w-5 h-5 shrink-0" />
+                    <span className="text-xs">{item.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. الشريط السفلي للموبايل */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-md border-t border-border shadow-lg z-40 px-2 pb-safe">
         <nav className="flex items-center justify-around py-2">
-          {navItems.map((item) => {
+          {/* العناصر الأساسية */}
+          {baseNavItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             
@@ -192,6 +254,39 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+
+          {/* زر "المزيد" لفتح النافذة المنبثقة لباقي الأقسام */}
+          <button
+            type="button"
+            onClick={() => setShowMoreMenu(!showMoreMenu)}
+            className="relative flex flex-col items-center justify-center w-14 h-14 transition-all duration-300"
+          >
+            <div 
+              className={`absolute top-1 w-9 h-9 rounded-xl transition-all duration-300 ${
+                extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
+                  ? 'bg-primary/10 backdrop-blur-sm border border-primary/20 scale-100 opacity-100 shadow-sm' 
+                  : 'scale-50 opacity-0'
+              }`} 
+            />
+
+            <MoreHorizontal 
+              className={`w-6 h-6 relative z-10 transition-all duration-300 ${
+                extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
+                  ? "text-primary translate-y-[2px]" 
+                  : "text-gray-400"
+              }`} 
+            />
+
+            <span 
+              className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
+                extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
+                  ? "text-primary opacity-100 font-semibold" 
+                  : "text-gray-400 opacity-70"
+              }`}
+            >
+              المزيد
+            </span>
+          </button>
         </nav>
       </div>
     </>
