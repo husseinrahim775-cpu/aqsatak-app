@@ -28,7 +28,10 @@ import {
   CloudUpload,
   CloudDownload,
   Check,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RefreshCw,
+  Sparkles,
+  AlertCircle
 } from "lucide-react";
 import { 
   getUserInstallments, 
@@ -55,11 +58,16 @@ export default function SettingsPage() {
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
+  // حالات التحديث التلقائي للديسك توب
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "not_available" | "error">("idle");
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [newVersion, setNewVersion] = useState("");
+
   // حالات الإعدادات العامة
   const [storeName, setStoreName] = useState("");
   const [storePhone, setStorePhone] = useState("");
   const [storeAddress, setStoreAddress] = useState("");
-  const [storeLogo, setStoreLogo] = useState(""); // 🖼️ حالة لوجو/شعار المكتب
+  const [storeLogo, setStoreLogo] = useState("");
   const [contractTerms, setContractTerms] = useState(
     "1. يتعهد الطرف الثاني بتسديد أقساطه المستحقة في مواعيدها المحدد أعلاه دون تأخير.\n2. في حال التأخير عن التسديد، يحق للطرف الأول اتخاذ الإجراءات القانونية المترتبة على ذلك.\n3. يعتبر هذا العقد وثيقة رسمية ملزمة للطرفين وللكفيل الضامن."
   );
@@ -144,7 +152,81 @@ export default function SettingsPage() {
     }
   };
 
-  // 🖼️ معالجة رفع صورة اللوجو وتحويلها إلى Base64
+  // 🔄 الاستماع لإشارات التحديث من Electron
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).require) {
+      try {
+        const { ipcRenderer } = (window as any).require("electron");
+
+        const handleUpdateStatus = (_: any, data: any) => {
+          setUpdateStatus(data.status);
+
+          if (data.status === "available" || data.status === "ready") {
+            setNewVersion(data.version || "");
+          }
+
+          if (data.status === "downloading") {
+            setDownloadProgress(data.percent || 0);
+          }
+
+          if (data.status === "not_available") {
+            toast.info("أنظمة أقساطك محدثة لأحدث إصدار بالفعل!");
+          }
+
+          if (data.status === "error") {
+            toast.error("تعذر الفحص، تأكد من الاتصال بالإنترنت.");
+          }
+        };
+
+        ipcRenderer.on("update_status", handleUpdateStatus);
+
+        return () => {
+          ipcRenderer.removeListener("update_status", handleUpdateStatus);
+        };
+      } catch (e) {
+        console.log("Not running in Electron desktop environment");
+      }
+    }
+  }, []);
+
+ const handleCheckForUpdates = () => {
+  setUpdateStatus("checking");
+
+  // ⏱️ وضع مؤقت لإنهاء حالة التحميل بعد 6 ثوانٍ في حال عدم استجابة السيرفر أو في بيئة التطوير
+  const timer = setTimeout(() => {
+    setUpdateStatus((currentStatus) => {
+      if (currentStatus === "checking") {
+        toast.info("أنظمة أقساطك محدثة لأحدث إصدار بالفعل!");
+        return "not_available";
+      }
+      return currentStatus;
+    });
+  }, 6000);
+
+  if (typeof window !== "undefined" && (window as any).require) {
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      ipcRenderer.send("check_for_updates");
+    } catch (e) {
+      clearTimeout(timer);
+      setUpdateStatus("idle");
+      toast.error("حدث خطأ أثناء الاتصال بأداة التحديث.");
+    }
+  } else {
+    clearTimeout(timer);
+    setUpdateStatus("idle");
+    toast.error("هذه الميزة تعمل فقط بداخل تطبيق الديسك توب المثبت.");
+  }
+};
+
+  const handleRestartAndInstall = () => {
+    if (typeof window !== "undefined" && (window as any).require) {
+      const { ipcRenderer } = (window as any).require("electron");
+      ipcRenderer.send("restart_and_install");
+    }
+  };
+
+  // 🖼️ معالجة رفع صورة اللوجو وتغييرها
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -162,7 +244,6 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
   };
 
-  // 📥 دالة معالجة واستعادة ملف بيانات JSON إلى Firestore بدون تكرار
   const processBackupJSON = async (content: any) => {
     if (!content.installments || !Array.isArray(content.installments)) {
       throw new Error("ملف النسخة الاحتياطية غير صالح!");
@@ -171,7 +252,6 @@ export default function SettingsPage() {
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
 
-    // 1. استعادة الأقساط
     for (const inst of content.installments) {
       if (inst.id) {
         const instRef = doc(db, "installments", inst.id);
@@ -182,7 +262,6 @@ export default function SettingsPage() {
       }
     }
 
-    // 2. استعادة الدفعات
     if (content.payments && Array.isArray(content.payments)) {
       for (const pay of content.payments) {
         if (pay.id) {
@@ -198,7 +277,6 @@ export default function SettingsPage() {
     await fetchUsersAndSettings();
   };
 
-  // ☁️ 🔄 جلب واستعادة أحدث نسخة من Google Drive تلقائياً
   const handleDownloadFromGoogleDrive = async (tokenParam?: string, isSilent = false) => {
     const token = tokenParam || localStorage.getItem("google_drive_access_token");
     if (!token) return;
@@ -239,7 +317,6 @@ export default function SettingsPage() {
     }
   };
 
-  // ☁️ ⬆️ رفع النسخة الاحتياطية إلى Google Drive
   const handleUploadToGoogleDrive = async (isSilent = false) => {
     const ownerUid = getOwnerUid();
     const googleAccessToken = localStorage.getItem("google_drive_access_token");
@@ -616,7 +693,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام وإدارة الموظفين</h1>
         <p className="text-gray-500 text-xs md:text-sm mt-1">
-          تخصيص تفاصيل المكتب، رفع الشعار، تغيير كلمة المرور عبر الجيميل، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
+          تخصيص تفاصيل المكتب، التحديثات المباشرة، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
         </p>
       </div>
 
@@ -626,6 +703,79 @@ export default function SettingsPage() {
           <span>تم حفظ الإعدادات وتحديث بيانات الشعار والشركة بنجاح!</span>
         </div>
       )}
+
+      {/* 🚀 قسم تحديثات تطبيق أقساطك (Electron Auto-Updater) */}
+      <div className="bg-card border border-border p-5 md:p-6 rounded-2xl space-y-4 shadow-sm dir-rtl text-right">
+        <div className="flex justify-between items-center border-b border-border pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-primary/10 text-primary rounded-xl">
+              <RefreshCw className={`w-5 h-5 ${updateStatus === "checking" ? "animate-spin" : ""}`} />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-foreground flex items-center gap-2">
+                تحديثات تطبيق أقساطك
+                <span className="text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-bold dir-ltr">v1.0.0</span>
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">البحث عن التحديثات الجديدة  </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCheckForUpdates}
+            disabled={updateStatus === "checking" || updateStatus === "downloading"}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50 shadow-sm"
+          >
+            {updateStatus === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            <span>{updateStatus === "checking" ? "جاري الفحص..." : "فحص التحديثات"}</span>
+          </button>
+        </div>
+
+        {/* 1. جاري التحميل */}
+        {updateStatus === "downloading" && (
+          <div className="space-y-2 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+            <div className="flex justify-between items-center text-xs text-blue-600 font-bold">
+              <span>جاري تنزيل التحديث الجديد ({newVersion})...</span>
+              <span dir="ltr">{downloadProgress}%</span>
+            </div>
+            <div className="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-2 overflow-hidden">
+              <div className="bg-blue-600 h-full transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* 2. التحديث جاهز للتثبيت */}
+        {updateStatus === "ready" && (
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+              <span className="text-xs md:text-sm font-bold">تم تنزيل الإصدار الجديد ({newVersion}) وجاهز للتثبيت!</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleRestartAndInstall}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm w-full sm:w-auto justify-center"
+            >
+              <Download className="w-4 h-4" />
+              <span>إعادة التشغيل والتثبيت الآن</span>
+            </button>
+          </div>
+        )}
+
+        {/* 3. النظام محدث */}
+        {updateStatus === "not_available" && (
+          <p className="text-xs text-emerald-600 font-bold flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4" /> تطبيقك يعمل بأحدث إصدار متوفر.
+          </p>
+        )}
+
+        {/* 4. خطأ */}
+        {updateStatus === "error" && (
+          <p className="text-xs text-rose-500 font-bold flex items-center gap-1.5">
+            <AlertCircle className="w-4 h-4" /> تعذر الاتصال بخادم التحديثات. تحقق من شبكة الإنترنت.
+          </p>
+        )}
+      </div>
 
       {/* 🔒 1. أمان وحماية حساب الشركة والرمز السرّي */}
       <div className="bg-card border border-primary/30 rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
@@ -847,7 +997,6 @@ export default function SettingsPage() {
             <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب والشعار وبيانات المطبوعات</h2>
           </div>
 
-          {/* 🖼️ قسم اختيار ورفع شعار/لوجو المكتب */}
           <div className="p-4 bg-secondary/20 border border-border rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-16 h-16 rounded-xl border border-border bg-background flex items-center justify-center overflow-hidden shrink-0 shadow-sm">

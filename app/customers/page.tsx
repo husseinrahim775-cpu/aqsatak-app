@@ -99,17 +99,16 @@ export default function CustomersPage() {
       const instPayments = payments.filter((p) => p.installmentId === item.id);
       const paidForInst = instPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-      const originalDue = Number(item.totalDue) || 0;
-      cust.totalOriginalDue += originalDue;
+      // 🟢 الحساب المباشر والدقيق للمتبقي الفعلي للقسط
+      const remainingForInst = Number(item.totalDue) || 0;
+      cust.totalRemaining += remainingForInst;
       cust.totalPaid += paidForInst;
     });
 
     const result: GroupedCustomer[] = [];
 
     map.forEach((cust) => {
-      const calcRemaining = Math.max(0, cust.totalOriginalDue - cust.totalPaid);
-      cust.totalRemaining = calcRemaining;
-      cust.isFullyPaid = calcRemaining <= 0;
+      cust.isFullyPaid = cust.totalRemaining <= 0;
 
       // 🚨 احتساب التقييم التلقائي باللون المناسب والقائمة السوداء
       cust.riskStatus = calculateCustomerRisk(
@@ -268,7 +267,7 @@ export default function CustomersPage() {
   };
 
   return (
-    <div className="space-y-4 md:space-y-6 relative pb-8 animate-in fade-in duration-500">
+    <div className="space-y-4 md:space-y-6 relative pb-8 animate-in fade-in duration-500 font-sans text-right dir-rtl">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4 print:hidden">
         <div>
           <h1 className="text-xl md:text-2xl font-bold">العملاء والأقساط</h1>
@@ -402,12 +401,12 @@ export default function CustomersPage() {
                   {customer.isFullyPaid ? (
                     <span className="font-extrabold text-emerald-600 dark:text-emerald-400">0 د.ع (خالي من الديون)</span>
                   ) : (
-                    <span className="font-extrabold text-foreground">{Math.round(customer.totalRemaining).toLocaleString()} د.ع</span>
+                    <span className="font-extrabold text-foreground">{Math.round(customer.totalRemaining).toLocaleString("en-US")} د.ع</span>
                   )}
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span>مجموع القسط المستحق:</span>
-                  <span className="font-bold text-primary">{Math.round(totalPeriodic).toLocaleString()} د.ع</span>
+                  <span className="font-bold text-primary">{Math.round(totalPeriodic).toLocaleString("en-US")} د.ع</span>
                 </div>
               </div>
 
@@ -592,7 +591,7 @@ export default function CustomersPage() {
                   <option value="" disabled>-- يرجى اختيار القسط --</option>
                   {fineCustomer.installments.map(inst => (
                     <option key={inst.id} value={inst.id}>
-                      {inst.productName} (متبقي: {Math.round(inst.totalDue).toLocaleString()})
+                      {inst.productName} (متبقي: {Math.round(inst.totalDue).toLocaleString("en-US")})
                     </option>
                   ))}
                 </select>
@@ -606,7 +605,7 @@ export default function CustomersPage() {
                   placeholder="مثال: 5000"
                   value={fineForm.amount}
                   onChange={(e) => setFineForm({...fineForm, amount: e.target.value})}
-                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:ring-2 focus:ring-orange-500 outline-none font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:ring-2 focus:ring-orange-500 outline-none font-bold dir-ltr text-right"
                 />
               </div>
 
