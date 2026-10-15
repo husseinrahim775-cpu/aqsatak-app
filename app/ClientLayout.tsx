@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 import { signOut } from "firebase/auth";
+import InstallmentCalculatorModal from "../components/InstallmentCalculatorModal";
 import { 
   LayoutDashboard, 
   Users, 
@@ -22,7 +23,8 @@ import {
   Package,
   BookOpen,
   MoreHorizontal,
-  X
+  X,
+  Calculator
 } from "lucide-react";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -33,6 +35,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const isPendingPage = pathname === "/pending";
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [isCalcOpen, setIsCalcOpen] = useState(false); // 🧮 حالة فتح الحاسبة
 
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
@@ -136,19 +139,36 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {/* 1. الشريط العلوي للموبايل */}
+      {/* 🧮 النافذة المنبثقة لحاسبة الأقساط */}
+      <InstallmentCalculatorModal 
+        isOpen={isCalcOpen} 
+        onClose={() => setIsCalcOpen(false)} 
+      />
+
+      {/* 1. الشريط العلوي للموبايل والدسطوب المميز */}
       <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-md border-b border-border p-4 shadow-sm sticky top-0 z-40">
         <div className="flex items-center gap-2 font-extrabold text-xl text-primary tracking-tight">
           <img src="./logo.png" alt="أقساطك" className="w-7 h-7 rounded-lg object-cover" />
           <span>أقساطك</span>
         </div>
+        
         <div className="flex items-center gap-2">
+          {/* 🧮 زر الحاسبة المودرن لشاشة الموبايل */}
+          <button
+            onClick={() => setIsCalcOpen(true)}
+            className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary hover:bg-primary/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
+            title="حاسبة الأقساط"
+          >
+            <Calculator className="w-5 h-5 text-primary" />
+          </button>
+
           <button 
             onClick={toggleTheme}
             className="p-2 bg-background border border-border rounded-xl text-foreground hover:bg-border/50 transition-all active:scale-95"
           >
             {isDarkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-indigo-500" />}
           </button>
+
           <button 
             onClick={handleLogout}
             className="p-2 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 rounded-xl text-red-500 hover:bg-red-100 transition-all active:scale-95"
@@ -164,9 +184,23 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         <Sidebar />
       </div>
 
-      {/* 3. المحتوى الرئيسي */}
+      {/* 3. المحتوى الرئيسي مع شريط الأدوات العلوية للشاشات الكبيرة */}
       <main className="flex-1 w-full overflow-y-auto p-4 pb-24 md:p-8 md:pb-8 transition-all duration-300">
-        <div className="max-w-7xl mx-auto h-full">
+        <div className="max-w-7xl mx-auto h-full space-y-4">
+          
+          {/* 🧮 زر الحاسبة المودرن للشاشات الكبيرة (أعلى الصفحات) */}
+          <div className="hidden md:flex justify-end items-center mb-2">
+            <button
+              onClick={() => setIsCalcOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-card border border-primary/20 hover:border-primary/50 text-primary rounded-2xl font-bold text-sm shadow-sm hover:shadow-md transition-all active:scale-95 group"
+            >
+              <div className="p-1.5 bg-primary/10 rounded-xl group-hover:bg-primary/20 transition-colors">
+                <Calculator className="w-4 h-4 text-primary" />
+              </div>
+              <span>حاسبة الأقساط السريعة</span>
+            </button>
+          </div>
+
           {children}
         </div>
       </main>

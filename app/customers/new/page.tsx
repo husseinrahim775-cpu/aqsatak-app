@@ -3,12 +3,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock, Package, Camera, FileText, Image as ImageIcon } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { 
   addInstallmentRecord, 
   getUserInstallments, 
   getAvailableInventory, 
   bindProductToContract, 
-  uploadCustomerDocument,
+  compressAndConvertToBase64,
   InstallmentData, 
   InventoryItem 
 } from "@/services/firestore";
@@ -25,6 +26,8 @@ interface ExistingCustomer {
 
 export default function NewInstallmentPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingCustomers, setExistingCustomers] = useState<ExistingCustomer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -37,6 +40,57 @@ export default function NewInstallmentPage() {
   const [idCardFile, setIdCardFile] = useState<File | null>(null);
   const [contractFile, setContractFile] = useState<File | null>(null);
   const [personalPhotoFile, setPersonalPhotoFile] = useState<File | null>(null);
+
+  const [formData, setFormData] = useState({
+    customerName: "",
+    phoneNumber: "",
+    address: "",
+    guarantorName: "",
+    guarantorPhone: "",
+    productName: "",
+    purchasePrice: "" as number | "",
+    profitMargin: "40" as number | string,
+    productPrice: "" as number | "",
+    downPayment: "" as number | "",
+    paymentPeriod: "monthly" as "daily" | "weekly" | "monthly",
+    months: "" as number | "",
+    monthlyInstallment: "" as number | "",
+    startDate: new Date().toISOString().split("T")[0],
+  });
+
+  // ⚡ استلام البيانات الممرة تلقائياً من الحاسبة السريعة عبر URL
+  useEffect(() => {
+    const priceParam = searchParams.get("price");
+    const downParam = searchParams.get("down");
+    const profitParam = searchParams.get("profit");
+    const monthsParam = searchParams.get("months");
+    const periodParam = searchParams.get("period");
+
+    if (priceParam || downParam || profitParam || monthsParam || periodParam) {
+      const parsedPrice = priceParam ? Number(priceParam) : "";
+      const parsedDown = downParam !== null ? Number(downParam) : "";
+      const parsedProfit = profitParam ? Number(profitParam) : 40;
+      const parsedMonths = monthsParam ? Number(monthsParam) : "";
+      const parsedPeriod = (periodParam as "daily" | "weekly" | "monthly") || "monthly";
+
+      let calculatedCost: number | "" = "";
+      if (typeof parsedPrice === "number" && parsedProfit) {
+        calculatedCost = Math.round(parsedPrice / (1 + Number(parsedProfit) / 100));
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        productPrice: parsedPrice,
+        purchasePrice: calculatedCost,
+        downPayment: parsedDown,
+        profitMargin: parsedProfit,
+        months: parsedMonths,
+        paymentPeriod: parsedPeriod,
+      }));
+
+      toast.success("تم استيراد حسابات العقد من الحاسبة السريعة بنجاح!");
+    }
+  }, [searchParams]);
 
   // جلب السلع المتوفرة بالمخزن
   useEffect(() => {
@@ -67,22 +121,10 @@ export default function NewInstallmentPage() {
     }
   }, [user]);
 
-  const [formData, setFormData] = useState({
-    customerName: "",
-    phoneNumber: "",
-    address: "",
-    guarantorName: "",
-    guarantorPhone: "",
-    productName: "",
-    purchasePrice: "" as number | "",
-    profitMargin: "50" as number | string,
-    productPrice: "" as number | "",
-    downPayment: "" as number | "",
-    paymentPeriod: "monthly" as "daily" | "weekly" | "monthly",
-    months: "" as number | "",
-    monthlyInstallment: "" as number | "",
-    startDate: new Date().toISOString().split("T")[0],
-  });
+  // دالة تحويل الأرقام للإنجليزي مع فواصل
+  const formatNum = (num: number) => {
+    return Math.round(num).toLocaleString("en-US");
+  };
 
   const handleSelectProduct = (productId: string) => {
     setSelectedProductId(productId);
@@ -145,7 +187,7 @@ export default function NewInstallmentPage() {
       const cost = Number(formData.purchasePrice);
       const profitAmount = Number(sellPrice) - cost;
       const rate = (profitAmount / cost) * 100;
-      newMargin = Number(rate.toFixed(2));
+      newMargin = Math.round(rate * 100) / 100;
     }
 
     setFormData((prev) => ({
@@ -232,7 +274,7 @@ export default function NewInstallmentPage() {
     setShowSuggestions(false);
   };
 
-  // ⚡ الحفظ الآمن والمستقر مع/بدون إنترنت
+  // ⚡ الحفظ المجاني والمباشر بدون حاجـة لـ Firebase Storage
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -248,19 +290,17 @@ export default function NewInstallmentPage() {
       let contractUrl = "";
       let personalPhotoUrl = "";
 
-      // 🌐 فحص الاتصال بالإنترنت قبل البدء برفع الصور
-      if (navigator.onLine) {
-        const uploadPromises = [
-          idCardFile ? uploadCustomerDocument(idCardFile, "id_cards") : Promise.resolve(""),
-          contractFile ? uploadCustomerDocument(contractFile, "contracts") : Promise.resolve(""),
-          personalPhotoFile ? uploadCustomerDocument(personalPhotoFile, "photos") : Promise.resolve(""),
-        ];
-        [idCardUrl, contractUrl, personalPhotoUrl] = await Promise.all(uploadPromises);
-      } else {
-        toast.info("أنت تعمل بدون إنترنت حالياً، سيتم حفظ العقد بدون رفع الصور.");
+      // 📸 ضغط وتحويل المستندات تلقائياً بأسلوب Base64
+      if (idCardFile) {
+        idCardUrl = await compressAndConvertToBase64(idCardFile);
+      }
+      if (contractFile) {
+        contractUrl = await compressAndConvertToBase64(contractFile);
+      }
+      if (personalPhotoFile) {
+        personalPhotoUrl = await compressAndConvertToBase64(personalPhotoFile);
       }
 
-      // إعداد بيانات القسط والعقد
       const payload: Omit<InstallmentData, "id" | "createdAt"> = {
         userId: user.uid,
         customerName: formData.customerName,
@@ -297,16 +337,16 @@ export default function NewInstallmentPage() {
           );
         }
 
-        toast.success("تم حفظ بيانات العميل والقسط بنجاح!");
+        toast.success("تم حفظ بيانات القسط والأوراق الثبوتية بنجاح!");
         window.location.href = "/customers";
       } else {
         toast.error("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
       }
     } catch (error) {
-      console.error("خطأ أثناء الرفع والحفظ:", error);
-      toast.error("حدث خطأ أثناء حفظ البيانات.");
+      console.error("خطأ أثناء معالجة الصور والحفظ:", error);
+      toast.error("حدث خطأ أثناء حفظ المستندات.");
     } finally {
-      setIsSubmitting(false); // 👈 ينتهي التحميل ولا يظل معلقاً
+      setIsSubmitting(false);
     }
   };
 
@@ -314,7 +354,7 @@ export default function NewInstallmentPage() {
   const periodUnitLabel = formData.paymentPeriod === "daily" ? "يوم" : formData.paymentPeriod === "weekly" ? "أسبوع" : "شهر";
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12 font-sans dir-rtl text-right">
       <div className="flex items-center gap-4">
         <Link
           href="/customers"
@@ -368,7 +408,7 @@ export default function NewInstallmentPage() {
                       onClick={() => selectCustomer(c)}
                     >
                       <span className="font-bold text-foreground text-sm">{c.customerName}</span>
-                      <span className="text-xs text-gray-500" dir="ltr">{c.phoneNumber}</span>
+                      <span className="text-xs text-gray-500 dir-ltr text-right">{c.phoneNumber}</span>
                     </button>
                   ))}
                 </div>
@@ -380,8 +420,7 @@ export default function NewInstallmentPage() {
               <input
                 type="tel"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background"
-                dir="ltr"
+                className="w-full p-3 rounded-lg border border-border bg-background text-left dir-ltr"
                 value={formData.phoneNumber}
                 onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
               />
@@ -419,8 +458,7 @@ export default function NewInstallmentPage() {
               <input
                 type="tel"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background"
-                dir="ltr"
+                className="w-full p-3 rounded-lg border border-border bg-background text-left dir-ltr"
                 value={formData.guarantorPhone}
                 onChange={(e) => setFormData({ ...formData, guarantorPhone: e.target.value })}
               />
@@ -435,7 +473,6 @@ export default function NewInstallmentPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* 1. صورة الهوية / البطاقة الموحدة */}
               <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
                 <ImageIcon className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الهوية / البطاقة الموحدة</span>
@@ -455,7 +492,6 @@ export default function NewInstallmentPage() {
                 {idCardFile && <p className="text-[10px] text-gray-400 truncate">{idCardFile.name}</p>}
               </div>
 
-              {/* 2. صورة العقد المكتوب */}
               <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
                 <FileText className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة العقد الورقي</span>
@@ -475,7 +511,6 @@ export default function NewInstallmentPage() {
                 {contractFile && <p className="text-[10px] text-gray-400 truncate">{contractFile.name}</p>}
               </div>
 
-              {/* 3. صورة العميل الشخصية */}
               <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
                 <User className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
@@ -511,12 +546,12 @@ export default function NewInstallmentPage() {
               <select
                 value={selectedProductId}
                 onChange={(e) => handleSelectProduct(e.target.value)}
-                className="w-full p-3 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary/50 outline-none text-sm"
+                className="w-full p-3 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary/50 outline-none text-sm cursor-pointer"
               >
                 <option value="">-- اضغط هنا لاختيار مادة من المخزن --</option>
                 {availableProducts.map((item) => (
                   <option key={item.id} value={item.id}>
-                    [{item.category}] {item.title} - ${item.price} {item.specs?.chassisNumber ? `| شاصي: ${item.specs.chassisNumber}` : ""}
+                    [{item.category}] {item.title} - ${formatNum(item.price)} {item.specs?.chassisNumber ? `| شاصي: ${item.specs.chassisNumber}` : ""}
                   </option>
                 ))}
               </select>
@@ -528,6 +563,7 @@ export default function NewInstallmentPage() {
                 <input
                   type="text"
                   required
+                  placeholder="مثال: آيفون 15 برو ماكس"
                   className="w-full p-3 rounded-lg border border-border bg-background"
                   value={formData.productName}
                   onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
@@ -540,8 +576,8 @@ export default function NewInstallmentPage() {
                   type="number"
                   min="0"
                   step="any"
-                  placeholder="أدخل سعر الشراء"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  placeholder="0"
+                  className="w-full p-3 rounded-lg border border-border bg-background dir-ltr text-right"
                   value={formData.purchasePrice}
                   onChange={(e) =>
                     handlePurchasePriceChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -557,7 +593,7 @@ export default function NewInstallmentPage() {
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  className="w-full p-3 rounded-lg border border-border bg-background dir-ltr text-right font-bold"
                   value={formData.profitMargin}
                   onChange={(e) =>
                     handleProfitMarginChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -572,8 +608,8 @@ export default function NewInstallmentPage() {
                   required
                   min="0"
                   step="any"
-                  placeholder="السعر الكلي للبيع"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  placeholder="0"
+                  className="w-full p-3 rounded-lg border border-border bg-background font-bold text-primary dir-ltr text-right"
                   value={formData.productPrice}
                   onChange={(e) =>
                     handleProductPriceChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -587,7 +623,8 @@ export default function NewInstallmentPage() {
                   type="number"
                   min="0"
                   step="any"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  placeholder="0"
+                  className="w-full p-3 rounded-lg border border-border bg-background text-emerald-600 font-bold dir-ltr text-right"
                   value={formData.downPayment}
                   onChange={(e) =>
                     setFormData({
@@ -598,13 +635,12 @@ export default function NewInstallmentPage() {
                 />
               </div>
 
-              {/* 🔄 اختيار نظام فترة التسديد */}
               <div>
                 <label className="block text-sm font-medium mb-1 text-primary font-bold">فترة التسديد (نوع القسط)</label>
                 <select
                   value={formData.paymentPeriod}
                   onChange={(e) => setFormData({ ...formData, paymentPeriod: e.target.value as "daily" | "weekly" | "monthly" })}
-                  className="w-full p-3 rounded-lg border border-primary/50 bg-background text-foreground focus:ring-2 focus:ring-primary font-bold outline-none"
+                  className="w-full p-3 rounded-lg border border-primary/50 bg-background text-foreground focus:ring-2 focus:ring-primary font-bold outline-none cursor-pointer"
                 >
                   <option value="monthly">قسط شهري</option>
                   <option value="weekly">قسط أسبوعي</option>
@@ -618,8 +654,8 @@ export default function NewInstallmentPage() {
                   type="number"
                   min="1"
                   step="any"
-                  placeholder={`مثال: ${formData.paymentPeriod === "daily" ? "30" : formData.paymentPeriod === "weekly" ? "12" : "12"}`}
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  placeholder="0"
+                  className="w-full p-3 rounded-lg border border-border bg-background font-bold dir-ltr text-right"
                   value={formData.months}
                   onChange={(e) =>
                     handleMonthsChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -635,8 +671,8 @@ export default function NewInstallmentPage() {
                   type="number"
                   min="0"
                   step="any"
-                  placeholder="مثال: 50000"
-                  className="w-full p-3 rounded-lg border border-primary/40 bg-background focus:ring-2 focus:ring-primary outline-none"
+                  placeholder="0"
+                  className="w-full p-3 rounded-lg border border-primary/40 bg-background focus:ring-2 focus:ring-primary outline-none font-bold text-primary dir-ltr text-right"
                   value={formData.monthlyInstallment}
                   onChange={(e) =>
                     handleMonthlyInstallmentChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -661,7 +697,7 @@ export default function NewInstallmentPage() {
           </div>
         </div>
 
-        {/* قسم النتائج الحسابية الفوري */}
+        {/* قسم النتائج الحسابية بالأرقام الإنجليزية الصافية */}
         <div className="bg-primary text-primary-foreground rounded-xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center text-center md:text-right gap-6 shadow-lg relative overflow-hidden">
           <Calculator className="absolute opacity-10 w-48 h-48 left-[-20px] top-[-20px] pointer-events-none" />
 
@@ -669,12 +705,12 @@ export default function NewInstallmentPage() {
             <div>
               <p className="text-primary-foreground/80 text-xs">سعر البيع الكلي</p>
               <p className="text-lg font-bold">
-                {Math.round(calculation.totalAmountWithProfit).toLocaleString()} د.ع
+                {formatNum(calculation.totalAmountWithProfit)} د.ع
               </p>
             </div>
             <div>
               <p className="text-primary-foreground/80 text-xs">المتبقي للتقسيط (بعد المقدمة)</p>
-              <p className="text-xl font-black">{Math.round(calculation.totalDue).toLocaleString()} د.ع</p>
+              <p className="text-xl font-black">{formatNum(calculation.totalDue)} د.ع</p>
             </div>
           </div>
 
@@ -688,14 +724,14 @@ export default function NewInstallmentPage() {
               {calculation.calculatedDays > 0 && ` و ${calculation.calculatedDays} يوم`}
             </div>
             <p className="text-xs text-primary-foreground/70">
-              الربح الصافي: <span className="text-green-300 font-bold">+{Math.round(calculation.totalProfit).toLocaleString()} د.ع</span>
+              الربح الصافي: <span className="text-green-300 font-bold">+{formatNum(calculation.totalProfit)} د.ع</span>
             </p>
           </div>
 
           <div className="z-10 bg-background text-foreground px-6 py-4 rounded-xl shadow-inner w-full md:w-auto text-center border-2 border-primary/20">
             <p className="text-sm font-medium text-gray-500 mb-1">القسط الـ{periodLabel} المطلوب</p>
             <p className="text-3xl font-extrabold text-primary">
-              {Math.round(calculation.monthlyInstallment).toLocaleString()} د.ع
+              {formatNum(calculation.monthlyInstallment)} د.ع
             </p>
           </div>
         </div>

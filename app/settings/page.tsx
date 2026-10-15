@@ -27,7 +27,8 @@ import {
   UserCheck,
   CloudUpload,
   CloudDownload,
-  Check
+  Check,
+  Image as ImageIcon
 } from "lucide-react";
 import { 
   getUserInstallments, 
@@ -58,6 +59,7 @@ export default function SettingsPage() {
   const [storeName, setStoreName] = useState("");
   const [storePhone, setStorePhone] = useState("");
   const [storeAddress, setStoreAddress] = useState("");
+  const [storeLogo, setStoreLogo] = useState(""); // 🖼️ حالة لوجو/شعار المكتب
   const [contractTerms, setContractTerms] = useState(
     "1. يتعهد الطرف الثاني بتسديد أقساطه المستحقة في مواعيدها المحدد أعلاه دون تأخير.\n2. في حال التأخير عن التسديد، يحق للطرف الأول اتخاذ الإجراءات القانونية المترتبة على ذلك.\n3. يعتبر هذا العقد وثيقة رسمية ملزمة للطرفين وللكفيل الضامن."
   );
@@ -124,6 +126,9 @@ export default function SettingsPage() {
         if (companyData.companyName) setStoreName(companyData.companyName);
         if (companyData.phone) setStorePhone(companyData.phone);
         if (companyData.address) setStoreAddress(companyData.address);
+        if ((companyData as any).logoUrl || (companyData as any).logo) {
+          setStoreLogo((companyData as any).logoUrl || (companyData as any).logo);
+        }
         if (companyData.notes) setContractTerms(companyData.notes);
       }
 
@@ -137,6 +142,24 @@ export default function SettingsPage() {
     } finally {
       setLoadingUsers(false);
     }
+  };
+
+  // 🖼️ معالجة رفع صورة اللوجو وتحويلها إلى Base64
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("حجم الصورة كبير جداً! يرجى اختيار صورة أقل من 2 ميغابايت.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setStoreLogo(reader.result as string);
+      toast.success("تم رفع الشعار بنجاح! اضغط (حفظ وتحديث الإعدادات) لتطبيقه.");
+    };
+    reader.readAsDataURL(file);
   };
 
   // 📥 دالة معالجة واستعادة ملف بيانات JSON إلى Firestore بدون تكرار
@@ -269,14 +292,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      // ⚡ 1. إذا كانت هذه النافذة منبثقة واستلمت الـ access_token من جوجل
       if (window.location.hash && window.location.hash.includes("access_token=")) {
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const token = hashParams.get("access_token");
 
         if (token) {
           localStorage.setItem("google_drive_access_token", token);
-          // إرسال الرسالة للنافذة الرئيسية وإغلاق هذه النافذة فوراً
           if (window.opener) {
             window.opener.postMessage({ type: "GOOGLE_AUTH_SUCCESS", token }, "*");
             window.close();
@@ -285,7 +306,6 @@ export default function SettingsPage() {
         }
       }
 
-      // ⚡ 2. الاستماع للرسائل القادمة من النافذة المنبثقة في النافذة الرئيسية
       const handleAuthMessage = async (event: MessageEvent) => {
         if (event.data?.type === "GOOGLE_AUTH_SUCCESS") {
           const token = event.data.token;
@@ -298,7 +318,6 @@ export default function SettingsPage() {
 
       window.addEventListener("message", handleAuthMessage);
 
-      // ⚡ 3. فحص التوكن المحفوظ مسبقاً والتزامن الآلي
       const savedToken = localStorage.getItem("google_drive_access_token");
       if (savedToken) {
         setIsDriveConnected(true);
@@ -458,6 +477,7 @@ export default function SettingsPage() {
         companyName: storeName,
         phone: storePhone,
         address: storeAddress,
+        logoUrl: storeLogo,
         notes: contractTerms,
       });
 
@@ -465,6 +485,7 @@ export default function SettingsPage() {
         companyName: storeName,
         phone: storePhone,
         address: storeAddress,
+        logoUrl: storeLogo,
         notes: contractTerms,
       }));
 
@@ -475,7 +496,7 @@ export default function SettingsPage() {
       localStorage.setItem("app_whatsapp_template", whatsappTemplate);
 
       setSaved(true);
-      toast.success("تم حفظ وتحديث إعدادات الشركة بنجاح!");
+      toast.success("تم حفظ وتحديث إعدادات الشركة والشعار بنجاح!");
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error("خطأ في حفظ الإعدادات:", err);
@@ -540,7 +561,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔑 دالة فتح نافذة ربط Google Drive
   const handleConnectGoogleDrive = () => {
     const CLIENT_ID = "42704920630-fh1e8kni3er2bhc6ejjj2kkhcgi01nvc.apps.googleusercontent.com"; 
     const REDIRECT_URI = "https://aqsatak-app.vercel.app/settings";
@@ -561,7 +581,6 @@ export default function SettingsPage() {
       `width=${width},height=${height},top=${top},left=${left}`
     );
 
-    // ⚡ فحص عنوان النافذة كخط احتياطي أوتوماتيكي
     const checkTokenInterval = setInterval(() => {
       try {
         if (!authWindow || authWindow.closed) {
@@ -588,9 +607,7 @@ export default function SettingsPage() {
             }
           }
         }
-      } catch (e) {
-        // التجاهل عند تحويل Google بين النطاقات
-      }
+      } catch (e) {}
     }, 300);
   };
 
@@ -599,14 +616,14 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام وإدارة الموظفين</h1>
         <p className="text-gray-500 text-xs md:text-sm mt-1">
-          تخصيص تفاصيل المكتب، تغيير كلمة المرور عبر الجيميل، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
+          تخصيص تفاصيل المكتب، رفع الشعار، تغيير كلمة المرور عبر الجيميل، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
         </p>
       </div>
 
       {saved && (
         <div className="p-3 md:p-4 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 rounded-xl flex items-center gap-2 md:gap-3 text-xs md:text-sm font-bold animate-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
-          <span>تم حفظ الإعدادات وتحديث بيانات الشركة بنجاح!</span>
+          <span>تم حفظ الإعدادات وتحديث بيانات الشعار والشركة بنجاح!</span>
         </div>
       )}
 
@@ -823,11 +840,49 @@ export default function SettingsPage() {
       </div>
 
       <form onSubmit={handleSaveSettings} className="space-y-4 md:space-y-6">
-        {/* 🏢 3. تفاصيل المكتب والطباعة */}
+        {/* 🏢 3. تفاصيل المكتب واللوجو والطباعة */}
         <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
             <Store className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب وبيانات العقود والمطبوعات</h2>
+            <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب والشعار وبيانات المطبوعات</h2>
+          </div>
+
+          {/* 🖼️ قسم اختيار ورفع شعار/لوجو المكتب */}
+          <div className="p-4 bg-secondary/20 border border-border rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-16 h-16 rounded-xl border border-border bg-background flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                {storeLogo ? (
+                  <img src={storeLogo} alt="شعار المكتب" className="w-full h-full object-contain" />
+                ) : (
+                  <ImageIcon className="w-8 h-8 text-gray-400" />
+                )}
+              </div>
+              <div>
+                <p className="font-bold text-xs md:text-sm text-foreground">شعار / لوجو المكتب الخاص بك</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  سيظهر هذا الشعار بوضوح أعلى العقود، الكشوفات، والإيصالات المطبوعة.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <label className="px-4 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm flex items-center gap-2">
+                <Upload className="w-4 h-4" />
+                <span>رفع شعار جديد</span>
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+              </label>
+
+              {storeLogo && (
+                <button
+                  type="button"
+                  onClick={() => setStoreLogo("")}
+                  className="px-3 py-2.5 border border-rose-500/30 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl text-xs font-bold transition-colors"
+                  title="حذف الشعار واستخدام الافتراضي"
+                >
+                  إزالة
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1023,7 +1078,6 @@ export default function SettingsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-            {/* تصدير JSON محلي */}
             <button
               type="button"
               onClick={handleExportBackup}
@@ -1037,7 +1091,6 @@ export default function SettingsPage() {
               <p className="text-[10px] md:text-xs text-gray-500">حفظ كافة بيانات الأقساط والدفعات في ملف لضمان عدم ضياعها.</p>
             </button>
 
-            {/* استعادة بدون تكرار محلي */}
             <label className="p-4 bg-background border border-border rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-right flex flex-col justify-between space-y-2 md:space-y-3 cursor-pointer group">
               <div className="flex items-center justify-between w-full">
                 <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">استعادة نسخة محليّة</span>
@@ -1047,7 +1100,6 @@ export default function SettingsPage() {
               <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction} className="hidden" />
             </label>
 
-            {/* ☁️ رفع واستعادة سحابية آليّة من Google Drive */}
             <div className="p-4 bg-background border border-blue-500/20 rounded-xl flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between w-full">
                 <span className="font-bold text-sm text-blue-600 dark:text-blue-400">تخزين Google Drive الآلي</span>
@@ -1058,7 +1110,6 @@ export default function SettingsPage() {
               </p>
 
               <div className="flex flex-col gap-2 pt-1">
-                {/* زر ربط الحساب وتحديد الحالة تلقائياً */}
                 {isDriveConnected ? (
                   <button
                     type="button"
@@ -1085,7 +1136,6 @@ export default function SettingsPage() {
                 )}
 
                 <div className="flex items-center gap-2">
-                  {/* زر الرفع اليدوي */}
                   <button
                     type="button"
                     onClick={() => handleUploadToGoogleDrive(false)}
@@ -1100,7 +1150,6 @@ export default function SettingsPage() {
                     <span>رفع الآن</span>
                   </button>
 
-                  {/* زر الاستعادة من Drive */}
                   <button
                     type="button"
                     onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
@@ -1126,7 +1175,7 @@ export default function SettingsPage() {
           className="w-full py-3.5 md:py-4 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-md text-sm md:text-base active:scale-[0.98]"
         >
           {loadingAction ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-          <span>حفظ وتحديث الإعدادات</span>
+          <span>حفظ وتحديث الإعدادات الشاملة</span>
         </button>
       </form>
     </div>

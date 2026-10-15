@@ -1,4 +1,4 @@
-import { db, storage, auth } from "./firebase";
+import { db, auth } from "./firebase";
 import { 
   collection, 
   addDoc, 
@@ -11,9 +11,9 @@ import {
   serverTimestamp,
   updateDoc,
   deleteDoc,
-  getDocsFromCache
+  getDocsFromCache,
+  setDoc
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ==========================================
 // ====== الواجهات والمجسمات (Interfaces) ======
@@ -37,6 +37,9 @@ export interface InstallmentData {
   totalProfit: number;
   monthlyInstallment: number; 
   startDate?: string;
+  nextDueDate?: string;
+  isBlacklisted?: boolean;
+  blacklistReason?: string;
   createdAt?: any;
   paidMonths?: string[];
   documents?: {
@@ -92,6 +95,14 @@ export interface InventoryItem {
   soldAt?: string;
 }
 
+export interface CustomerRiskStatus {
+  level: "excellent" | "warning" | "danger";
+  label: string;
+  color: string;
+  isBlacklisted: boolean;
+  maxDaysOverdue: number;
+}
+
 // Helper لتسهيل القراءة السريعة من الـ Cache
 const fetchWithCacheFirst = async (q: any) => {
   try {
@@ -100,29 +111,183 @@ const fetchWithCacheFirst = async (q: any) => {
       return cacheSnap;
     }
   } catch (e) {
-    // الكاش غير متوفر، سنتوجه للشبكة
+    // الكاش غير متوفر
   }
   return await getDocs(q);
 };
 
 // ==========================================
-// ====== 0. دالة رفع الصور والمستندات ======
+// ====== 📸 0. تحويل وضغط الصور مجاناً (Base64) ======
 // ==========================================
 
-export const uploadCustomerDocument = async (file: File, folderName: string): Promise<string> => {
+export const compressAndConvertToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 800; // أبعاد واضحة ومناسبة للوثائق
+
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        // ضغط الجودة لـ 60% لضمان حجم خفيف جداً بـ Firestore
+        const compressedBase64 = canvas.toDataURL("image/jpeg", 0.6);
+        resolve(compressedBase64);
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
+
+/**
+ * 📸 تحديث أو حذف صور المستندات لعقد محدد
+ */
+export const updateContractDocuments = async (
+  installmentId: string,
+  updatedDocuments: {
+    idCardUrl?: string;
+    contractUrl?: string;
+    personalPhotoUrl?: string;
+  }
+) => {
   try {
-    const fileRef = ref(storage, `documents/${folderName}/${Date.now()}_${file.name}`);
-    await uploadBytes(fileRef, file);
-    const downloadUrl = await getDownloadURL(fileRef);
-    return downloadUrl;
+    const instRef = doc(db, "installments", installmentId);
+    await updateDoc(instRef, {
+      documents: updatedDocuments,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
   } catch (error) {
-    console.error("خطأ في رفع صورة المستند:", error);
+    console.error("خطأ في تحديث صور المستندات:", error);
     throw error;
   }
 };
 
 // ==========================================
-// ====== 1. إدارة الأقساط والعملاء ======
+// ====== 🚦 1. نظام التقييم والحظر الآلي ======
+// ==========================================
+
+export const calculateCustomerRisk = (
+  installments: InstallmentData[],
+  payments: PaymentRecord[],
+  isManualBlacklisted: boolean = false,
+  blacklistReason?: string
+): CustomerRiskStatus => {
+  if (isManualBlacklisted || installments.some((i) => i.isBlacklisted)) {
+    return {
+      level: "danger",
+      label: "🔴 محظور (القائمة السوداء)",
+      color: "bg-red-500/10 text-red-600 border-red-500/30",
+      isBlacklisted: true,
+      maxDaysOverdue: 999,
+    };
+  }
+
+  const now = new Date();
+  let maxDaysOverdue = 0;
+
+  installments.forEach((inst) => {
+    const instPayments = payments.filter((p) => p.installmentId === inst.id);
+    const paidSum = instPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const remaining = Number(inst.totalDue || 0) - paidSum;
+
+    if (remaining > 0 && inst.nextDueDate) {
+      const dueDate = new Date(inst.nextDueDate);
+      if (now > dueDate) {
+        const diffDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 3600 * 24));
+        if (diffDays > maxDaysOverdue) maxDaysOverdue = diffDays;
+      }
+    }
+  });
+
+  if (maxDaysOverdue > 30) {
+    return {
+      level: "danger",
+      label: `🔴 عميل خطر (متأخر ${maxDaysOverdue} يوم)`,
+      color: "bg-red-500/10 text-red-600 border-red-500/30",
+      isBlacklisted: false,
+      maxDaysOverdue,
+    };
+  } else if (maxDaysOverdue > 5) {
+    return {
+      level: "warning",
+      label: `🟡 عميل متلكئ (متأخر ${maxDaysOverdue} أيام)`,
+      color: "bg-amber-500/10 text-amber-600 border-amber-500/30",
+      isBlacklisted: false,
+      maxDaysOverdue,
+    };
+  }
+
+  return {
+    level: "excellent",
+    label: "🟢 عميل ممتاز (التزام تام)",
+    color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30",
+    isBlacklisted: false,
+    maxDaysOverdue: 0,
+  };
+};
+
+export const toggleCustomerBlacklist = async (
+  userId: string,
+  phoneNumber: string,
+  isBlacklisted: boolean,
+  reason?: string
+) => {
+  try {
+    const installments = await getInstallmentsByPhone(userId, phoneNumber);
+    const updatePromises = installments.map((inst) => {
+      if (!inst.id) return Promise.resolve();
+      const instRef = doc(db, "installments", inst.id);
+      return updateDoc(instRef, {
+        isBlacklisted,
+        blacklistReason: reason || "",
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    await Promise.all(updatePromises);
+    return true;
+  } catch (error) {
+    console.error("خطأ في تحديث القائمة السوداء:", error);
+    throw error;
+  }
+};
+
+export const checkCustomerBlacklistStatus = async (userId: string, phoneNumber: string) => {
+  try {
+    const installments = await getInstallmentsByPhone(userId, phoneNumber);
+    const isBlacklisted = installments.some((i) => i.isBlacklisted);
+    const blacklistReason = installments.find((i) => i.isBlacklisted)?.blacklistReason || "";
+
+    return {
+      isBlacklisted,
+      blacklistReason,
+      previousContractsCount: installments.length,
+    };
+  } catch (error) {
+    console.error("خطأ في فحص القائمة السوداء للعميل:", error);
+    return { isBlacklisted: false, blacklistReason: "", previousContractsCount: 0 };
+  }
+};
+
+// ==========================================
+// ====== 2. إدارة الأقساط والعملاء ======
 // ==========================================
 
 export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "createdAt">) => {
@@ -130,6 +295,7 @@ export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "c
     const docRef = await addDoc(collection(db, "installments"), {
       ...data,
       paidMonths: [],
+      isBlacklisted: data.isBlacklisted || false,
       createdAt: serverTimestamp(),
     });
     return { success: true, id: docRef.id };
@@ -238,7 +404,7 @@ export const getInstallmentsByPhone = async (userId: string, phoneNumber: string
 };
 
 // ==========================================
-// ====== 2. سجل المقبوضات والدفعات ======
+// ====== 3. سجل المقبوضات والدفعات ======
 // ==========================================
 
 export const addPaymentRecord = async (data: Omit<PaymentRecord, "id">) => {
@@ -417,7 +583,7 @@ export const addPenaltyRecord = async (
 };
 
 // ==========================================
-// ====== 3. قسم الديون الحرة ======
+// ====== 4. قسم الديون الحرة ======
 // ==========================================
 
 export const addDebt = async (debtData: Omit<DebtData, "id" | "createdAt">) => {
@@ -476,7 +642,7 @@ export const deleteDebt = async (debtId: string) => {
 };
 
 // ==========================================
-// ====== 4. قسم المخزن والمنتجات ======
+// ====== 5. قسم المخزن والمنتجات ======
 // ==========================================
 
 export const addInventoryItem = async (item: Omit<InventoryItem, "id">) => {
@@ -577,7 +743,7 @@ export const unbindProductFromContract = async (itemId: string) => {
 };
 
 // ==========================================
-// 🏦 الخزينة والصندوق (Treasury)
+// 🏦 6. الخزينة والصندوق (Treasury)
 // ==========================================
 
 export interface TreasuryTransaction {
@@ -632,7 +798,7 @@ export const deleteTreasuryTransaction = async (id: string) => {
 };
 
 // ==========================================
-// 👥 الموظفين والصلاحيات
+// 👥 7. الموظفين والصلاحيات
 // ==========================================
 
 export type UserRole = "admin" | "employee";
@@ -698,7 +864,7 @@ export const deleteSystemUser = async (id: string) => {
 };
 
 // ==========================================
-// ⚙️ إعدادات الطباعة ومعلومات الشركة
+// ⚙️ 8. إعدادات الطباعة ومعلومات الشركة
 // ==========================================
 
 export interface CompanySettings {

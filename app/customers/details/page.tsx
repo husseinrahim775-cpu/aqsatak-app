@@ -10,11 +10,13 @@ import {
   deleteInstallment,
   updatePaymentRecord,
   deletePaymentRecord,
+  updateContractDocuments,
+  compressAndConvertToBase64,
   InstallmentData, 
   PaymentRecord 
 } from "../../../services/firestore";
 import { useAuth } from "../../../components/AuthProvider";
-import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X, Receipt, Printer } from "lucide-react";
+import { ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, Edit, Trash2, X, Receipt, Printer, Camera, FileText, Image as ImageIcon, Download, ExternalLink, Eye, EyeOff, ChevronDown, ChevronUp, RefreshCw, Upload } from "lucide-react";
 import Link from "next/link";
 import { ContractPrintTemplate, PaymentReceiptPrintTemplate } from "@/components/PrintTemplates";
 
@@ -41,6 +43,13 @@ function CustomerDetailsContent() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
+
+  // حالة إظهار / إخفاء المستندات
+  const [showDocs, setShowDocs] = useState(true);
+  const [updatingDocType, setUpdatingDocType] = useState<string | null>(null);
+
+  // حالة الصورة المكبرة للعرض
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
   const [printContractData, setPrintContractData] = useState<InstallmentData | null>(null);
   const [printPaymentData, setPrintPaymentData] = useState<PaymentRecord | null>(null);
@@ -91,6 +100,51 @@ function CustomerDetailsContent() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // 📸 دالة تغيير أو إضافة صورة وثيقة جديدة
+  const handleUploadOrReplaceDoc = async (inst: InstallmentData, docKey: "idCardUrl" | "contractUrl" | "personalPhotoUrl", file: File) => {
+    if (!inst.id) return;
+    try {
+      setUpdatingDocType(docKey);
+      const compressedBase64 = await compressAndConvertToBase64(file);
+      
+      const currentDocs = inst.documents || {};
+      const updatedDocs = {
+        ...currentDocs,
+        [docKey]: compressedBase64,
+      };
+
+      await updateContractDocuments(inst.id, updatedDocs);
+      await fetchData();
+    } catch (error) {
+      console.error("خطأ في تغيير الصورة:", error);
+      alert("حدث خطأ أثناء تحميل الصورة الجديدة.");
+    } finally {
+      setUpdatingDocType(null);
+    }
+  };
+
+  // 🗑️ دالة حذف صورة وثيقة محددة
+  const handleDeleteDoc = async (inst: InstallmentData, docKey: "idCardUrl" | "contractUrl" | "personalPhotoUrl", docName: string) => {
+    if (!inst.id) return;
+    const confirmDelete = window.confirm(`هل أنت متأكد من حذف صورة (${docName})؟`);
+    if (!confirmDelete) return;
+
+    try {
+      setUpdatingDocType(docKey);
+      const currentDocs = inst.documents || {};
+      const updatedDocs = { ...currentDocs };
+      delete updatedDocs[docKey];
+
+      await updateContractDocuments(inst.id, updatedDocs);
+      await fetchData();
+    } catch (error) {
+      console.error("خطأ في حذف الصورة:", error);
+      alert("حدث خطأ أثناء حذف الصورة.");
+    } finally {
+      setUpdatingDocType(null);
+    }
+  };
 
   const triggerPrint = () => {
     setTimeout(() => {
@@ -294,7 +348,7 @@ function CustomerDetailsContent() {
   const mainInfo = installments[0];
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12 relative">
+    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12 relative font-sans text-right dir-rtl">
       <div className="flex items-center gap-4">
         <Link href="/customers" className="p-2 bg-card border border-border rounded-lg hover:bg-border/50 transition-colors">
           <ArrowRight className="w-5 h-5 text-foreground" />
@@ -347,6 +401,250 @@ function CustomerDetailsContent() {
         </div>
       </div>
 
+      {/* 🔒 بطاقة المستندات والأوراق الثبوتية القابلة للتعديل والحذف وتغيير الصور */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm transition-all">
+        <button
+          type="button"
+          onClick={() => setShowDocs(!showDocs)}
+          className="w-full p-4 flex items-center justify-between bg-secondary/20 hover:bg-secondary/40 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-primary font-bold">
+            <Camera className="w-5 h-5" />
+            <span>الأوراق والمستندات الثبوتية</span>
+            <span className="text-xs bg-primary/10 px-2 py-0.5 rounded-full text-primary font-normal">إدارة وتعديل</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs font-bold text-gray-500">
+            {showDocs ? (
+              <>
+                <EyeOff className="w-4 h-4 text-amber-500" />
+                <span>إخفاء المستندات</span>
+                <ChevronUp className="w-4 h-4" />
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4 text-primary" />
+                <span>عرض المستندات</span>
+                <ChevronDown className="w-4 h-4" />
+              </>
+            )}
+          </div>
+        </button>
+
+        {showDocs && (
+          <div className="p-6 border-t border-border animate-in fade-in duration-200 space-y-6">
+            {installments.map((inst, instIdx) => {
+              const docs = inst.documents || {};
+
+              return (
+                <div key={inst.id || instIdx} className="space-y-3">
+                  {installments.length > 1 && (
+                    <p className="text-xs font-bold text-primary border-b border-border/60 pb-1">
+                      مستندات العقد ({inst.productName}):
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {/* 1. الهوية / البطاقة الموحدة */}
+                    <div className="bg-secondary/30 border border-border rounded-2xl p-3 text-center space-y-2 group hover:border-primary/50 transition relative">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-500 px-1">
+                        <span className="flex items-center gap-1">
+                          <ImageIcon className="w-3.5 h-3.5 text-primary" /> الهوية / الموحدة
+                        </span>
+                        {docs.idCardUrl && (
+                          <button
+                            onClick={() => handleDeleteDoc(inst, "idCardUrl", "الهوية/الموحدة")}
+                            disabled={updatingDocType === "idCardUrl"}
+                            className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+                            title="حذف الصورة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {docs.idCardUrl ? (
+                        <div 
+                          onClick={() => setPreviewImage({ url: docs.idCardUrl!, title: `هوية العميل - ${inst.customerName}` })}
+                          className="relative h-40 w-full rounded-xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition"
+                        >
+                          <img src={docs.idCardUrl} alt="الهوية" className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
+                            <ExternalLink className="w-4 h-4" />
+                            <span>تكبير الصورة</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-40 w-full rounded-xl border border-dashed border-border/80 flex flex-col items-center justify-center text-gray-400 gap-2 bg-background/50">
+                          <ImageIcon className="w-8 h-8 text-gray-400 opacity-60" />
+                          <span className="text-xs">لم ترفع صورة الهوية</span>
+                        </div>
+                      )}
+
+                      {/* زر تغيير أو إضافة الصورة */}
+                      <label className="block w-full">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadOrReplaceDoc(inst, "idCardUrl", file);
+                          }}
+                        />
+                        <span className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm">
+                          {updatingDocType === "idCardUrl" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : docs.idCardUrl ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>تغيير الصورة</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>إضافة صورة</span>
+                            </>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* 2. صورة العقد الورقي */}
+                    <div className="bg-secondary/30 border border-border rounded-2xl p-3 text-center space-y-2 group hover:border-primary/50 transition relative">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-500 px-1">
+                        <span className="flex items-center gap-1">
+                          <FileText className="w-3.5 h-3.5 text-primary" /> العقد الورقي
+                        </span>
+                        {docs.contractUrl && (
+                          <button
+                            onClick={() => handleDeleteDoc(inst, "contractUrl", "العقد الورقي")}
+                            disabled={updatingDocType === "contractUrl"}
+                            className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+                            title="حذف الصورة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {docs.contractUrl ? (
+                        <div 
+                          onClick={() => setPreviewImage({ url: docs.contractUrl!, title: `عقد العميل الورقي - ${inst.customerName}` })}
+                          className="relative h-40 w-full rounded-xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition"
+                        >
+                          <img src={docs.contractUrl} alt="العقد الورقي" className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
+                            <ExternalLink className="w-4 h-4" />
+                            <span>تكبير الصورة</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-40 w-full rounded-xl border border-dashed border-border/80 flex flex-col items-center justify-center text-gray-400 gap-2 bg-background/50">
+                          <FileText className="w-8 h-8 text-gray-400 opacity-60" />
+                          <span className="text-xs">لم ترفع صورة العقد الورقي</span>
+                        </div>
+                      )}
+
+                      <label className="block w-full">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadOrReplaceDoc(inst, "contractUrl", file);
+                          }}
+                        />
+                        <span className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm">
+                          {updatingDocType === "contractUrl" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : docs.contractUrl ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>تغيير الصورة</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>إضافة صورة</span>
+                            </>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* 3. الصورة الشخصية للزبون */}
+                    <div className="bg-secondary/30 border border-border rounded-2xl p-3 text-center space-y-2 group hover:border-primary/50 transition relative">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-500 px-1">
+                        <span className="flex items-center gap-1">
+                          <User className="w-3.5 h-3.5 text-primary" /> الصورة الشخصية
+                        </span>
+                        {docs.personalPhotoUrl && (
+                          <button
+                            onClick={() => handleDeleteDoc(inst, "personalPhotoUrl", "الصورة الشخصية")}
+                            disabled={updatingDocType === "personalPhotoUrl"}
+                            className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+                            title="حذف الصورة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {docs.personalPhotoUrl ? (
+                        <div 
+                          onClick={() => setPreviewImage({ url: docs.personalPhotoUrl!, title: `الصورة الشخصية - ${inst.customerName}` })}
+                          className="relative h-40 w-full rounded-xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition"
+                        >
+                          <img src={docs.personalPhotoUrl} alt="الصورة الشخصية" className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
+                            <ExternalLink className="w-4 h-4" />
+                            <span>تكبير الصورة</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-40 w-full rounded-xl border border-dashed border-border/80 flex flex-col items-center justify-center text-gray-400 gap-2 bg-background/50">
+                          <User className="w-8 h-8 text-gray-400 opacity-60" />
+                          <span className="text-xs">لم ترفع صورة العميل</span>
+                        </div>
+                      )}
+
+                      <label className="block w-full">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadOrReplaceDoc(inst, "personalPhotoUrl", file);
+                          }}
+                        />
+                        <span className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm">
+                          {updatingDocType === "personalPhotoUrl" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : docs.personalPhotoUrl ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>تغيير الصورة</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>إضافة صورة</span>
+                            </>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {installments.map((item, idx) => {
         const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
         const periodUnitName = item.paymentPeriod === "daily" ? "أيام" : item.paymentPeriod === "weekly" ? "أسابيع" : "أشهر";
@@ -395,19 +693,19 @@ function CustomerDetailsContent() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-4 rounded-xl text-sm border border-border">
               <div>
                 <p className="text-gray-500 text-xs">سعر المنتج</p>
-                <p className="font-bold">{item.productPrice.toLocaleString()} د.ع</p>
+                <p className="font-bold">{item.productPrice.toLocaleString("en-US")} د.ع</p>
               </div>
               <div>
                 <p className="text-gray-500 text-xs">الدفعة المقدمة</p>
-                <p className="font-bold">{item.downPayment.toLocaleString()} د.ع</p>
+                <p className="font-bold">{item.downPayment.toLocaleString("en-US")} د.ع</p>
               </div>
               <div>
                 <p className="text-gray-500 text-xs">المتبقي للتقسيط</p>
-                <p className="font-extrabold text-foreground">{Math.round(item.totalDue).toLocaleString()} د.ع</p>
+                <p className="font-extrabold text-foreground">{Math.round(item.totalDue).toLocaleString("en-US")} د.ع</p>
               </div>
               <div>
                 <p className="text-gray-500 text-xs">القسط الـ{periodLabel}</p>
-                <p className="font-black text-primary">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</p>
+                <p className="font-black text-primary">{Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع</p>
               </div>
             </div>
 
@@ -441,7 +739,7 @@ function CustomerDetailsContent() {
                       return (
                         <tr key={mIdx} className="hover:bg-secondary/20 transition-colors">
                           <td className="p-3 font-bold text-primary">الدفعة #{mIdx + 1}</td>
-                          <td className="p-3 font-extrabold">{Math.round(item.monthlyInstallment).toLocaleString()} د.ع</td>
+                          <td className="p-3 font-extrabold">{Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع</td>
                           <td className="p-3 text-gray-500 font-bold" dir="ltr">{dueDateFormatted}</td>
                           <td className="p-3 text-center">
                             {isPaid ? (
@@ -512,7 +810,7 @@ function CustomerDetailsContent() {
                         return (
                           <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
                             <td className="p-3 font-semibold">{paidDate}</td>
-                            <td className="p-3 font-black text-emerald-700 dark:text-emerald-400">+{p.amount.toLocaleString()} د.ع</td>
+                            <td className="p-3 font-black text-emerald-700 dark:text-emerald-400">+{p.amount.toLocaleString("en-US")} د.ع</td>
                             <td className="p-3 font-bold text-gray-500" dir="ltr">{p.targetMonth || "-"}</td>
                             <td className="p-3 text-gray-500 text-xs max-w-[200px] truncate" title={p.notes}>
                               {p.notes || "دفعة اعتيادية"}
@@ -552,6 +850,50 @@ function CustomerDetailsContent() {
         );
       })}
 
+      {/* 🖼️ نافذة تكبير الصورة والتحميل */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div 
+            className="bg-card border border-border rounded-3xl p-4 max-w-3xl w-full space-y-4 relative overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-border pb-3">
+              <h3 className="font-bold text-foreground text-sm">{previewImage.title}</h3>
+              <button 
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 hover:bg-secondary rounded-full text-gray-400 hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative max-h-[70vh] flex items-center justify-center overflow-hidden rounded-2xl bg-black/20">
+              <img src={previewImage.url} alt="مكبر" className="max-h-[65vh] w-auto object-contain rounded-xl" />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <a 
+                href={previewImage.url} 
+                download="document.jpg"
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-primary/90 transition"
+              >
+                <Download className="w-4 h-4" />
+                <span>تحميل الصورة</span>
+              </a>
+              <button 
+                onClick={() => setPreviewImage(null)}
+                className="px-4 py-2 bg-secondary text-foreground rounded-xl text-xs font-bold hover:bg-secondary/80 transition"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="print-container">
         {printContractData && <ContractPrintTemplate installment={printContractData} />}
         {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}
@@ -584,7 +926,7 @@ function CustomerDetailsContent() {
                     type="number"
                     value={editForm.productPrice}
                     onChange={(e) => setEditForm({...editForm, productPrice: Number(e.target.value)})}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                   />
                 </div>
                 <div>
@@ -593,7 +935,7 @@ function CustomerDetailsContent() {
                     type="number"
                     value={editForm.downPayment}
                     onChange={(e) => setEditForm({...editForm, downPayment: Number(e.target.value)})}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                   />
                 </div>
               </div>
@@ -604,7 +946,7 @@ function CustomerDetailsContent() {
                     type="number"
                     value={editForm.monthlyInstallment}
                     onChange={(e) => setEditForm({...editForm, monthlyInstallment: Number(e.target.value)})}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                   />
                 </div>
                 <div>
@@ -613,7 +955,7 @@ function CustomerDetailsContent() {
                     type="number"
                     value={editForm.months}
                     onChange={(e) => setEditForm({...editForm, months: Number(e.target.value)})}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                   />
                 </div>
               </div>
@@ -656,7 +998,7 @@ function CustomerDetailsContent() {
                   type="number"
                   value={editPaymentForm.amount}
                   onChange={(e) => setEditPaymentForm({...editPaymentForm, amount: Number(e.target.value)})}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none"
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                 />
               </div>
               <div>
