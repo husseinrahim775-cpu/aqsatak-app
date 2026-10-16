@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "../../components/AuthProvider";
+import packageJson from "@/package.json";
 import { 
   Store, 
   Percent, 
@@ -58,10 +59,11 @@ export default function SettingsPage() {
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
-  // حالات التحديث التلقائي للديسك توب
+  // حالات التحديث التلقائي ورقم الإصدار الحقيقي للديسك توب
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "not_available" | "error">("idle");
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [newVersion, setNewVersion] = useState("");
+  const [currentAppVersion, setCurrentAppVersion] = useState("1.0.1");
 
   // حالات الإعدادات العامة
   const [storeName, setStoreName] = useState("");
@@ -152,11 +154,16 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔄 الاستماع لإشارات التحديث من Electron
+  // 🔄 الاستماع لإشارات التحديث ورقم الإصدار من Electron
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).require) {
       try {
         const { ipcRenderer } = (window as any).require("electron");
+
+        // 🟢 جلب رقم الإصدار الحقيقي للبرنامج المعتمد بـ package.json الخاص بـ Electron
+        ipcRenderer.invoke("get_app_version").then((ver: string) => {
+          if (ver) setCurrentAppVersion(ver);
+        }).catch(() => {});
 
         const handleUpdateStatus = (_: any, data: any) => {
           setUpdateStatus(data.status);
@@ -174,7 +181,7 @@ export default function SettingsPage() {
           }
 
           if (data.status === "error") {
-            toast.error("تعذر الفحص، تأكد من الاتصال بالإنترنت.");
+            toast.error(data.error || "تعذر الفحص، تأكد من الاتصال بالإنترنت.");
           }
         };
 
@@ -189,35 +196,22 @@ export default function SettingsPage() {
     }
   }, []);
 
- const handleCheckForUpdates = () => {
-  setUpdateStatus("checking");
+  const handleCheckForUpdates = () => {
+    setUpdateStatus("checking");
 
-  // ⏱️ وضع مؤقت لإنهاء حالة التحميل بعد 6 ثوانٍ في حال عدم استجابة السيرفر أو في بيئة التطوير
-  const timer = setTimeout(() => {
-    setUpdateStatus((currentStatus) => {
-      if (currentStatus === "checking") {
-        toast.info("أنظمة أقساطك محدثة لأحدث إصدار بالفعل!");
-        return "not_available";
+    if (typeof window !== "undefined" && (window as any).require) {
+      try {
+        const { ipcRenderer } = (window as any).require("electron");
+        ipcRenderer.send("check_for_updates");
+      } catch (e) {
+        setUpdateStatus("idle");
+        toast.error("حدث خطأ أثناء الاتصال بأداة التحديث.");
       }
-      return currentStatus;
-    });
-  }, 6000);
-
-  if (typeof window !== "undefined" && (window as any).require) {
-    try {
-      const { ipcRenderer } = (window as any).require("electron");
-      ipcRenderer.send("check_for_updates");
-    } catch (e) {
-      clearTimeout(timer);
+    } else {
       setUpdateStatus("idle");
-      toast.error("حدث خطأ أثناء الاتصال بأداة التحديث.");
+      toast.error("هذه الميزة تعمل فقط بداخل تطبيق الديسك توب المثبت.");
     }
-  } else {
-    clearTimeout(timer);
-    setUpdateStatus("idle");
-    toast.error("هذه الميزة تعمل فقط بداخل تطبيق الديسك توب المثبت.");
-  }
-};
+  };
 
   const handleRestartAndInstall = () => {
     if (typeof window !== "undefined" && (window as any).require) {
@@ -714,9 +708,11 @@ export default function SettingsPage() {
             <div>
               <h3 className="font-bold text-base text-foreground flex items-center gap-2">
                 تحديثات تطبيق أقساطك
-                <span className="text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-bold dir-ltr">v1.0.0</span>
+                <span className="text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-bold dir-ltr">
+                  v{currentAppVersion}
+                </span>
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">البحث عن التحديثات الجديدة  </p>
+              <p className="text-xs text-gray-500 mt-0.5">البحث عن التحديثات الجديدة</p>
             </div>
           </div>
 
