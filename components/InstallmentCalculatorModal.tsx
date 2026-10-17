@@ -16,10 +16,14 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
   const [period, setPeriod] = useState<"monthly" | "weekly" | "daily">("monthly");
   const [calcMode, setCalcMode] = useState<"byDuration" | "byPayment">("byDuration");
 
-  // المدخلات فارغة تماماً عند الفتح
+  // المدخلات الأساسية
   const [costPrice, setCostPrice] = useState<number | "">(""); 
   const [downPayment, setDownPayment] = useState<number | "">(""); 
   const [profitRate, setProfitRate] = useState<number | "">(""); 
+  const [totalPriceInput, setTotalPriceInput] = useState<number | "">(""); // 💵 حقل سعر البيع الكلي الجديد
+
+  // تحديد آخر حقل تم تعديله لمنع التعارض أثناء الحساب اللحظي ("rate" | "total")
+  const [lastEdited, setLastEdited] = useState<"rate" | "total">("rate");
   
   // مدخلات الأقساط
   const [durationCount, setDurationCount] = useState<number | "">(""); 
@@ -31,12 +35,60 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
       setCostPrice("");
       setDownPayment("");
       setProfitRate("");
+      setTotalPriceInput("");
       setDurationCount("");
       setCustomPayment("");
+      setLastEdited("rate");
     }
   }, [isOpen]);
 
-  // النتائج
+  // 🔄 معالجة تغيير سعر التكلفة (سعر الشراء)
+  const handleCostChange = (val: number | "") => {
+    setCostPrice(val);
+    const cost = Number(val) || 0;
+
+    if (lastEdited === "rate") {
+      const rate = Number(profitRate) || 0;
+      const computedTotal = cost > 0 ? Math.round(cost + (cost * rate) / 100) : "";
+      setTotalPriceInput(computedTotal);
+    } else {
+      const total = Number(totalPriceInput) || 0;
+      if (cost > 0 && total >= cost) {
+        const computedRate = ((total - cost) / cost) * 100;
+        setProfitRate(Number(computedRate.toFixed(2)));
+      }
+    }
+  };
+
+  // 📈 معالجة أدخال نسبة الفائدة المباشرة
+  const handleProfitRateChange = (val: number | "") => {
+    setProfitRate(val);
+    setLastEdited("rate");
+    const cost = Number(costPrice) || 0;
+    const rate = Number(val) || 0;
+
+    if (cost > 0) {
+      const computedTotal = Math.round(cost + (cost * rate) / 100);
+      setTotalPriceInput(computedTotal);
+    }
+  };
+
+  // 💵 معالجة أدخال سعر البيع الكلي المباشر
+  const handleTotalPriceInputChange = (val: number | "") => {
+    setTotalPriceInput(val);
+    setLastEdited("total");
+    const cost = Number(costPrice) || 0;
+    const total = Number(val) || 0;
+
+    if (cost > 0 && total >= cost) {
+      const computedRate = ((total - cost) / cost) * 100;
+      setProfitRate(Number(computedRate.toFixed(2)));
+    } else if (cost > 0 && total < cost) {
+      setProfitRate(0);
+    }
+  };
+
+  // النتائج الحسابية
   const [results, setResults] = useState({
     profitAmount: 0,
     totalFinalPrice: 0,
@@ -48,15 +100,15 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
   useEffect(() => {
     const cost = Number(costPrice) || 0;
     const down = Number(downPayment) || 0;
-    const rate = Number(profitRate) || 0;
+    let rate = Number(profitRate) || 0;
+    let totalFinalPrice = Number(totalPriceInput) || 0;
 
-    // 1. حساب ربح الفائدة على التكلفة الكاملة
-    const profitAmount = cost > 0 && rate > 0 ? Math.round((cost * rate) / 100) : 0;
+    if (lastEdited === "rate") {
+      const profitAmount = cost > 0 && rate > 0 ? Math.round((cost * rate) / 100) : 0;
+      totalFinalPrice = cost + profitAmount;
+    }
 
-    // 2. السعر النهائي الكلي بالتقسيط شامل الربح
-    const totalFinalPrice = cost + profitAmount;
-
-    // 3. إجمالي المتبقي للتقسيط بعد خصم المقدمة
+    const profitAmount = Math.max(0, totalFinalPrice - cost);
     const totalDue = Math.max(0, totalFinalPrice - down);
 
     let periodicPayment = 0;
@@ -79,11 +131,10 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
       periodicPayment,
       calculatedInstallmentsCount,
     });
-  }, [costPrice, downPayment, profitRate, durationCount, customPayment, period, calcMode]);
+  }, [costPrice, downPayment, profitRate, totalPriceInput, durationCount, customPayment, period, calcMode, lastEdited]);
 
   if (!isOpen) return null;
 
-  // دالة تحويل الأرقام للصيغة الإنجليزية مع الفواصل
   const formatNum = (num: number) => {
     return num.toLocaleString('en-US');
   };
@@ -169,7 +220,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
           </button>
         </div>
 
-        {/* حقول الإدخال بخط واضح وقراءة واضحة */}
+        {/* حقول الإدخال */}
         <div className="grid grid-cols-2 gap-3 text-xs md:text-sm font-sans">
           <div>
             <label className="block text-gray-500 font-bold mb-1">سعر شراء المنتج (التكلفة)</label>
@@ -177,7 +228,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
               type="number"
               placeholder="0"
               value={costPrice}
-              onChange={(e) => setCostPrice(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(e) => handleCostChange(e.target.value === "" ? "" : Number(e.target.value))}
               className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-foreground dir-ltr text-right"
             />
           </div>
@@ -199,8 +250,19 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
               type="number"
               placeholder="0"
               value={profitRate}
-              onChange={(e) => setProfitRate(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(e) => handleProfitRateChange(e.target.value === "" ? "" : Number(e.target.value))}
               className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-primary dir-ltr text-right"
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-500 font-bold mb-1">سعر البيع الكلي بالتقسيط</label>
+            <input
+              type="number"
+              placeholder="0"
+              value={totalPriceInput}
+              onChange={(e) => handleTotalPriceInputChange(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-emerald-600 dark:text-emerald-400 dir-ltr text-right"
             />
           </div>
 
@@ -217,7 +279,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
             </select>
           </div>
 
-          <div className="col-span-2">
+          <div>
             {calcMode === "byDuration" ? (
               <div>
                 <label className="block text-gray-500 font-bold mb-1">
@@ -249,7 +311,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
           </div>
         </div>
 
-        {/* بطاقة النتائج المباشرة بخط ناصع ومريح للعين */}
+        {/* بطاقة النتائج المباشرة */}
         <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20 p-4 rounded-2xl space-y-2.5 text-xs md:text-sm font-sans">
           <div className="flex justify-between items-center border-b border-primary/20 pb-2">
             <span className="font-bold text-gray-600 dark:text-gray-300">مبلغ القسط الـ ({getPeriodSingleText()}):</span>
@@ -269,7 +331,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
           </div>
 
           <div className="flex justify-between text-gray-500">
-            <span>إجمالي المتبقي للتقسيط (بعدخصم المقدمة):</span>
+            <span>إجمالي المتبقي للتقسيط (بعد خصم المقدمة):</span>
             <span className="font-bold text-foreground">{formatNum(results.totalDue)} د.ع</span>
           </div>
 

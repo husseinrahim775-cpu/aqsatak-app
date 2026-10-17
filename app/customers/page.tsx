@@ -250,8 +250,56 @@ export default function CustomersPage() {
     }
   };
 
+  // 📱💻 دالة الطباعة المحسّنة والمتوافقة مع الآيفون وأجهزة سطح المكتب
   const handleExecutePrint = () => {
-    window.print();
+    if (!printModalCustomer || !printRef.current) return;
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+    if (isIOS) {
+      // 📱 معالجة خاصة لأجهزة الآيفون والآيباد
+      const printHtml = printRef.current.innerHTML;
+      const printWindow = window.open("", "_blank");
+
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html dir="rtl" lang="ar">
+            <head>
+              <title>كشف حساب عميل - ${printModalCustomer.customerName}</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <script src="https://cdn.tailwindcss.com"></script>
+              <style>
+                body { 
+                  font-family: system-ui, -apple-system, sans-serif; 
+                  padding: 10px; 
+                  background: white; 
+                  color: black;
+                }
+                @media print {
+                  body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                }
+              </style>
+            </head>
+            <body>
+              ${printHtml}
+              <script>
+                window.onload = () => {
+                  setTimeout(() => {
+                    window.print();
+                  }, 500);
+                };
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } else {
+      // 💻 أجهزة الكمبيوتر والتطبيق الـ EXE
+      window.print();
+    }
+
     setPrintModalCustomer(null);
   };
 
@@ -550,8 +598,8 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {/* 🖨️ القالب الفعلي للطباعة */}
-      <div className="hidden print:block">
+      {/* 🖨️ القالب الفعلي للطباعة المخصص */}
+      <div className="hidden print:block print:fixed print:inset-0 print:z-[9999] print:bg-white print:p-0">
         {printModalCustomer && (
           <CustomerStatementPrintTemplate
             ref={printRef}

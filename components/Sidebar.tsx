@@ -74,10 +74,17 @@ export default function Sidebar() {
     <aside className="w-64 bg-card border-l border-border h-screen sticky top-0 flex flex-col justify-between p-4 shadow-sm select-none">
       
       <div>
-        {/* اسم النظام والشعار */}
-        <div className="mb-8 mt-4 text-center">
-          <h2 className="text-3xl font-extrabold text-primary">أقساطك</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
+        {/* اسم النظام والشعار المحسّن للمتصفحات وSafari */}
+        <div className="mb-8 mt-4 text-center flex flex-col items-center justify-center">
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <img 
+              src="/logo.png" 
+              alt="أقساطك" 
+              className="w-9 h-9 object-contain"
+            />
+            <h2 className="text-3xl font-extrabold text-primary">أقساطك</h2>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
             {isEmployee ? `حساب موظف: ${userData?.name || "الموظف"}` : "نظام الإدارة المالي"}
           </p>
         </div>

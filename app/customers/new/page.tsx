@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock, Package, Camera, FileText, Image as ImageIcon } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { 
   addInstallmentRecord, 
   getUserInstallments, 
@@ -26,6 +26,7 @@ interface ExistingCustomer {
 
 export default function NewInstallmentPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -338,7 +339,7 @@ export default function NewInstallmentPage() {
         }
 
         toast.success("تم حفظ بيانات القسط والأوراق الثبوتية بنجاح!");
-        window.location.href = "/customers";
+        router.push("/customers");
       } else {
         toast.error("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, Suspense, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { 
   getInstallmentsByPhone, 
@@ -53,6 +53,9 @@ function CustomerDetailsContent() {
 
   const [printContractData, setPrintContractData] = useState<InstallmentData | null>(null);
   const [printPaymentData, setPrintPaymentData] = useState<PaymentRecord | null>(null);
+
+  // 🖨️ مرجع حاوية الطباعة
+  const printAreaRef = useRef<HTMLDivElement>(null);
 
   const [editingInstallment, setEditingInstallment] = useState<InstallmentData | null>(null);
   const [editForm, setEditForm] = useState({
@@ -146,10 +149,42 @@ function CustomerDetailsContent() {
     }
   };
 
+  // 📱💻 دالة الطباعة المتوافقة مع الآيفون والـ EXE
   const triggerPrint = () => {
     setTimeout(() => {
-      window.print();
-    }, 150);
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+      if (isIOS && printAreaRef.current) {
+        const printWindow = window.open("", "_blank");
+        if (printWindow) {
+          printWindow.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl" lang="ar">
+              <head>
+                <title>طباعة</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <script src="https://cdn.tailwindcss.com"></script>
+                <style>
+                  body { font-family: system-ui, sans-serif; padding: 10px; background: white; color: black; }
+                  @media print { body { -webkit-print-color-adjust: exact !important; } }
+                </style>
+              </head>
+              <body>
+                ${printAreaRef.current.innerHTML}
+                <script>
+                  window.onload = () => {
+                    setTimeout(() => { window.print(); }, 300);
+                  };
+                </script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+      } else {
+        window.print();
+      }
+    }, 250);
   };
 
   const handleDeleteInstallment = async (id: string, productName: string) => {
@@ -894,7 +929,8 @@ function CustomerDetailsContent() {
         </div>
       )}
 
-      <div className="print-container">
+      {/* 🖨️ حاوية قوالب الطباعة المربوطة بالـ Ref للـ iOS */}
+      <div ref={printAreaRef} className="print-container hidden print:block">
         {printContractData && <ContractPrintTemplate installment={printContractData} />}
         {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}
       </div>
