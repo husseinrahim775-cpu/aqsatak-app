@@ -99,8 +99,10 @@ export default function CustomersPage() {
       const instPayments = payments.filter((p) => p.installmentId === item.id);
       const paidForInst = instPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-      // 🟢 الحساب المباشر والدقيق للمتبقي الفعلي للقسط
+      const originalForInst = (Number(item.productPrice) || 0) - (Number(item.downPayment) || 0);
       const remainingForInst = Number(item.totalDue) || 0;
+
+      cust.totalOriginalDue += originalForInst;
       cust.totalRemaining += remainingForInst;
       cust.totalPaid += paidForInst;
     });
@@ -110,7 +112,6 @@ export default function CustomersPage() {
     map.forEach((cust) => {
       cust.isFullyPaid = cust.totalRemaining <= 0;
 
-      // 🚨 احتساب التقييم التلقائي باللون المناسب والقائمة السوداء
       cust.riskStatus = calculateCustomerRisk(
         cust.installments,
         payments,
@@ -250,54 +251,79 @@ export default function CustomersPage() {
     }
   };
 
-  // 📱💻 دالة الطباعة المحسّنة والمتوافقة مع الآيفون وأجهزة سطح المكتب
+  // 📱💻 دالة الطباعة الشاملة المصممة لتفتح المستند وتدعم تعدد الصفحات والحفظ كـ PDF
   const handleExecutePrint = () => {
     if (!printModalCustomer || !printRef.current) return;
 
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                  (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
+    const contentHtml = printRef.current.innerHTML;
+
+    const fullDocumentHtml = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+        <head>
+          <title>كشف حساب عميل - ${printModalCustomer.customerName}</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @page { size: auto; margin: 10mm; }
+            html, body { 
+              height: auto !important; 
+              overflow: visible !important; 
+              font-family: system-ui, -apple-system, sans-serif; 
+              padding: 15px; 
+              background: white; 
+              color: black; 
+              -webkit-print-color-adjust: exact !important; 
+              print-color-adjust: exact !important; 
+            }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; page-break-after: auto; }
+            thead { display: table-header-group; }
+            @media print {
+              .print-action-bar { display: none !important; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-action-bar" style="position: sticky; top: 0; z-index: 9999; background: #1e293b; color: white; padding: 12px; margin-bottom: 20px; text-align: center; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            <button onclick="window.print()" style="background: #2563eb; color: white; padding: 10px 28px; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: background 0.2s;">
+              🖨️ اضغط هنا لتحديد الطابعة أو الحفظ كـ PDF
+            </button>
+          </div>
+
+          ${contentHtml}
+
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                try {
+                  window.print();
+                } catch(e) {}
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
 
     if (isIOS) {
-      // 📱 معالجة خاصة لأجهزة الآيفون والآيباد
-      const printHtml = printRef.current.innerHTML;
-      const printWindow = window.open("", "_blank");
-
-      if (printWindow) {
-        printWindow.document.write(`
-          <!DOCTYPE html>
-          <html dir="rtl" lang="ar">
-            <head>
-              <title>كشف حساب عميل - ${printModalCustomer.customerName}</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <script src="https://cdn.tailwindcss.com"></script>
-              <style>
-                body { 
-                  font-family: system-ui, -apple-system, sans-serif; 
-                  padding: 10px; 
-                  background: white; 
-                  color: black;
-                }
-                @media print {
-                  body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-                }
-              </style>
-            </head>
-            <body>
-              ${printHtml}
-              <script>
-                window.onload = () => {
-                  setTimeout(() => {
-                    window.print();
-                  }, 500);
-                };
-              </script>
-            </body>
-          </html>
-        `);
-        printWindow.document.close();
+      const printWin = window.open("", "_blank");
+      if (printWin) {
+        printWin.document.open();
+        printWin.document.write(fullDocumentHtml);
+        printWin.document.close();
       }
     } else {
-      // 💻 أجهزة الكمبيوتر والتطبيق الـ EXE
-      window.print();
+      const blob = new Blob([fullDocumentHtml], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const printWin = window.open(url, "_blank", "width=900,height=800");
+
+      if (!printWin) {
+        window.print();
+      }
     }
 
     setPrintModalCustomer(null);
@@ -392,14 +418,12 @@ export default function CustomersPage() {
                   <h3 className="font-bold text-base md:text-lg text-foreground flex items-center gap-2">
                     {customer.customerName}
                     <div className="flex items-center gap-1">
-                      {/* 🖨️ زر طباعة كشف الحساب */}
                       <button onClick={() => setPrintModalCustomer(customer)} className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-md transition-colors" title="طباعة كشف حساب">
                         <Printer className="w-4 h-4" />
                       </button>
                       <button onClick={() => openFineModal(customer)} className="p-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-md transition-colors" title="إضافة غرامة تأخير">
                         <AlertCircle className="w-4 h-4" />
                       </button>
-                      {/* 🚨 زر القائمة السوداء (الحظر) */}
                       <button 
                         onClick={() => {
                           setBlacklistModalCust(customer);
@@ -426,7 +450,6 @@ export default function CustomersPage() {
                 </div>
 
                 <div className="flex flex-col items-end gap-1.5">
-                  {/* 🟢🟡🔴 شارة التقييم الآلي ومستوى الالتزام */}
                   <span className={`px-2.5 py-1 rounded-full border text-[10px] md:text-xs font-bold ${customer.riskStatus.color}`}>
                     {customer.riskStatus.label}
                   </span>

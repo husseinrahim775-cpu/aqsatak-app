@@ -145,44 +145,72 @@ function CustomerDetailsContent() {
       console.error("خطأ في حذف الصورة:", error);
       alert("حدث خطأ أثناء حذف الصورة.");
     } finally {
-      setUpdatingDocType(null);
+      setIsSaving(false);
     }
   };
 
-  // 📱💻 دالة الطباعة المتوافقة مع الآيفون والـ EXE
+  // 📱💻 دالة الطباعة المتوافقة مع كافة الأجهزة مع إصلاح الشعار
   const triggerPrint = () => {
     setTimeout(() => {
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      if (!printAreaRef.current) return;
 
-      if (isIOS && printAreaRef.current) {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const contentHtml = printAreaRef.current.innerHTML;
+
+      const fullDocumentHtml = `
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+          <head>
+            <title>طباعة عقد العميل</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <script src="https://cdn.tailwindcss.com"></script>
+            <style>
+              @page { size: auto; margin: 10mm; }
+              body { 
+                font-family: system-ui, -apple-system, sans-serif; 
+                padding: 15px; 
+                background: white; 
+                color: black; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+              }
+              @media print {
+                .no-print { display: none !important; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="no-print mb-4 text-center">
+              <button onclick="window.print()" style="background:#2563eb; color:white; font-weight:bold; padding:10px 24px; border-radius:8px; border:none; cursor:pointer;">
+                🖨️ اضغط هنا لتحديد الطابعة والبدء بالطباعة
+              </button>
+            </div>
+
+            ${contentHtml}
+
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  try { window.print(); } catch(e){}
+                }, 500);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (isIOS) {
         const printWindow = window.open("", "_blank");
         if (printWindow) {
-          printWindow.document.write(`
-            <!DOCTYPE html>
-            <html dir="rtl" lang="ar">
-              <head>
-                <title>طباعة</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <script src="https://cdn.tailwindcss.com"></script>
-                <style>
-                  body { font-family: system-ui, sans-serif; padding: 10px; background: white; color: black; }
-                  @media print { body { -webkit-print-color-adjust: exact !important; } }
-                </style>
-              </head>
-              <body>
-                ${printAreaRef.current.innerHTML}
-                <script>
-                  window.onload = () => {
-                    setTimeout(() => { window.print(); }, 300);
-                  };
-                </script>
-              </body>
-            </html>
-          `);
+          printWindow.document.open();
+          printWindow.document.write(fullDocumentHtml);
           printWindow.document.close();
         }
       } else {
-        window.print();
+        const blob = new Blob([fullDocumentHtml], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "width=900,height=800");
       }
     }, 250);
   };
@@ -436,7 +464,7 @@ function CustomerDetailsContent() {
         </div>
       </div>
 
-      {/* 🔒 بطاقة المستندات والأوراق الثبوتية القابلة للتعديل والحذف وتغيير الصور */}
+      {/* 🔒 بطاقة المستندات والأوراق الثبوتية */}
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm transition-all">
         <button
           type="button"
@@ -516,7 +544,6 @@ function CustomerDetailsContent() {
                         </div>
                       )}
 
-                      {/* زر تغيير أو إضافة الصورة */}
                       <label className="block w-full">
                         <input
                           type="file"
@@ -929,7 +956,7 @@ function CustomerDetailsContent() {
         </div>
       )}
 
-      {/* 🖨️ حاوية قوالب الطباعة المربوطة بالـ Ref للـ iOS */}
+      {/* 🖨️ حاوية قوالب الطباعة */}
       <div ref={printAreaRef} className="print-container hidden print:block">
         {printContractData && <ContractPrintTemplate installment={printContractData} />}
         {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}

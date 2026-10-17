@@ -3,9 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { InstallmentData, PaymentRecord, getCompanySettings } from "@/services/firestore";
 import { auth } from "@/services/firebase";
-import defaultLogo from "@/public/logo.png"; // الشعار الافتراضي للنظام في حال عدم رفع شعار خاص
+import defaultLogo from "@/public/logo.png";
 
-// دالة مساعدة لجلب ownerUid الحقيقي (سواء كان المسجل مديراً أو موظفاً)
 const getOwnerUid = () => {
   const activeSession = sessionStorage.getItem("active_session");
   if (activeSession) {
@@ -92,7 +91,6 @@ export const ContractPrintTemplate = React.forwardRef<
 
   return (
     <div ref={ref} className="p-8 bg-white text-black font-sans space-y-6 text-right dir-rtl leading-relaxed">
-      {/* هيدر العقد مع الشعار الديناميكي */}
       <div className="border-b-2 border-black pb-4 mb-4">
         <div className="flex justify-between items-center">
           <img 
@@ -340,9 +338,38 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
     fetchStoreSettings();
   }, [customer]);
 
+  // ✅ حساب إجمالي الدين المطلوب للتقسيط المباشر لضمان دقة الأرقام
+  const calculatedTotalOriginalDue = customer.installments.reduce((sum, inst) => {
+    return sum + ((Number(inst.productPrice) || 0) - (Number(inst.downPayment) || 0));
+  }, 0);
+
+  const calculatedTotalRemaining = customer.installments.reduce((sum, inst) => {
+    return sum + (Number(inst.totalDue) || 0);
+  }, 0);
+
   return (
     <div ref={ref} className="p-8 bg-white text-black font-sans space-y-6 text-right dir-rtl leading-relaxed">
-      {/* 🖼️ هيدر الكشف المحترف بالشعار الديناميكي الخاص بكل عميل */}
+      {/* تنسيقات CSS لمنع قص الصفحات عند الطباعة وحل مشكلة اللابتوب */}
+      <style>{`
+        @media print {
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+          }
+          table {
+            page-break-inside: auto;
+          }
+          tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          thead {
+            display: table-header-group;
+          }
+        }
+      `}</style>
+
+      {/* هيدر الكشف المحترف */}
       <div className="border-b-2 border-black pb-4 mb-4">
         <div className="flex justify-between items-center">
           <img 
@@ -372,11 +399,11 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
         </div>
         <div className="space-y-1 text-left font-mono">
           <p className="text-xs text-gray-600">إجمالي المطلوب للتقسيط:</p>
-          <p className="font-bold text-sm">{Math.round(customer.totalOriginalDue).toLocaleString()} د.ع</p>
+          <p className="font-bold text-sm">{Math.round(calculatedTotalOriginalDue || customer.totalOriginalDue).toLocaleString()} د.ع</p>
           <p className="text-xs text-gray-600">المبلغ المسدد فعلياً:</p>
           <p className="font-bold text-sm text-emerald-700">{Math.round(customer.totalPaid).toLocaleString()} د.ع</p>
           <p className="text-xs text-gray-600">المتبقي الذمة الماليّة:</p>
-          <p className="font-black text-base text-rose-700">{Math.round(customer.totalRemaining).toLocaleString()} د.ع</p>
+          <p className="font-black text-base text-rose-700">{Math.round(calculatedTotalRemaining || customer.totalRemaining).toLocaleString()} د.ع</p>
         </div>
       </div>
 
