@@ -32,8 +32,14 @@ import {
   Image as ImageIcon,
   RefreshCw,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Settings,
+  Zap,
+  ShieldCheck
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   getUserInstallments, 
   getUserPayments, 
@@ -52,12 +58,45 @@ import { db } from "../../services/firebase";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, userData } = useAuth() as any;
   const [saved, setSaved] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [uploadingToDrive, setUploadingToDrive] = useState(false);
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
+
+  // إيميل الأدمن الرئيسي
+  const ADMIN_EMAIL = "admin@aqsatak.com";
+  // فحص هل الحساب الحالي هو الأدمن الرئيسي
+  const isAdmin = userData?.role === "admin" || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+
+  // 🗂️ حالة التحكم بالبطاقات المطوية
+  const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
+    subscriptionInfo: true, // مفتوح افتراضياً لعرض حالة الاشتراك
+    updates: true,
+    security: false,
+    employees: false,
+    company: false,
+    whatsapp: false,
+    financial: false,
+    theme: false,
+    backup: false,
+  });
+
+  const toggleSection = (key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // 📐 حساب الأيام المتبقية والباقة للحساب المسجل
+  const currentSub = userData?.subscription;
+  const endDate = currentSub?.endDate ? new Date(currentSub.endDate) : null;
+  const daysLeft = endDate ? Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+
+  const planNames: Record<string, string> = {
+    basic: "الباقة الأساسية (Basic)",
+    plus: "باقة بلس (Plus)",
+    super: "الباقة الفائقة (Super)",
+  };
 
   // حالات التحديث التلقائي ورقم الإصدار الحقيقي للديسك توب
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "not_available" | "error">("idle");
@@ -160,7 +199,6 @@ export default function SettingsPage() {
       try {
         const { ipcRenderer } = (window as any).require("electron");
 
-        // 🟢 جلب رقم الإصدار الحقيقي للبرنامج المعتمد بـ package.json الخاص بـ Electron
         ipcRenderer.invoke("get_app_version").then((ver: string) => {
           if (ver) setCurrentAppVersion(ver);
         }).catch(() => {});
@@ -220,7 +258,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🖼️ معالجة رفع صورة اللوجو وتغييرها
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -683,646 +720,814 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-12">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground">إعدادات النظام وإدارة الموظفين</h1>
-        <p className="text-gray-500 text-xs md:text-sm mt-1">
-          تخصيص تفاصيل المكتب، التحديثات المباشرة، إضافة الموظفين وصلاحياتهم، والنسخ الاحتياطي.
-        </p>
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="max-w-4xl mx-auto space-y-5 md:space-y-6 pb-12 font-sans dir-rtl text-right"
+    >
+      {/* 1. ترويسة الصفحة المودرن  */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
+        <div>
+          <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
+            <Settings className="w-6 h-6 text-orange-500" />
+            إعدادات النظام وإدارة الموظفين
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">تخصيص تفاصيل المكتب، التحديثات المباشرة، الصلاحيات، والنسخ الاحتياطي .</p>
+        </div>
+
+        <button
+          onClick={() => handleSaveSettings({ preventDefault: () => {} } as any)}
+          disabled={loadingAction}
+          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-3 rounded-2xl font-bold text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-all disabled:opacity-50"
+        >
+          {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <span>حفظ التعديلات العامة</span>
+        </button>
       </div>
 
       {saved && (
-        <div className="p-3 md:p-4 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 rounded-xl flex items-center gap-2 md:gap-3 text-xs md:text-sm font-bold animate-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center gap-2.5 text-xs font-black animate-in slide-in-from-top-2">
+          <CheckCircle2 className="w-5 h-5" />
           <span>تم حفظ الإعدادات وتحديث بيانات الشعار والشركة بنجاح!</span>
         </div>
       )}
 
-      {/* 🚀 قسم تحديثات تطبيق أقساطك (Electron Auto-Updater) */}
-      <div className="bg-card border border-border p-5 md:p-6 rounded-2xl space-y-4 shadow-sm dir-rtl text-right">
-        <div className="flex justify-between items-center border-b border-border pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-primary/10 text-primary rounded-xl">
-              <RefreshCw className={`w-5 h-5 ${updateStatus === "checking" ? "animate-spin" : ""}`} />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-foreground flex items-center gap-2">
-                تحديثات تطبيق أقساطك
-                <span className="text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-bold dir-ltr">
-                  v{currentAppVersion}
-                </span>
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">البحث عن التحديثات الجديدة</p>
-            </div>
+      {/* 🎯 كارت متابعة تفاصيل الاشتراك الحالي وحساب الأيام المتبقية (محدث للـ Admin) */}
+      <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-4">
+        <div className="flex justify-between items-center border-b border-border/60 pb-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-orange-500" />
+            <h3 className="font-black text-sm text-foreground">حالة اشتراك الحساب المسجل</h3>
           </div>
-
-          <button
-            type="button"
-            onClick={handleCheckForUpdates}
-            disabled={updateStatus === "checking" || updateStatus === "downloading"}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50 shadow-sm"
-          >
-            {updateStatus === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            <span>{updateStatus === "checking" ? "جاري الفحص..." : "فحص التحديثات"}</span>
-          </button>
+          <span className="text-[10px] font-black px-3 py-1 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+            {isAdmin ? "وصول غير محدود" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية")}
+          </span>
         </div>
 
-        {/* 1. جاري التحميل */}
-        {updateStatus === "downloading" && (
-          <div className="space-y-2 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-            <div className="flex justify-between items-center text-xs text-blue-600 font-bold">
-              <span>جاري تنزيل التحديث الجديد ({newVersion})...</span>
-              <span dir="ltr">{downloadProgress}%</span>
-            </div>
-            <div className="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-2 overflow-hidden">
-              <div className="bg-blue-600 h-full transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
+            <span className="text-[10px] text-muted-foreground font-bold block">نوع الباقة المخصصة</span>
+            <span className="text-xs font-black text-foreground">
+              {isAdmin ? "الباقة الإدارية الشاملة" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية (Basic)")}
+            </span>
           </div>
-        )}
 
-        {/* 2. التحديث جاهز للتثبيت */}
-        {updateStatus === "ready" && (
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="w-5 h-5 shrink-0" />
-              <span className="text-xs md:text-sm font-bold">تم تنزيل الإصدار الجديد ({newVersion}) وجاهز للتثبيت!</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleRestartAndInstall}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm w-full sm:w-auto justify-center"
-            >
-              <Download className="w-4 h-4" />
-              <span>إعادة التشغيل والتثبيت الآن</span>
-            </button>
+          <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
+            <span className="text-[10px] text-muted-foreground font-bold block">فترة الاشتراك</span>
+            <span className="text-xs font-black text-foreground">
+              {isAdmin ? "دائم / غير محدود" : (currentSub?.period === "yearly" ? "سنوي" : "شهري")}
+            </span>
           </div>
-        )}
 
-        {/* 3. النظام محدث */}
-        {updateStatus === "not_available" && (
-          <p className="text-xs text-emerald-600 font-bold flex items-center gap-1.5">
-            <CheckCircle2 className="w-4 h-4" /> تطبيقك يعمل بأحدث إصدار متوفر.
-          </p>
-        )}
+          <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
+            <span className="text-[10px] text-muted-foreground font-bold block">المدة المتبقية</span>
+            {isAdmin ? (
+              <span className="text-xs font-black text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-purple-500" />
+                غير محدود (أدمن)
+              </span>
+            ) : daysLeft > 0 ? (
+              <span className={`text-xs font-black font-mono ${daysLeft <= 7 ? "text-rose-500 animate-pulse" : "text-emerald-500"}`}>
+                {daysLeft} يوم متبقي
+              </span>
+            ) : (
+              <span className="text-xs font-black text-rose-500">
+                منتهي (يرجى التواصل للتجديد)
+              </span>
+            )}
+          </div>
+        </div>
 
-        {/* 4. خطأ */}
-        {updateStatus === "error" && (
-          <p className="text-xs text-rose-500 font-bold flex items-center gap-1.5">
-            <AlertCircle className="w-4 h-4" /> تعذر الاتصال بخادم التحديثات. تحقق من شبكة الإنترنت.
-          </p>
+        {!isAdmin && daysLeft <= 7 && daysLeft > 0 && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold rounded-2xl flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>تنبيّه: اشتراكك الحسابي على وشك الانتهاء خلال {daysLeft} أيام!</span>
+          </div>
         )}
       </div>
 
-      {/* 🔒 1. أمان وحماية حساب الشركة والرمز السرّي */}
-      <div className="bg-card border border-primary/30 rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-          <Key className="w-4 h-4 md:w-5 md:h-5" />
-          <h2 className="font-bold text-base md:text-lg">أمان وحماية حساب الشركة والرمز السرّي</h2>
-        </div>
-
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-primary/5 border border-primary/20 p-4 rounded-xl">
-          <div className="space-y-1">
-            <p className="font-bold text-sm text-foreground flex items-center gap-2">
-              <Mail className="w-4 h-4 text-primary" />
-              <span>البريد الإلكتروني الحالي للمدير:</span>
-            </p>
-            <p className="text-xs font-mono font-bold text-primary dir-ltr">{user?.email || "غير مسجل"}</p>
-            <p className="text-[11px] text-gray-500 mt-1">
-              في حال نسيت كلمة المرور أو رغبت بتغييرها، اضغط الزر لإرسال رابط إعادة التعيين الرسمي لحساب الجيميل الخاص بك.
-            </p>
-          </div>
-
+      <form onSubmit={handleSaveSettings} className="space-y-4">
+        
+        {/* 🚀 1. قسم التحديثات الذكية  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
-            onClick={handleSendPasswordReset}
-            disabled={isSendingReset}
-            className="px-4 py-2.5 bg-primary text-primary-foreground text-xs md:text-sm font-bold rounded-xl hover:bg-primary/90 transition-all shadow-sm flex items-center gap-2 shrink-0 active:scale-95 disabled:opacity-50"
+            onClick={() => toggleSection("updates")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
           >
-            {isSendingReset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-            <span>إرسال رابط تغيير الرمز إلى الجيميل</span>
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-orange-500/10 text-orange-500 rounded-xl">
+                <RefreshCw className={`w-4 h-4 ${updateStatus === "checking" ? "animate-spin" : ""}`} />
+              </div>
+              <span>تحديثات النظام وإصدار التطبيق</span>
+              <span className="text-[10px] bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 px-2.5 py-0.5 rounded-full font-bold dir-ltr">
+                v{currentAppVersion}
+              </span>
+            </div>
+
+            {openSections.updates ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
           </button>
-        </div>
 
-        <div className="pt-3 border-t border-border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/20 p-4 rounded-xl">
-          <div>
-            <p className="text-xs md:text-sm font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
-            <p className="text-[11px] text-gray-500 mt-0.5">
-              الرمز الذي تستخدمه لدخول حساب المالك من شاشة اختيار الموظف بدلاً من كتابة كلمة سر الشركة أمام الآخرين.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <input
-              type="password"
-              value={adminPin}
-              onChange={(e) => setAdminPin(e.target.value)}
-              placeholder="1234"
-              className="p-2.5 border border-border bg-background rounded-xl text-center font-mono w-32 text-sm outline-none focus:ring-2 focus:ring-primary font-bold"
-              dir="ltr"
-            />
-            <button
-              type="button"
-              onClick={handleUpdateAdminPin}
-              disabled={savingPin}
-              className="px-4 py-2.5 bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-            >
-              {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ الرمز"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 👥 2. إضافة وتحديد صلاحيات الموظفين */}
-      <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-          <UserPlus className="w-4 h-4 md:w-5 md:h-5" />
-          <h2 className="font-bold text-base md:text-lg">إضافة موظف جديد وتخصيص الصلاحيات</h2>
-        </div>
-
-        <form onSubmit={handleAddEmployee} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم الموظف</label>
-              <input
-                type="text"
-                required
-                placeholder="مثال: أحمد علي"
-                value={empForm.name}
-                onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم المستخدم (Username)</label>
-              <input
-                type="text"
-                required
-                placeholder="مثال: ahmed123"
-                value={empForm.username}
-                onChange={(e) => setEmpForm({ ...empForm, username: e.target.value })}
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50 text-left font-mono"
-                dir="ltr"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">رمز المرور الخاص به</label>
-              <input
-                type="text"
-                required
-                placeholder="11223344"
-                value={empForm.password}
-                onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/50 text-left font-mono"
-                dir="ltr"
-              />
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-border">
-            <label className="block text-xs font-bold text-gray-500 mb-2">تحديد أقسام الشاشة المسموح للموظف بدخولها:</label>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-bold">
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={empForm.canManageCustomers}
-                  onChange={(e) => setEmpForm({ ...empForm, canManageCustomers: e.target.checked })}
-                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
-                />
-                <span>تسجيل عملاء وتلقي دفعات</span>
-              </label>
-
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={empForm.canManageStore}
-                  onChange={(e) => setEmpForm({ ...empForm, canManageStore: e.target.checked })}
-                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
-                />
-                <span>إدارة المخزن والمبيعات</span>
-              </label>
-
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={empForm.canViewDashboard}
-                  onChange={(e) => setEmpForm({ ...empForm, canViewDashboard: e.target.checked })}
-                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
-                />
-                <span>عرض الداشبورد والمركز المالي</span>
-              </label>
-
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={empForm.canViewTreasury}
-                  onChange={(e) => setEmpForm({ ...empForm, canViewTreasury: e.target.checked })}
-                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
-                />
-                <span>عرض الخزينة ورصيد السيولة</span>
-              </label>
-
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/60 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={empForm.canDeleteOrEdit}
-                  onChange={(e) => setEmpForm({ ...empForm, canDeleteOrEdit: e.target.checked })}
-                  className="rounded text-primary focus:ring-primary w-4 h-4 accent-primary"
-                />
-                <span>تعديل وحذف العقود والدفعات</span>
-              </label>
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={submittingUser || !empForm.name || !empForm.username}
-            className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs md:text-sm hover:bg-primary/90 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
-          >
-            {submittingUser ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-            <span>حفظ الموظف بنجاح</span>
-          </button>
-        </form>
-
-        <div className="pt-4 border-t border-border space-y-3">
-          <h3 className="font-bold text-sm flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
-            <span>قائمة الموظفين النشطين حالياً بالمنظومة:</span>
-          </h3>
-
-          {loadingUsers ? (
-            <div className="text-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" />
-            </div>
-          ) : usersList.length === 0 ? (
-            <p className="text-xs text-gray-400 italic py-2">لا يوجد موظفين مسجلين في الوقت الحالي.</p>
-          ) : (
-            <div className="divide-y divide-border border border-border rounded-xl overflow-hidden">
-              {usersList.map((emp) => (
-                <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-secondary/20 transition-colors bg-card">
+          <AnimatePresence>
+            {openSections.updates && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div>
-                    <p className="font-bold text-xs md:text-sm text-foreground flex items-center gap-2">
-                      <UserCheck className="w-4 h-4 text-primary" />
-                      <span>{emp.name}</span>
+                    <h4 className="font-bold text-xs md:text-sm text-foreground">البحث الآلي عن التحديثات المباشرة</h4>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">افحص وجود إصدار جديد من أداة أقساطك الديسك توب لضمان أعلى أداء.</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCheckForUpdates}
+                    disabled={updateStatus === "checking" || updateStatus === "downloading"}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all disabled:opacity-50 shadow-sm shrink-0"
+                  >
+                    {updateStatus === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    <span>{updateStatus === "checking" ? "جاري الفحص..." : "فحص التحديثات الآن"}</span>
+                  </button>
+                </div>
+
+                {updateStatus === "downloading" && (
+                  <div className="space-y-2 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                    <div className="flex justify-between items-center text-xs text-blue-600 font-bold">
+                      <span>جاري تنزيل التحديث الجديد ({newVersion})...</span>
+                      <span dir="ltr">{downloadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-2 overflow-hidden">
+                      <div className="bg-blue-600 h-full transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {updateStatus === "ready" && (
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="w-5 h-5 shrink-0" />
+                      <span className="text-xs font-bold">تم تنزيل الإصدار الجديد ({newVersion}) وجاهز للتثبيت!</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRestartAndInstall}
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm w-full sm:w-auto justify-center"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>إعادة التشغيل والتثبيت الآن</span>
+                    </button>
+                  </div>
+                )}
+
+                {updateStatus === "not_available" && (
+                  <p className="text-xs text-emerald-600 font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> تطبيقك يعمل بأحدث إصدار متوفر.
+                  </p>
+                )}
+
+                {updateStatus === "error" && (
+                  <p className="text-xs text-rose-500 font-bold flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" /> تعذر الاتصال بخادم التحديثات. تحقق من شبكة الإنترنت.
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 🔒 2. قسم أمان حساب الشركة والرمز السرّي PIN  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("security")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-purple-500/10 text-purple-500 rounded-xl">
+                <Key className="w-4 h-4" />
+              </div>
+              <span>أمان حساب الشركة ورمز PIN السريع للمالك</span>
+            </div>
+
+            {openSections.security ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          <AnimatePresence>
+            {openSections.security && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-orange-500/5 border border-orange-500/20 p-4 rounded-2xl">
+                  <div className="space-y-1">
+                    <p className="font-bold text-xs text-foreground flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-orange-500" />
+                      <span>البريد الإلكتروني الحالي لمالك المنظومة:</span>
                     </p>
-                    <p className="text-[11px] text-gray-500 font-mono mt-0.5" dir="ltr">
-                      اسم المستخدم: <strong className="text-primary">{emp.username || emp.email.split('@')[0]}</strong> • كلمة السر: {emp.password}
+                    <p className="text-xs font-mono font-bold text-orange-500 dir-ltr">{user?.email || "غير مسجل"}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      إرسال رابط استعادة وتغيير كلمة السر الرسمية للشركة إلى صندوق الجيميل الخاص بك.
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => emp.id && handleDeleteEmp(emp.id, emp.name)}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
-                    title="حذف الموظف"
+                    onClick={handleSendPasswordReset}
+                    disabled={isSendingReset}
+                    className="px-4 py-2.5 bg-orange-500 text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all shadow-sm flex items-center gap-2 shrink-0 disabled:opacity-50"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {isSendingReset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                    <span>إرسال رابط التغيير للجيميل</span>
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
+
+                <div className="pt-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/30 p-4 rounded-2xl border border-border/50">
+                  <div>
+                    <p className="text-xs font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      الرمز الذي تستخدمه لدخول حساب المالك من شاشة الموظفين بدلاً من كتابة كلمة سر الشركة.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="password"
+                      value={adminPin}
+                      onChange={(e) => setAdminPin(e.target.value)}
+                      placeholder="1234"
+                      className="p-2.5 border border-border bg-background rounded-2xl text-center font-mono w-28 text-xs outline-none focus:ring-2 focus:ring-orange-500 font-bold"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleUpdateAdminPin}
+                      disabled={savingPin}
+                      className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all shadow-sm disabled:opacity-50"
+                    >
+                      {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ الرمز"}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </div>
 
-      <form onSubmit={handleSaveSettings} className="space-y-4 md:space-y-6">
-        {/* 🏢 3. تفاصيل المكتب واللوجو والطباعة */}
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-            <Store className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">تفاصيل المكتب والشعار وبيانات المطبوعات</h2>
-          </div>
+        {/* 👥 3. قسم إضافة وتحديد صلاحيات الموظفين  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("employees")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                <UserPlus className="w-4 h-4" />
+              </div>
+              <span>إدارة الموظفين وتحديد صلاحيات النظام ({usersList.length})</span>
+            </div>
 
-          <div className="p-4 bg-secondary/20 border border-border rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-16 h-16 rounded-xl border border-border bg-background flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-                {storeLogo ? (
-                  <img src={storeLogo} alt="شعار المكتب" className="w-full h-full object-contain" />
-                ) : (
-                  <ImageIcon className="w-8 h-8 text-gray-400" />
+            {openSections.employees ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          <AnimatePresence>
+            {openSections.employees && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="space-y-4 bg-secondary/20 p-4 rounded-2xl border border-border/50">
+                  <h4 className="font-bold text-xs text-foreground">إضافة موظف أو كادر جديد للمكتب:</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم الموظف الثلاثي</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: أحمد علي"
+                        value={empForm.name}
+                        onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
+                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم المستخدم (Username)</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: ahmed123"
+                        value={empForm.username}
+                        onChange={(e) => setEmpForm({ ...empForm, username: e.target.value })}
+                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 text-left font-mono"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">رمز السر الخاص به</label>
+                      <input
+                        type="text"
+                        placeholder="11223344"
+                        value={empForm.password}
+                        onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
+                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 text-left font-mono"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-muted-foreground mb-2">تحديد الصلاحيات المسموح بها للموظف:</label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-bold">
+                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={empForm.canManageCustomers}
+                          onChange={(e) => setEmpForm({ ...empForm, canManageCustomers: e.target.checked })}
+                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
+                        />
+                        <span>تسجيل عملاء وتلقي دفعات</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={empForm.canManageStore}
+                          onChange={(e) => setEmpForm({ ...empForm, canManageStore: e.target.checked })}
+                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
+                        />
+                        <span>إدارة المخزن والمبيعات</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={empForm.canViewDashboard}
+                          onChange={(e) => setEmpForm({ ...empForm, canViewDashboard: e.target.checked })}
+                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
+                        />
+                        <span>عرض الداشبورد والمالية</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={empForm.canViewTreasury}
+                          onChange={(e) => setEmpForm({ ...empForm, canViewTreasury: e.target.checked })}
+                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
+                        />
+                        <span>عرض الخزينة والسيولة</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={empForm.canDeleteOrEdit}
+                          onChange={(e) => setEmpForm({ ...empForm, canDeleteOrEdit: e.target.checked })}
+                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
+                        />
+                        <span>تعديل وحذف العقود</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddEmployee}
+                    disabled={submittingUser || !empForm.name || !empForm.username}
+                    className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-2xl text-xs hover:opacity-95 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                  >
+                    {submittingUser ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                    <span>تأكيد وحفظ الموظف</span>
+                  </button>
+                </div>
+
+                <div className="pt-2 space-y-2">
+                  <h4 className="font-bold text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-orange-500" />
+                    <span>قائمة الكادر والموظفين المسجلين:</span>
+                  </h4>
+
+                  {loadingUsers ? (
+                    <div className="text-center py-4 text-orange-500">
+                      <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                    </div>
+                  ) : usersList.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic py-2">لا يوجد موظفين مسجلين في الوقت الحالي.</p>
+                  ) : (
+                    <div className="divide-y divide-border/60 border border-border/80 rounded-2xl overflow-hidden bg-background">
+                      {usersList.map((emp) => (
+                        <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-secondary/30 transition-colors">
+                          <div>
+                            <p className="font-bold text-xs text-foreground flex items-center gap-2">
+                              <UserCheck className="w-4 h-4 text-emerald-500" />
+                              <span>{emp.name}</span>
+                            </p>
+                            <p className="text-[10px] text-muted-foreground font-mono mt-0.5" dir="ltr">
+                              المستخدم: <strong className="text-orange-500">{emp.username || emp.email.split('@')[0]}</strong> • الرمز: {emp.password}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => emp.id && handleDeleteEmp(emp.id, emp.name)}
+                            className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"
+                            title="حذف الموظف"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 🏢 4. تفاصيل الشركة والشعار والطباعة  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("company")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
+                <Store className="w-4 h-4" />
+              </div>
+              <span>بيانات الشركة والشعار وعقود الطباعة الرسمية</span>
+            </div>
+
+            {openSections.company ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          <AnimatePresence>
+            {openSections.company && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="p-4 bg-secondary/30 border border-border/60 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-2xl border border-border bg-background flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                      {storeLogo ? (
+                        <img src={storeLogo} alt="شعار المكتب" className="w-full h-full object-contain" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-bold text-xs text-foreground">شعار / لوجو المكتب الخاص بك</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        سيظهر بوضوح أعلى العقود، الكشوفات، والإيصالات المطبوعة.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <label className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all cursor-pointer shadow-sm flex items-center gap-1.5">
+                      <Upload className="w-4 h-4" />
+                      <span>رفع شعار جديد</span>
+                      <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                    </label>
+
+                    {storeLogo && (
+                      <button
+                        type="button"
+                        onClick={() => setStoreLogo("")}
+                        className="px-3 py-2.5 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl text-xs font-bold transition-colors"
+                      >
+                        إزالة
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">اسم المكتب / الشركة البائعة</label>
+                    <input
+                      type="text"
+                      value={storeName}
+                      onChange={(e) => setStoreName(e.target.value)}
+                      placeholder="مثال: أقساطك للتجارة والتقسيط"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-orange-500" /> رقم هاتف المكتب الرئيسي
+                    </label>
+                    <input
+                      type="text"
+                      value={storePhone}
+                      onChange={(e) => setStorePhone(e.target.value)}
+                      placeholder="07700000000"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-orange-500" /> عنوان الفرع الرئيسي
+                    </label>
+                    <input
+                      type="text"
+                      value={storeAddress}
+                      onChange={(e) => setStoreAddress(e.target.value)}
+                      placeholder="مثال: بغداد - المنصور"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">حساب المالك الحسابي</label>
+                    <input
+                      type="text"
+                      disabled
+                      value={user?.email || "المستخدم الحالي"}
+                      className="w-full p-3 bg-secondary/40 border border-border rounded-2xl text-xs font-bold text-muted-foreground cursor-not-allowed font-mono"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-orange-500" /> شروط وتعهدات العقد المطبوع
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={contractTerms}
+                    onChange={(e) => setContractTerms(e.target.value)}
+                    placeholder="أدخل الشروط والأحكام التي تظهر بأسفل العقد..."
+                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 💬 5. قسم ربط الواتساب والإشعارات الآلية  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("whatsapp")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
+                <MessageSquare className="w-4 h-4" />
+              </div>
+              <span>تذكير الأقساط عبر الواتساب و ربط API التلقائي</span>
+            </div>
+
+            {openSections.whatsapp ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          <AnimatePresence>
+            {openSections.whatsapp && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="flex items-center justify-between p-3.5 bg-secondary/30 rounded-2xl border border-border/60">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-emerald-500" />
+                    <span className="text-xs font-bold text-foreground">تفعيل إرسال الرسائل تلقائياً عبر API</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={useAutoApi}
+                    onChange={(e) => setUseAutoApi(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 accent-emerald-500 cursor-pointer"
+                  />
+                </div>
+
+                {useAutoApi && (
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-3">
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                      ✓ يتم الإرسال المباشر للرسالة بالخلفية لخدمة UltraMsg دون الحاجة لفتح تطبيق الواتساب.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">Instance ID / Account ID</label>
+                        <input
+                          type="text"
+                          value={waInstanceId}
+                          onChange={(e) => setWaInstanceId(e.target.value)}
+                          placeholder="مثال: instance12345"
+                          className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                          dir="ltr"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">API Token / Access Key</label>
+                        <input
+                          type="password"
+                          value={waToken}
+                          onChange={(e) => setWaToken(e.target.value)}
+                          placeholder="أدخل الـ Token"
+                          className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </div>
-              <div>
-                <p className="font-bold text-xs md:text-sm text-foreground">شعار / لوجو المكتب الخاص بك</p>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  سيظهر هذا الشعار بوضوح أعلى العقود، الكشوفات، والإيصالات المطبوعة.
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <label className="px-4 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm flex items-center gap-2">
-                <Upload className="w-4 h-4" />
-                <span>رفع شعار جديد</span>
-                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-              </label>
-
-              {storeLogo && (
-                <button
-                  type="button"
-                  onClick={() => setStoreLogo("")}
-                  className="px-3 py-2.5 border border-rose-500/30 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl text-xs font-bold transition-colors"
-                  title="حذف الشعار واستخدام الافتراضي"
-                >
-                  إزالة
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">اسم المكتب / الشركة البائعة</label>
-              <input
-                type="text"
-                value={storeName}
-                onChange={(e) => setStoreName(e.target.value)}
-                placeholder="مثال: أقساطك للتجارة والتقسيط"
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-                <Phone className="w-3.5 h-3.5 text-primary" /> رقم هاتف المكتب / الشركة
-              </label>
-              <input
-                type="text"
-                value={storePhone}
-                onChange={(e) => setStorePhone(e.target.value)}
-                placeholder="07700000000"
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-primary" /> عنوان المكتب / الفرع الرئيسي
-              </label>
-              <input
-                type="text"
-                value={storeAddress}
-                onChange={(e) => setStoreAddress(e.target.value)}
-                placeholder="مثال: بغداد - المنصور"
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">حساب المالك الحالي</label>
-              <input
-                type="text"
-                disabled
-                value={user?.email || "المستخدم الحالي"}
-                className="w-full p-2.5 md:p-3 bg-background/50 border border-border rounded-xl text-sm md:text-base text-gray-400 cursor-not-allowed"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-              <FileText className="w-3.5 h-3.5 text-primary" /> شروط وتعهدات العقد المطبوع
-            </label>
-            <textarea
-              rows={4}
-              value={contractTerms}
-              onChange={(e) => setContractTerms(e.target.value)}
-              placeholder="أدخل الشروط والأحكام التي تظهر بأسفل العقد..."
-              className="w-full p-3 md:p-4 bg-background border border-border rounded-xl text-xs md:text-sm outline-none resize-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
+                <div>
+                  <label className="block text-xs font-bold text-muted-foreground mb-1.5">قالب نص رسالة التذكير بالأقساط</label>
+                  <textarea
+                    rows={3}
+                    value={whatsappTemplate}
+                    onChange={(e) => setWhatsappTemplate(e.target.value)}
+                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                    المتغيرات المتاحة: &#123;name&#125; اسم العميل، &#123;amount&#125; القسط، &#123;product&#125; المنتج.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* 💬 4. إعدادات الواتساب و API التلقائي */}
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-3 gap-3">
-            <div className="flex items-center gap-2 text-primary">
-              <MessageSquare className="w-4 h-4 md:w-5 md:h-5 text-green-500" />
-              <h2 className="font-bold text-base md:text-lg">إشعارات الواتساب و ربط الـ API</h2>
+        {/* 📊 6. قسم النسبة المالية الافتراضية والمظهر  Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-2.5">
+              <Percent className="w-4 h-4" />
+              <h3 className="font-extrabold text-xs">النسبة المالية الافتراضية</h3>
             </div>
 
-            <div className="flex items-center justify-between sm:justify-start gap-3 bg-background p-2 md:p-1.5 rounded-xl border border-border">
-              <div className="flex items-center gap-1.5">
-                <Bot className="w-4 h-4 text-green-500" />
-                <span className="text-xs font-bold text-foreground">إرسال تلقائي عبر API</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={useAutoApi}
-                onChange={(e) => setUseAutoApi(e.target.checked)}
-                className="w-4 h-4 md:w-4 md:h-4 rounded accent-green-500 cursor-pointer"
-              />
-            </div>
-          </div>
-
-          {useAutoApi && (
-            <div className="p-3 md:p-4 bg-green-500/5 border border-green-500/20 rounded-xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
-              <p className="text-[10px] md:text-xs text-green-600 dark:text-green-400 font-bold">
-                ✓ سيتم إرسال الرسائل في الخلفية مباشرة لخدمة الواتساب الخاصة بك دون الحاجة لفتح التطبيق.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] md:text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-                    <Key className="w-3.5 h-3.5 text-primary" /> Instance ID / Account ID
-                  </label>
-                  <input
-                    type="text"
-                    value={waInstanceId}
-                    onChange={(e) => setWaInstanceId(e.target.value)}
-                    placeholder="مثال: instance12345"
-                    className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] md:text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-                    <Key className="w-3.5 h-3.5 text-primary" /> API Token / Access Key
-                  </label>
-                  <input
-                    type="password"
-                    value={waToken}
-                    onChange={(e) => setWaToken(e.target.value)}
-                    placeholder="أدخل الـ Token"
-                    className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-500/50"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">قالب رسالة التذكير بالأقساط</label>
-            <textarea
-              rows={3}
-              value={whatsappTemplate}
-              onChange={(e) => setWhatsappTemplate(e.target.value)}
-              className="w-full p-3 md:p-4 bg-background border border-border rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-primary/50"
-            />
-            <p className="text-[10px] md:text-[11px] text-gray-400 mt-1.5">
-              المتغيرات المتاحة: &#123;name&#125; اسم العميل، &#123;amount&#125; القسط، &#123;product&#125; المنتج.
-            </p>
-          </div>
-        </div>
-
-        {/* 📊 5. الإعدادات المالية */}
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-            <Percent className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">الإعدادات المالية الافتراضية</h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">نسبة الربح الافتراضية (%)</label>
+              <label className="block text-[11px] font-bold text-muted-foreground mb-1">نسبة الربح الافتراضية (%)</label>
               <input
                 type="number"
                 value={defaultProfitRate}
                 onChange={(e) => setDefaultProfitRate(Number(e.target.value))}
-                className="w-full p-2.5 md:p-3 bg-background border border-border rounded-xl text-sm md:text-base outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-black dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
               />
             </div>
           </div>
-        </div>
 
-        {/* 🎨 6. مظهر التطبيق */}
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-            <Sun className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">مظهر البرنامج (التصميم)</h2>
-          </div>
-
-          <div className="flex items-center justify-between p-3 md:p-4 bg-background rounded-xl border border-border">
-            <div className="flex items-center gap-3">
-              {isDarkMode ? <Moon className="w-5 h-5 md:w-6 md:h-6 text-purple-400" /> : <Sun className="w-5 h-5 md:w-6 md:h-6 text-amber-500" />}
-              <div>
-                <p className="font-bold text-xs md:text-sm text-foreground">الوضع الليلي (Dark Mode)</p>
-                <p className="text-[10px] md:text-xs text-gray-500">تبديل ألوان النظام</p>
-              </div>
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center gap-2 text-purple-500 border-b border-border/60 pb-2.5">
+              <Sun className="w-4 h-4" />
+              <h3 className="font-extrabold text-xs">مظهر المنظومة (Dark / Light)</h3>
             </div>
 
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                isDarkMode 
-                  ? "bg-purple-600 hover:bg-purple-700 text-white" 
-                  : "bg-gray-200 hover:bg-gray-300 text-gray-800"
-              }`}
-            >
-              {isDarkMode ? "مُفعل" : "معطل"}
-            </button>
+            <div className="flex items-center justify-between p-2.5 bg-secondary/30 rounded-2xl border border-border/50">
+              <div className="flex items-center gap-2">
+                {isDarkMode ? <Moon className="w-4 h-4 text-purple-400" /> : <Sun className="w-4 h-4 text-amber-500" />}
+                <span className="text-xs font-bold text-foreground">الوضع الليلي (Dark)</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                  isDarkMode 
+                    ? "bg-purple-600 text-white" 
+                    : "bg-secondary text-foreground border border-border"
+                }`}
+              >
+                {isDarkMode ? "مُفعل" : "معطل"}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* 💾 7. إدارة النسخ الاحتياطية و Google Drive */}
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 text-primary border-b border-border pb-3">
-            <Database className="w-4 h-4 md:w-5 md:h-5" />
-            <h2 className="font-bold text-base md:text-lg">إدارة النسخ الاحتياطية والتخزين السحابي</h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-            <button
-              type="button"
-              onClick={handleExportBackup}
-              disabled={loadingAction}
-              className="p-4 bg-background border border-border rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-right flex flex-col justify-between space-y-2 md:space-y-3 group"
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">تصدير نسخة (JSON)</span>
-                <Download className="w-5 h-5 text-primary opacity-80 group-hover:opacity-100 group-hover:-translate-y-1 transition-all" />
+        {/* 💾 7. قسم النسخ الاحتياطي و Google Drive  Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("backup")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                <Database className="w-4 h-4" />
               </div>
-              <p className="text-[10px] md:text-xs text-gray-500">حفظ كافة بيانات الأقساط والدفعات في ملف لضمان عدم ضياعها.</p>
-            </button>
+              <span>إدارة النسخ الاحتياطية والتزامن السحابي Google Drive</span>
+            </div>
 
-            <label className="p-4 bg-background border border-border rounded-xl hover:bg-primary/5 hover:border-primary/30 transition-all text-right flex flex-col justify-between space-y-2 md:space-y-3 cursor-pointer group">
-              <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">استعادة نسخة محليّة</span>
-                <Upload className="w-5 h-5 text-primary opacity-80 group-hover:opacity-100 group-hover:-translate-y-1 transition-all" />
-              </div>
-              <p className="text-[10px] md:text-xs text-gray-500">استرجاع وتحديث البيانات من ملف .json محلي.</p>
-              <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction} className="hidden" />
-            </label>
+            {openSections.backup ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
 
-            <div className="p-4 bg-background border border-blue-500/20 rounded-xl flex flex-col justify-between space-y-3">
-              <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-blue-600 dark:text-blue-400">تخزين Google Drive الآلي</span>
-                <CloudUpload className="w-5 h-5 text-blue-500" />
-              </div>
-              <p className="text-[10px] md:text-xs text-gray-500">
-                مزامنة أوتوماتيكية يومية واستعادة فورية عند تسجيل الدخول.
-              </p>
-
-              <div className="flex flex-col gap-2 pt-1">
-                {isDriveConnected ? (
+          <AnimatePresence>
+            {openSections.backup && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-4"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      localStorage.removeItem("google_drive_access_token");
-                      setIsDriveConnected(false);
-                      toast.info("تم إلغاء ربط Google Drive.");
-                    }}
-                    className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
-                    title="اضغط لإلغاء الربط"
+                    onClick={handleExportBackup}
+                    disabled={loadingAction}
+                    className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-orange-500/50 transition-all text-right flex flex-col justify-between space-y-2 group"
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>تم الربط بنجاح (مُتصل)</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleConnectGoogleDrive}
-                    className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
-                  >
-                    <Key className="w-3.5 h-3.5" />
-                    <span>ربط الحساب للتزامن الآلي</span>
-                  </button>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleUploadToGoogleDrive(false)}
-                    disabled={uploadingToDrive || loadingAction || !isDriveConnected}
-                    className="flex-1 py-1.5 px-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
-                  >
-                    {uploadingToDrive ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                    ) : (
-                      <CloudUpload className="w-3.5 h-3.5 text-blue-500" />
-                    )}
-                    <span>رفع الآن</span>
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-bold text-xs text-foreground group-hover:text-orange-500 transition-colors">تصدير نسخة (JSON)</span>
+                      <Download className="w-4 h-4 text-orange-500" />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">حفظ كامل بياناتك وسجلاتك في ملف خارجي آمن.</p>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
-                    disabled={downloadingFromDrive || loadingAction || !isDriveConnected}
-                    className="flex-1 py-1.5 px-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
-                  >
-                    {downloadingFromDrive ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
-                    ) : (
-                      <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                    <span>استعادة من Drive</span>
-                  </button>
+                  <label className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-orange-500/50 transition-all text-right flex flex-col justify-between space-y-2 cursor-pointer group">
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-bold text-xs text-foreground group-hover:text-orange-500 transition-colors">استعادة نسخة محليّة</span>
+                      <Upload className="w-4 h-4 text-orange-500" />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">قراءة واسترجاع السجلات من ملف .json محلي.</p>
+                    <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction} className="hidden" />
+                  </label>
+
+                  <div className="p-4 bg-secondary/20 border border-blue-500/30 rounded-2xl flex flex-col justify-between space-y-2.5">
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-bold text-xs text-blue-500">تزامن Google Drive</span>
+                      <CloudUpload className="w-4 h-4 text-blue-500" />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      مزامنة تلقائية مع حساب جوجل للحماية من ضياع البيانات.
+                    </p>
+
+                    <div className="flex flex-col gap-2 pt-1">
+                      {isDriveConnected ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            localStorage.removeItem("google_drive_access_token");
+                            setIsDriveConnected(false);
+                            toast.info("تم إلغاء ربط Google Drive.");
+                          }}
+                          className="w-full py-2 px-3 bg-emerald-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Google Drive مُتصل بنجاح</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleConnectGoogleDrive}
+                          className="w-full py-2 px-3 bg-blue-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 shadow-sm"
+                        >
+                          <Key className="w-3.5 h-3.5" />
+                          <span>ربط حساب Google Drive</span>
+                        </button>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleUploadToGoogleDrive(false)}
+                          disabled={uploadingToDrive || loadingAction || !isDriveConnected}
+                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                        >
+                          {uploadingToDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <CloudUpload className="w-3.5 h-3.5 text-blue-500" />}
+                          <span>رفع الآن</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
+                          disabled={downloadingFromDrive || loadingAction || !isDriveConnected}
+                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                        >
+                          {downloadingFromDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />}
+                          <span>استعادة</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        <button
-          type="submit"
-          disabled={loadingAction}
-          className="w-full py-3.5 md:py-4 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-md text-sm md:text-base active:scale-[0.98]"
-        >
-          {loadingAction ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-          <span>حفظ وتحديث الإعدادات الشاملة</span>
-        </button>
       </form>
-    </div>
+    </motion.div>
   );
 }

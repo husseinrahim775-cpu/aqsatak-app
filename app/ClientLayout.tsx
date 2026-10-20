@@ -3,6 +3,7 @@
 import Sidebar from "../components/Sidebar";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { AuthProvider, useAuth } from "../components/AuthProvider";
+import SubscriptionGuard from "../components/SubscriptionGuard";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -10,6 +11,7 @@ import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 import { signOut } from "firebase/auth";
 import InstallmentCalculatorModal from "../components/InstallmentCalculatorModal";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   LayoutDashboard, 
   Users, 
@@ -36,11 +38,34 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [isCalcOpen, setIsCalcOpen] = useState(false); // 🧮 حالة فتح الحاسبة
+  const [waveGlow, setWaveGlow] = useState(false);
+  const [mobileLogo, setMobileLogo] = useState<string>("./logo.png"); // 🖼️ حالة اللوجو الديناميكي للموبايل
 
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 1. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
+  // 🔄 1. الاستماع الحي للشعار المرفوع وتحديث شريط الموبايل و Favicon المتصفح حياً
+  useEffect(() => {
+    const unsubLogo = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().systemLogoUrl) {
+        const newLogoUrl = docSnap.data().systemLogoUrl;
+        setMobileLogo(newLogoUrl);
+
+        // 🌐 تحديث أيقونة تبويب المتصفح (Favicon) ديناميكياً
+        let faviconLink: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+        if (!faviconLink) {
+          faviconLink = document.createElement("link");
+          faviconLink.rel = "shortcut icon";
+          document.getElementsByTagName("head")[0].appendChild(faviconLink);
+        }
+        faviconLink.href = newLogoUrl;
+      }
+    });
+
+    return () => unsubLogo();
+  }, []);
+
+  // 🔄 2. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
   useEffect(() => {
     if (!user || isLoginPage) return;
 
@@ -87,12 +112,19 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     return () => unsubscribeDoc();
   }, [user, pathname, router, logout, isLoginPage, isPendingPage]);
 
-  // 2. التحكم في الوضع الليلي
+  // 3. التحكم في الوضع الليلي وموجة الحركة عند التنقل بين الصفحات
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
       setIsDarkMode(true);
     }
   }, []);
+
+  useEffect(() => {
+    // تفعيل إضاءة الموجة عند تغيير المسار (Pathname)
+    setWaveGlow(true);
+    const timer = setTimeout(() => setWaveGlow(false), 800);
+    return () => clearTimeout(timer);
+  }, [pathname]);
 
   const toggleTheme = () => {
     const nextState = !isDarkMode;
@@ -145,33 +177,33 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         onClose={() => setIsCalcOpen(false)} 
       />
 
-      {/* 1. الشريط العلوي للموبايل والدسطوب المميز */}
-      <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-md border-b border-border p-4 shadow-sm sticky top-0 z-40">
+      {/* 1. الشريط العلوي للموبايل بأسلوب Dashboard  */}
+      <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-xl border-b border-border p-4 shadow-sm sticky top-0 z-40">
         <div className="flex items-center gap-2 font-extrabold text-xl text-primary tracking-tight">
-          <img src="./logo.png" alt="أقساطك" className="w-7 h-7 rounded-lg object-cover" />
-          <span>أقساطك</span>
+          <img src={mobileLogo} alt="أقساطك" className="w-8 h-8 rounded-2xl object-cover shadow-sm border border-primary/20 bg-white p-0.5" />
+          <span className="bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent font-black">أقساطك</span>
         </div>
         
         <div className="flex items-center gap-2">
           {/* 🧮 زر الحاسبة المودرن لشاشة الموبايل */}
           <button
             onClick={() => setIsCalcOpen(true)}
-            className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary hover:bg-primary/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
+            className="p-2.5 bg-orange-500/10 border border-orange-500/20 rounded-2xl text-orange-600 hover:bg-orange-500/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
             title="حاسبة الأقساط"
           >
-            <Calculator className="w-5 h-5 text-primary" />
+            <Calculator className="w-5 h-5 text-orange-500" />
           </button>
 
           <button 
             onClick={toggleTheme}
-            className="p-2 bg-background border border-border rounded-xl text-foreground hover:bg-border/50 transition-all active:scale-95"
+            className="p-2.5 bg-background/80 border border-border rounded-2xl text-foreground hover:bg-border/50 transition-all active:scale-95 shadow-sm"
           >
             {isDarkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-indigo-500" />}
           </button>
 
           <button 
             onClick={handleLogout}
-            className="p-2 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 rounded-xl text-red-500 hover:bg-red-100 transition-all active:scale-95"
+            className="p-2.5 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 rounded-2xl text-red-500 hover:bg-red-100 transition-all active:scale-95"
             title="تسجيل الخروج"
           >
             <LogOut className="w-5 h-5" />
@@ -179,79 +211,131 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {/* 2. القائمة الجانبية للشاشات الكبيرة */}
-      <div className="hidden md:block sticky top-0 h-screen w-64 z-50">
+      {/* 2. القائمة الجانبية للشاشات الكبيرة بعرض w-20 المودرن */}
+      <div className="hidden md:block sticky top-0 h-screen w-20 z-50">
         <Sidebar />
       </div>
 
-      {/* 3. المحتوى الرئيسي مع شريط الأدوات العلوية للشاشات الكبيرة */}
+      {/* 3. المحتوى الرئيسي مع الترويسة العلوية لـ  */}
       <main className="flex-1 w-full overflow-y-auto p-4 pb-24 md:p-8 md:pb-8 transition-all duration-300">
-        <div className="max-w-7xl mx-auto h-full space-y-4">
+        <div className={`max-w-7xl mx-auto h-full space-y-4 rounded-3xl transition-all duration-500 ${waveGlow ? 'tab-wave-active' : ''}`}>
           
-          {/* 🧮 زر الحاسبة المودرن للشاشات الكبيرة (أعلى الصفحات) */}
-          <div className="hidden md:flex justify-end items-center mb-2">
-            <button
-              onClick={() => setIsCalcOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-card border border-primary/20 hover:border-primary/50 text-primary rounded-2xl font-bold text-sm shadow-sm hover:shadow-md transition-all active:scale-95 group"
-            >
-              <div className="p-1.5 bg-primary/10 rounded-xl group-hover:bg-primary/20 transition-colors">
-                <Calculator className="w-4 h-4 text-primary" />
-              </div>
-              <span>حاسبة الأقساط السريعة</span>
-            </button>
-          </div>
-
-          {children}
-        </div>
-      </main>
-
-      {/* 📱 4. النافذة المنبثقة لبقية الأقسام (عند الضغط على "المزيد" في الموبايل) */}
-      {showMoreMenu && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 md:hidden flex flex-col justify-end"
-          onClick={() => setShowMoreMenu(false)}
-        >
-          <div 
-            className="bg-card border-t border-border rounded-t-3xl p-5 space-y-4 animate-in slide-in-from-bottom duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b border-border pb-3">
-              <h3 className="font-bold text-foreground text-sm">بقية أقسام المنظومة</h3>
-              <button 
-                onClick={() => setShowMoreMenu(false)} 
-                className="p-1 rounded-full hover:bg-secondary text-gray-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {extraNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          {/* 🧮 الهيدر العلوي بأسلوب  للشاشات الكبيرة */}
+          <div className="hidden md:flex justify-between items-center mb-4 pb-3 border-b border-border/50">
+            {/* أسرار التنقل السريعة  Tabs */}
+            <div className="flex items-center gap-1.5 bg-card/80 backdrop-blur-md p-1.5 rounded-full border border-border shadow-sm">
+              {[
+                { name: "الرئيسية", href: "/dashboard" },
+                { name: "العملاء", href: "/customers" },
+                { name: "الحسابات", href: "/accounts" },
+                { name: "الخزينة", href: "/treasury" },
+                { name: "المخزن", href: "/inventory" },
+                { name: "الديون", href: "/debts" },
+              ].map((tab) => {
+                const isActive = pathname.startsWith(tab.href);
                 return (
                   <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setShowMoreMenu(false)}
-                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${
+                    key={tab.href}
+                    href={tab.href}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-full transition-all ${
                       isActive 
-                        ? "bg-primary/10 border-primary text-primary font-bold" 
-                        : "bg-secondary/40 border-border text-foreground hover:bg-secondary"
+                        ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    <Icon className="w-5 h-5 shrink-0" />
-                    <span className="text-xs">{item.name}</span>
+                    {tab.name}
                   </Link>
                 );
               })}
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* 5. الشريط السفلي للموبايل */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-md border-t border-border shadow-lg z-40 px-2 pb-safe">
+            {/* زر الحاسبة السريعة */}
+            <motion.button
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setIsCalcOpen(true)}
+              className="flex items-center gap-2.5 px-4 py-2 bg-card/90 backdrop-blur-md border border-orange-500/30 hover:border-orange-500 text-orange-600 dark:text-orange-400 rounded-2xl font-bold text-xs shadow-sm hover:shadow-orange-500/10 transition-all group"
+            >
+              <div className="p-1 bg-orange-500/10 rounded-lg group-hover:bg-orange-500/20 transition-colors">
+                <Calculator className="w-3.5 h-3.5 text-orange-500" />
+              </div>
+              <span>حاسبة الأقساط</span>
+            </motion.button>
+          </div>
+
+          {/* محتوى الصفحات محمي بواسطة SubscriptionGuard مع حركة Framer Motion */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+            >
+              <SubscriptionGuard>
+                {children}
+              </SubscriptionGuard>
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </main>
+
+      {/* 📱 4. النافذة المنبثقة لبقية الأقسام (عند الضغط على "المزيد" في الموبايل) */}
+      <AnimatePresence>
+        {showMoreMenu && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 md:hidden flex flex-col justify-end"
+            onClick={() => setShowMoreMenu(false)}
+          >
+            <motion.div 
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-card border-t border-border rounded-t-3xl p-5 space-y-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center border-b border-border pb-3">
+                <h3 className="font-bold text-foreground text-sm">بقية أقسام المنظومة</h3>
+                <button 
+                  onClick={() => setShowMoreMenu(false)} 
+                  className="p-1.5 rounded-full hover:bg-secondary text-gray-400"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                {extraNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setShowMoreMenu(false)}
+                      className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${
+                        isActive 
+                          ? "bg-orange-500/10 border-orange-500 text-orange-600 font-bold dark:text-orange-400" 
+                          : "bg-secondary/40 border-border text-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <Icon className="w-5 h-5 shrink-0" />
+                      <span className="text-xs">{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 📱 5. الشريط السفلي المطور للموبايل بأسلوب  Pill Tabs */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/85 backdrop-blur-xl border-t border-border shadow-2xl z-40 px-3 pb-safe">
         <nav className="flex items-center justify-around py-2">
           {/* العناصر الأساسية */}
           {baseNavItems.map((item) => {
@@ -265,22 +349,22 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 className="relative flex flex-col items-center justify-center w-14 h-14 transition-all duration-300"
               >
                 <div 
-                  className={`absolute top-1 w-9 h-9 rounded-xl transition-all duration-300 ${
+                  className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
                     isActive 
-                      ? 'bg-primary/10 backdrop-blur-sm border border-primary/20 scale-100 opacity-100 shadow-sm' 
+                      ? 'bg-orange-500/15 backdrop-blur-sm border border-orange-500/30 scale-100 opacity-100 shadow-sm' 
                       : 'scale-50 opacity-0'
                   }`} 
                 />
                 
                 <Icon 
-                  className={`w-6 h-6 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-primary translate-y-[2px]" : "text-gray-400"
+                  className={`w-5 h-5 relative z-10 transition-all duration-300 ${
+                    isActive ? "text-orange-500 translate-y-[2px]" : "text-gray-400"
                   }`} 
                 />
                 
                 <span 
                   className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-primary opacity-100 font-semibold" : "text-gray-400 opacity-70"
+                    isActive ? "text-orange-600 dark:text-orange-400 font-bold" : "text-gray-400 opacity-70"
                   }`}
                 >
                   {item.name}
@@ -296,17 +380,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             className="relative flex flex-col items-center justify-center w-14 h-14 transition-all duration-300"
           >
             <div 
-              className={`absolute top-1 w-9 h-9 rounded-xl transition-all duration-300 ${
+              className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? 'bg-primary/10 backdrop-blur-sm border border-primary/20 scale-100 opacity-100 shadow-sm' 
+                  ? 'bg-orange-500/15 backdrop-blur-sm border border-orange-500/30 scale-100 opacity-100 shadow-sm' 
                   : 'scale-50 opacity-0'
               }`} 
             />
 
             <MoreHorizontal 
-              className={`w-6 h-6 relative z-10 transition-all duration-300 ${
+              className={`w-5 h-5 relative z-10 transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-primary translate-y-[2px]" 
+                  ? "text-orange-500 translate-y-[2px]" 
                   : "text-gray-400"
               }`} 
             />
@@ -314,7 +398,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <span 
               className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-primary opacity-100 font-semibold" 
+                  ? "text-orange-600 dark:text-orange-400 font-bold" 
                   : "text-gray-400 opacity-70"
               }`}
             >

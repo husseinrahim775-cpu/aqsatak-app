@@ -11,8 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   deleteDoc,
-  getDocsFromCache,
-  setDoc
+  getDocsFromCache
 } from "firebase/firestore";
 
 // ==========================================
@@ -180,7 +179,7 @@ export const updateContractDocuments = async (
 };
 
 // ==========================================
-// ====== 🚦 1. نظام التقييم والحظر الآلي ======
+// ====== 🚦 1. نظام التقييم والحظر الآلي (V14 Engine) ======
 // ==========================================
 
 export const calculateCustomerRisk = (
@@ -193,7 +192,7 @@ export const calculateCustomerRisk = (
     return {
       level: "danger",
       label: "🔴 محظور (القائمة السوداء)",
-      color: "bg-red-500/10 text-red-600 border-red-500/30",
+      color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 font-bold",
       isBlacklisted: true,
       maxDaysOverdue: 999,
     };
@@ -220,7 +219,7 @@ export const calculateCustomerRisk = (
     return {
       level: "danger",
       label: `🔴 عميل خطر (متأخر ${maxDaysOverdue} يوم)`,
-      color: "bg-red-500/10 text-red-600 border-red-500/30",
+      color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 font-bold",
       isBlacklisted: false,
       maxDaysOverdue,
     };
@@ -228,7 +227,7 @@ export const calculateCustomerRisk = (
     return {
       level: "warning",
       label: `🟡 عميل متلكئ (متأخر ${maxDaysOverdue} أيام)`,
-      color: "bg-amber-500/10 text-amber-600 border-amber-500/30",
+      color: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 font-bold",
       isBlacklisted: false,
       maxDaysOverdue,
     };
@@ -237,7 +236,7 @@ export const calculateCustomerRisk = (
   return {
     level: "excellent",
     label: "🟢 عميل ممتاز (التزام تام)",
-    color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30",
+    color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-bold",
     isBlacklisted: false,
     maxDaysOverdue: 0,
   };

@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../services/firebase";
-import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight } from "lucide-react";
+import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight, Sparkles } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { SystemUser } from "../../services/firestore";
 
 export default function LoginPage() {
@@ -66,7 +67,7 @@ export default function LoginPage() {
 
       setEmployees(list);
 
-      // 🎯 التعديل الجوهري: إذا كان الحساب جديداً أو بدون موظفين، ادخل مباشرة للوحة التحكم!
+      // 🎯 إذا كان الحساب جديداً أو بدون موظفين، ادخل مباشرة للوحة التحكم!
       if (list.length === 0) {
         const sessionData = JSON.stringify({ role: "admin", name: "مدير النظام" });
         sessionStorage.setItem("active_session", sessionData);
@@ -223,40 +224,53 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-radial from-slate-900 via-zinc-950 to-black p-4 relative overflow-hidden select-none">
+    <div className="min-h-screen w-full flex items-center justify-center bg-background p-4 relative overflow-hidden select-none dir-rtl font-sans">
       
-      <div className="absolute -top-40 -right-40 w-96 h-96 bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
+      {/* خلفية الإضاءة الدائرية العصرية  */}
+      <div className="absolute top-1/4 right-1/2 translate-x-1/2 w-[500px] h-[500px] bg-orange-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[400px] bg-red-500/10 rounded-full blur-[140px] pointer-events-none" />
 
-      <div className="w-full max-w-md bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl p-8 space-y-6 relative z-10 animate-in fade-in zoom-in-95 duration-300">
-        
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="w-full max-w-md bg-card/90 backdrop-blur-2xl border border-border/80 rounded-3xl shadow-2xl p-6 md:p-8 space-y-6 relative z-10"
+      >
+        {/* الترويسة والشعار */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-primary to-blue-500 shadow-lg shadow-primary/25 mb-1">
-            <Shield className="w-7 h-7 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-gradient-to-tr from-orange-500 to-red-500 shadow-lg shadow-orange-500/25 mb-1">
+            <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-white">أقساطك</h1>
-          <p className="text-xs text-zinc-400 font-medium">
-            {!isCompanyAuthenticated ? "تسجيل دخول المنظومة الماليّة" : "اختر المستخدم وأدخل رمز الأمان للبدء"}
+          <h1 className="text-3xl font-black tracking-tight text-foreground">منظومة أقساطك</h1>
+          <p className="text-xs text-muted-foreground font-medium">
+            {!isCompanyAuthenticated ? "تسجيل دخول المنظومة الماليّة " : "اختر المستخدم وأدخل رمز الأمان للبدء"}
           </p>
         </div>
 
-        {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3.5 rounded-2xl text-xs text-center font-bold animate-in slide-in-from-top-2 duration-200">
-            {error}
-          </div>
-        )}
+        <AnimatePresence mode="wait">
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -5 }}
+              className="bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 p-3.5 rounded-2xl text-xs text-center font-bold"
+            >
+              {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {!isCompanyAuthenticated ? (
           <form onSubmit={handleCompanyLogin} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-zinc-400">البريد الإلكتروني للشركة</label>
+              <label className="text-xs font-bold text-muted-foreground">البريد الإلكتروني للشركة</label>
               <div className="relative">
-                <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="email"
                   required
                   placeholder="admin@company.com"
-                  className="w-full pr-10 pl-4 py-3 rounded-2xl border border-white/10 bg-zinc-950/50 text-white placeholder:text-zinc-600 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-mono"
+                  className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
                   value={companyEmail}
                   onChange={(e) => setCompanyEmail(e.target.value)}
                   dir="ltr"
@@ -265,14 +279,14 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-zinc-400">كلمة سر الشركة</label>
+              <label className="text-xs font-bold text-muted-foreground">كلمة السر الخاصة بالشركة</label>
               <div className="relative">
-                <Lock className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
-                  className="w-full pr-10 pl-4 py-3 rounded-2xl border border-white/10 bg-zinc-950/50 text-white placeholder:text-zinc-600 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-mono"
+                  className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
                   value={companyPassword}
                   onChange={(e) => setCompanyPassword(e.target.value)}
                   dir="ltr"
@@ -280,19 +294,21 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <button
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 text-white py-3.5 rounded-2xl font-bold text-sm transition-all shadow-lg shadow-primary/20 flex justify-center items-center gap-2 active:scale-[0.98] disabled:opacity-50"
+              className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-orange-500/20 flex justify-center items-center gap-2 disabled:opacity-50"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isNewAccount ? "إنشاء حساب شركة" : "ربط المنظومة")}
-            </button>
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isNewAccount ? "إنشاء حساب شركة جديد" : "ربط المنظومة الماليّة")}
+            </motion.button>
 
             <div className="text-center text-xs pt-1">
               <button
                 type="button"
                 onClick={() => { setIsNewAccount(!isNewAccount); setError(""); }}
-                className="text-zinc-400 hover:text-white transition-colors"
+                className="text-muted-foreground hover:text-foreground font-bold transition-colors"
               >
                 {isNewAccount ? "لديك حساب شركة بالفعل؟ تسجيل الدخول" : "أنشئ حساب شركة جديد للمكتب"}
               </button>
@@ -301,32 +317,32 @@ export default function LoginPage() {
         ) : (
           <form onSubmit={handleEmployeeLogin} className="space-y-4">
             
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
+            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs font-bold text-emerald-300">الشركة متصلة بنجاح</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">الشركة متصلة بنجاح</span>
               </div>
               <button
                 type="button"
                 onClick={handleSwitchCompany}
-                className="text-[11px] text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 transition-colors"
+                className="text-[11px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1 transition-colors"
               >
-                <LogOut className="w-3 h-3" />
+                <LogOut className="w-3.5 h-3.5" />
                 <span>تغيير الشركة</span>
               </button>
             </div>
 
             {loadingEmployees ? (
-              <div className="py-8 text-center text-primary">
-                <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" />
-                <p className="text-xs text-zinc-500 mt-2">جاري جلب بيانات الموظفين...</p>
+              <div className="py-8 text-center text-orange-500 space-y-2">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto text-orange-500" />
+                <p className="text-xs text-muted-foreground font-bold">جاري جلب بيانات الموظفين...</p>
               </div>
             ) : (
               <>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-400">اختر حساب الحضور / الموظف</label>
+                  <label className="text-xs font-bold text-muted-foreground">اختر حساب الحضور / الموظف</label>
                   <div className="relative">
-                    <UserCheck className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+                    <UserCheck className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     <select
                       value={selectedEmpId}
                       onChange={(e) => {
@@ -334,11 +350,11 @@ export default function LoginPage() {
                         setEmpPinCode("");
                         setError("");
                       }}
-                      className="w-full pr-10 pl-4 py-3 rounded-2xl border border-white/10 bg-zinc-950/70 text-white text-sm font-bold outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
+                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/50 cursor-pointer"
                     >
-                      <option value="admin_owner" className="bg-zinc-900 text-white">🔑 مدير النظام (المالك)</option>
+                      <option value="admin_owner">🔑 مدير النظام (المالك)</option>
                       {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id} className="bg-zinc-900 text-white">
+                        <option key={emp.id} value={emp.id}>
                           👤 {emp.name} ({emp.username || emp.email?.split("@")[0]})
                         </option>
                       ))}
@@ -347,16 +363,16 @@ export default function LoginPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-400">
+                  <label className="text-xs font-bold text-muted-foreground">
                     {selectedEmpId === "admin_owner" ? "رمز PIN الخاص بالمالك" : "الرمز السرّي الخاص بالموظف"}
                   </label>
                   <div className="relative">
-                    <KeyRound className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    <KeyRound className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <input
                       type="password"
                       required
                       placeholder={selectedEmpId === "admin_owner" ? "أدخل رمز PIN المالك..." : "أدخل الرمز السرّي..."}
-                      className="w-full pr-10 pl-4 py-3 rounded-2xl border border-white/10 bg-zinc-950/50 text-white placeholder:text-zinc-600 text-sm font-mono outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
                       value={empPinCode}
                       onChange={(e) => setEmpPinCode(e.target.value)}
                       dir="ltr"
@@ -364,10 +380,12 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 text-white py-3.5 rounded-2xl font-bold text-sm transition-all shadow-lg shadow-primary/20 flex justify-center items-center gap-2 active:scale-[0.98] disabled:opacity-50 mt-2"
+                  className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-orange-500/20 flex justify-center items-center gap-2 disabled:opacity-50 mt-2"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                     <>
@@ -375,12 +393,12 @@ export default function LoginPage() {
                       <ChevronRight className="w-4 h-4 rotate-180" />
                     </>
                   )}
-                </button>
+                </motion.button>
               </>
             )}
           </form>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -79,7 +79,7 @@ export default function TreasuryPage() {
     return user?.uid || null;
   }, [user]);
 
- // ⚡ جلب بيانات الخزينة السريع بدون تعليق الواجهة
+  // ⚡ جلب بيانات الخزينة السريع بدون تعليق الواجهة
   const fetchData = useCallback(async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) {
@@ -89,14 +89,10 @@ export default function TreasuryPage() {
 
     setLoading(true);
     try {
-      // 1. جلب حركات الخزينة اليدوية فوراً من الكاش
       const manualTx = await getUserTreasuryTransactions(ownerUid).catch(() => []);
-      
-      // 🚀 إظهار البيانات وإغلاق التحميل فوراً في جزء من الثانية
       setTransactions(manualTx || []);
       setLoading(false);
 
-      // 2. جلب الدفعات والأقساط في الخلفية لتجميع المقبوضات التلقائية بدون إعاقة الشاشة
       const [payments, installments] = await Promise.all([
         getUserPayments(ownerUid).catch(() => []),
         getUserInstallments(ownerUid).catch(() => []),
@@ -136,7 +132,6 @@ export default function TreasuryPage() {
         return timeB - timeA;
       });
 
-      // تحديث القائمة الشاملة فور اكتمالها
       setTransactions(allTx);
     } catch (error) {
       console.error("خطأ في جلب بيانات الخزينة:", error);
@@ -235,6 +230,9 @@ export default function TreasuryPage() {
   };
 
   const handleClearAllData = async () => {
+    const confirmClear = window.confirm("تنبيه: هل أنت متأكد من تصفير الصندوق ومسح كافة السجلات الحالية؟");
+    if (!confirmClear) return;
+
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
 
@@ -280,48 +278,54 @@ export default function TreasuryPage() {
 
   if (loading) {
     return (
-      <div className="h-[75vh] flex items-center justify-center text-primary">
-        <Loader2 className="w-9 h-9 animate-spin" />
+      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+        <Loader2 className="w-10 h-10 animate-spin" />
+        <span className="text-xs font-black text-muted-foreground animate-pulse">جاري جلب بيانات الخزينة V14...</span>
       </div>
     );
   }
 
+  const isNegative = summary.netBalance < 0;
+
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
+    <div className="max-w-7xl mx-auto space-y-6 pb-12 font-sans dir-rtl text-right">
       
-      {/* 1. الهيدر وأزرار العمليات السريعة */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card p-4 md:p-6 rounded-2xl border border-border shadow-sm">
+      {/* 1. الترويسة الرئيسية والعمليات السريعة بتأثيرات حركية V14 Glass */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm transition-all duration-300 hover:shadow-md">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
-            <Vault className="w-6 h-6 text-primary" />
+          <h1 className="text-xl md:text-3xl font-black text-foreground tracking-tight flex items-center gap-2.5">
+            <Vault className="w-7 h-7 text-orange-500 animate-pulse" />
             <span>خزينة الأموال والصندوق</span>
           </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+          <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">
             إدارة حركة السيولة النقدية المباشرة (المقبوضات، المصاريف، وشراء البضائع).
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* زر تصفير الصندوق - أحمر جريء ورسمي */}
           <button
             onClick={handleClearAllData}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 px-3 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 shadow-sm"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-700 hover:bg-red-800 text-white border border-red-600 px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
             title="مسح وتنظيف كافة سجلات حركات الحساب"
           >
-            <Trash2 className="w-4 h-4 text-rose-400" />
+            <Trash2 className="w-4 h-4 text-white" />
             <span>تصفير الصندوق</span>
           </button>
 
+          {/* زر إيداع السيولة */}
           <button
             onClick={() => handleOpenModal("inflow")}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-colors shadow-sm"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
           >
             <PlusCircle className="w-4 h-4" />
             <span>إيداع سيولة (+)</span>
           </button>
           
+          {/* زر تسجيل مصاريف - لون أحمر ناصع صريح */}
           <button
             onClick={() => handleOpenModal("outflow")}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-colors shadow-sm"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
           >
             <MinusCircle className="w-4 h-4" />
             <span>تسجيل مصاريف (-)</span>
@@ -329,50 +333,68 @@ export default function TreasuryPage() {
         </div>
       </div>
 
-      {/* 2. البطاقات المالية الرئيسية للسيولة */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card border border-primary/30 p-5 rounded-2xl shadow-sm flex items-center justify-between">
+      {/* 2. البطاقات المالية المرتفعة بالـ Hover مع التحول التلقائي للون الأحمر في حال السالب */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+        
+        {/* بطاقة صافي السيولة النقدية - تتلون بالأحمر الفاقع التلقائي عند النقص/السالب */}
+        <div className={`p-5 md:p-6 rounded-3xl shadow-sm flex items-center justify-between transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl border ${
+          isNegative 
+            ? "bg-red-600 text-white border-red-500 shadow-red-500/20" 
+            : "bg-card/90 backdrop-blur-md border-border"
+        }`}>
           <div>
-            <p className="text-xs font-bold text-muted-foreground mb-1">صافي السيولة النقدية بالصندوق</p>
-            <p className={`text-2xl md:text-3xl font-black ${summary.netBalance >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600"}`}>
-              {summary.netBalance.toLocaleString()} د.ع
+            <p className={`text-xs font-bold mb-1 ${isNegative ? "text-red-100" : "text-muted-foreground"}`}>
+              صافي السيولة النقدية بالصندوق
             </p>
-            <p className="text-[10px] text-muted-foreground mt-1">الرصيد المتوفر في الفترة المحددة</p>
+            <p className={`text-2xl md:text-3xl font-black font-mono ${
+              isNegative ? "text-white" : "text-orange-500"
+            }`}>
+              {summary.netBalance.toLocaleString("en-US")} د.ع
+            </p>
+            <p className={`text-[11px] mt-1 font-bold ${isNegative ? "text-red-100" : "text-muted-foreground"}`}>
+              {isNegative ? "⚠️ يوجد عجز/نقص في الصندوق!" : "الرصيد المتوفر في الفترة المحددة"}
+            </p>
           </div>
-          <div className="p-3.5 bg-primary/10 text-primary rounded-2xl">
+          <div className={`p-4 rounded-2xl border ${
+            isNegative 
+              ? "bg-white/20 text-white border-white/30" 
+              : "bg-orange-500/10 text-orange-500 border-orange-500/20"
+          }`}>
             <Vault className="w-7 h-7" />
           </div>
         </div>
 
-        <div className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between">
+        {/* إجمالي المقبوضات والداخل */}
+        <div className="bg-card/90 backdrop-blur-md border border-border p-5 md:p-6 rounded-3xl shadow-sm flex items-center justify-between transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
           <div>
             <p className="text-xs font-bold text-muted-foreground mb-1">إجمالي المقبوضات والداخل</p>
-            <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
-              +{summary.totalInflow.toLocaleString()} د.ع
+            <p className="text-2xl md:text-3xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+              +{summary.totalInflow.toLocaleString("en-US")} د.ع
             </p>
-            <p className="text-[10px] text-muted-foreground mt-1">أقساط + مقدمات + إيداعات</p>
+            <p className="text-[11px] text-muted-foreground mt-1 font-bold">أقساط + مقدمات + إيداعات</p>
           </div>
-          <div className="p-3.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl">
+          <div className="p-4 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-500/20">
             <TrendingUp className="w-7 h-7" />
           </div>
         </div>
 
-        <div className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between">
+        {/* إجمالي الخروج والمصاريف */}
+        <div className="bg-card/90 backdrop-blur-md border border-border p-5 md:p-6 rounded-3xl shadow-sm flex items-center justify-between transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
           <div>
             <p className="text-xs font-bold text-muted-foreground mb-1">إجمالي الخروج والمصاريف</p>
-            <p className="text-2xl font-extrabold text-rose-600 dark:text-rose-400">
-              -{summary.totalOutflow.toLocaleString()} د.ع
+            <p className="text-2xl md:text-3xl font-black text-red-600 dark:text-red-400 font-mono">
+              -{summary.totalOutflow.toLocaleString("en-US")} د.ع
             </p>
-            <p className="text-[10px] text-muted-foreground mt-1">شراء سلع + نثريات + مسحوبات</p>
+            <p className="text-[11px] text-muted-foreground mt-1 font-bold">شراء سلع + نثريات + مسحوبات</p>
           </div>
-          <div className="p-3.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-2xl">
+          <div className="p-4 bg-red-500/10 text-red-600 dark:text-red-400 rounded-2xl border border-red-500/20">
             <TrendingDown className="w-7 h-7" />
           </div>
         </div>
       </div>
 
-      {/* 3. شريط البحث والتصفية بالتاريخ */}
-      <div className="bg-card border border-border p-4 rounded-2xl shadow-sm space-y-3">
+      {/* 3. شريط البحث والتصفية بستايل v14 */}
+      <div className="bg-card/90 backdrop-blur-md border border-border p-4 md:p-5 rounded-3xl shadow-sm space-y-3">
         <div className="flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="relative w-full md:w-80">
             <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -381,47 +403,47 @@ export default function TreasuryPage() {
               placeholder="ابحث في سجل كشف الخزينة والمصاريف..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pr-10 pl-4 py-2 rounded-xl border border-border bg-background text-foreground text-xs md:text-sm focus:ring-2 focus:ring-primary outline-none transition-all"
+              className="w-full pr-10 pl-4 py-2.5 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none transition-all"
             />
           </div>
 
-          <div className="flex items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border w-full md:w-auto overflow-x-auto">
+          <div className="flex items-center gap-1.5 bg-secondary/40 p-1.5 rounded-2xl border border-border w-full md:w-auto overflow-x-auto">
             <button
               onClick={() => setDateFilterType("all")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
-                dateFilterType === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
+                dateFilterType === "all" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               الكل ({transactions.length})
             </button>
             <button
               onClick={() => setDateFilterType("today")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
-                dateFilterType === "today" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
+                dateFilterType === "today" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               اليوم
             </button>
             <button
               onClick={() => setDateFilterType("month")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
-                dateFilterType === "month" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
+                dateFilterType === "month" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               هذا الشهر
             </button>
             <button
               onClick={() => setDateFilterType("year")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 ${
-                dateFilterType === "year" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
+                dateFilterType === "year" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               هذه السنة
             </button>
             <button
               onClick={() => setDateFilterType("custom")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0 flex items-center gap-1 ${
-                dateFilterType === "custom" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 flex items-center gap-1.5 ${
+                dateFilterType === "custom" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
@@ -431,29 +453,29 @@ export default function TreasuryPage() {
         </div>
 
         {dateFilterType === "custom" && (
-          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border text-xs animate-in fade-in duration-200">
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-border text-xs animate-in fade-in duration-200">
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">من تاريخ:</span>
+              <span className="text-muted-foreground font-bold">من تاريخ:</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="bg-background border border-border rounded-lg px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-primary font-mono"
+                className="bg-background border border-border rounded-xl px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-orange-500 font-mono font-bold"
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">إلى تاريخ:</span>
+              <span className="text-muted-foreground font-bold">إلى تاريخ:</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="bg-background border border-border rounded-lg px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-primary font-mono"
+                className="bg-background border border-border rounded-xl px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-orange-500 font-mono font-bold"
               />
             </div>
             {(startDate || endDate) && (
               <button
                 onClick={() => { setStartDate(""); setEndDate(""); }}
-                className="text-rose-500 hover:underline text-xs font-bold mr-auto"
+                className="text-red-500 hover:underline text-xs font-black mr-auto"
               >
                 مسح التواريخ
               </button>
@@ -462,20 +484,20 @@ export default function TreasuryPage() {
         )}
       </div>
 
-      {/* 4. كشف حساب حركة الصندوق الخزينة */}
-      <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-border bg-secondary/20 flex items-center justify-between">
-          <h2 className="font-bold text-sm md:text-base flex items-center gap-2">
-            <Receipt className="w-4 h-4 text-primary" />
+      {/* 4. كشف حركة الصندوق خالي من أي لون وردي V14 Table */}
+      <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md">
+        <div className="p-4 md:p-5 border-b border-border bg-secondary/30 flex items-center justify-between">
+          <h2 className="font-black text-sm md:text-base flex items-center gap-2.5">
+            <Receipt className="w-5 h-5 text-orange-500" />
             <span>كشف حركة الصندوق والتصرفات المالية</span>
           </h2>
-          <span className="text-xs font-bold bg-primary/10 text-primary px-2.5 py-0.5 rounded-full">
+          <span className="text-xs font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 px-3 py-1 rounded-full border border-orange-500/20">
             {filteredTransactions.length} سجل
           </span>
         </div>
 
         {filteredTransactions.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground text-xs font-bold">
+          <div className="text-center py-12 text-muted-foreground text-xs md:text-sm font-bold">
             لا توجد حركات نقدية مسجلة في هذا النطاق الزمني المحدد.
           </div>
         ) : (
@@ -483,17 +505,17 @@ export default function TreasuryPage() {
             <table className="w-full text-right text-xs md:text-sm">
               <thead className="bg-secondary/40 text-muted-foreground border-b border-border text-xs">
                 <tr>
-                  <th className="p-3.5">التاريخ والوقت</th>
-                  <th className="p-3.5">التصنيف</th>
-                  <th className="p-3.5">البيان / التفاصيل</th>
-                  <th className="p-3.5">المبلغ</th>
-                  <th className="p-3.5 text-center">إجراءات</th>
+                  <th className="p-3.5 font-black">التاريخ والوقت</th>
+                  <th className="p-3.5 font-black">التصنيف</th>
+                  <th className="p-3.5 font-black">البيان / التفاصيل</th>
+                  <th className="p-3.5 font-black">المبلغ</th>
+                  <th className="p-3.5 font-black text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredTransactions.map((tx, idx) => (
                   <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
-                    <td className="p-3.5 text-muted-foreground font-mono text-xs">
+                    <td className="p-3.5 text-muted-foreground font-mono font-bold text-xs">
                       {tx.date ? new Date(tx.date).toLocaleDateString("ar-IQ", {
                         year: "numeric",
                         month: "numeric",
@@ -503,37 +525,38 @@ export default function TreasuryPage() {
                       }) : "---"}
                     </td>
 
+                    {/* استبدال الوردية بشارات داكنة/رسمية */}
                     <td className="p-3.5">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                      <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
                         tx.type === "inflow"
                           ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                          : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                          : "bg-black text-white dark:bg-slate-800 dark:text-slate-100 border-slate-700"
                       }`}>
                         {getCategoryLabel(tx.category)}
                       </span>
                     </td>
 
-                    <td className="p-3.5 font-bold text-foreground max-w-[280px] truncate">
+                    <td className="p-3.5 font-black text-foreground max-w-[280px] truncate">
                       {tx.description}
                     </td>
 
-                    <td className={`p-3.5 font-black text-sm ${
-                      tx.type === "inflow" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                    <td className={`p-3.5 font-black text-sm md:text-base font-mono ${
+                      tx.type === "inflow" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
                     }`}>
-                      {tx.type === "inflow" ? "+" : "-"}{tx.amount.toLocaleString()} د.ع
+                      {tx.type === "inflow" ? "+" : "-"}{tx.amount.toLocaleString("en-US")} د.ع
                     </td>
 
                     <td className="p-3.5 text-center">
                       {!tx.id?.startsWith("pay_") && !tx.id?.startsWith("down_") ? (
                         <button
                           onClick={() => handleDeleteTx(tx)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                          className="p-2 text-red-600 hover:bg-red-500/10 rounded-xl transition-colors"
                           title="حذف الحركة اليدوية"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       ) : (
-                        <span className="text-[10px] text-muted-foreground italic">آلي من الأقساط</span>
+                        <span className="text-[11px] text-muted-foreground font-bold italic">آلي من الأقساط</span>
                       )}
                     </td>
                   </tr>
@@ -544,29 +567,29 @@ export default function TreasuryPage() {
         )}
       </div>
 
-      {/* 5. نافذة تسجيل الإيداع / المصروف اليدوي */}
+      {/* 5. نافذة تسجيل الإيداع / المصروف اليدوي V14 Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 md:p-4 backdrop-blur-sm">
-          <div className="bg-card rounded-2xl w-full max-w-md p-4 md:p-6 shadow-2xl border border-border animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
-              <h2 className={`text-base md:text-lg font-bold flex items-center gap-2 ${
-                modalType === "inflow" ? "text-emerald-600" : "text-rose-600"
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3 md:p-4 backdrop-blur-md">
+          <div className="bg-card rounded-3xl w-full max-w-md p-5 md:p-6 shadow-2xl border border-border animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 border-b border-border pb-3.5">
+              <h2 className={`text-base md:text-lg font-black flex items-center gap-2 ${
+                modalType === "inflow" ? "text-emerald-600" : "text-red-600"
               }`}>
                 {modalType === "inflow" ? <PlusCircle className="w-5 h-5" /> : <MinusCircle className="w-5 h-5" />}
                 <span>{modalType === "inflow" ? "إيداع سيولة / رأس مال" : "تسجيل مصروف / سحب"}</span>
               </h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-1 hover:bg-secondary rounded-lg">
+              <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-secondary rounded-xl transition-colors">
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
             <form onSubmit={handleSaveTransaction} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">تصنيف الحركة</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">تصنيف الحركة</label>
                 <select
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value as any })}
-                  className="w-full p-2.5 rounded-xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-primary outline-none"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none"
                 >
                   {modalType === "inflow" ? (
                     <>
@@ -584,7 +607,7 @@ export default function TreasuryPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">المبلغ (د.ع)</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">المبلغ (د.ع)</label>
                 <input
                   type="number"
                   required
@@ -592,18 +615,18 @@ export default function TreasuryPage() {
                   placeholder="أدخل قيمة المبلغ..."
                   value={form.amount}
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-primary outline-none"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-orange-500 outline-none font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">البيان / ملاحظة الحركة</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">البيان / ملاحظة الحركة</label>
                 <input
                   type="text"
                   placeholder="مثال: إيجار المحل لشهر 10، أو شراء 5 دراجات..."
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-border bg-background text-xs md:text-sm focus:ring-2 focus:ring-primary outline-none"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none"
                 />
               </div>
 
@@ -611,15 +634,15 @@ export default function TreasuryPage() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 py-2.5 text-xs md:text-sm font-bold rounded-xl border border-border hover:bg-secondary transition-colors"
+                  className="flex-1 py-3 text-xs md:text-sm font-bold rounded-2xl border border-border hover:bg-secondary transition-colors"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || !form.amount}
-                  className={`flex-1 py-2.5 text-xs md:text-sm rounded-xl text-white font-bold transition-colors flex items-center justify-center gap-2 ${
-                    modalType === "inflow" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"
+                  className={`flex-1 py-3 text-xs md:text-sm rounded-2xl text-white font-black transition-all flex items-center justify-center gap-2 shadow-md ${
+                    modalType === "inflow" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"
                   }`}
                 >
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>تأكيد الحفظ</span>}

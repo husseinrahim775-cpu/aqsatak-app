@@ -1,155 +1,170 @@
 "use client";
 
-import { useState } from "react";
-import { TrendingUp } from "lucide-react";
+import { useState, useMemo } from "react";
+import { motion } from "framer-motion";
+import { Calculator, TrendingUp, Sparkles, DollarSign, Calendar, RefreshCw } from "lucide-react";
+import AnimatedNumber from "./AnimatedNumber";
 
 interface ProfitSimulatorProps {
-  initialCapital?: number;
-  currentCapital?: number;
-  defaultProfitMargin?: number;
-  monthlyCashFlow?: number;
+  initialCapital: number;
+  currentCapital: number;
+  defaultProfitMargin: number;
+  monthlyCashFlow: number;
 }
 
-export default function ProfitSimulator({ 
-  initialCapital, 
-  currentCapital, 
-  defaultProfitMargin = 20,
-  monthlyCashFlow = 0 
+export default function ProfitSimulator({
+  initialCapital = 1000000,
+  defaultProfitMargin = 30,
+  monthlyCashFlow = 200000,
 }: ProfitSimulatorProps) {
-  // الاعتماد على رأس المال القادم مهما كان مسمى الـ Prop
-  const baseCapital = Number(initialCapital ?? currentCapital) || 0;
+  const [investment, setInvestment] = useState<number>(initialCapital || 1000000);
+  const [profitMargin, setProfitMargin] = useState<number>(defaultProfitMargin || 30);
+  const [reinvestRate, setReinvestRate] = useState<number>(100); // نسبة إعادة الاستثمار
 
-  const [profitMargin, setProfitMargin] = useState<number>(defaultProfitMargin || 20);
-  const [installmentMonths, setInstallmentMonths] = useState<number>(10);
-  const [simulationMonths, setSimulationMonths] = useState<number>(12);
+  const projections = useMemo(() => {
+    const marginRatio = profitMargin / 100;
+    const reinvestRatio = reinvestRate / 100;
 
-  // خوارزمية تدوير الأقساط شهرياً دون أخطاء NaN
-  const calculateRecycledGrowth = () => {
-    if (baseCapital <= 0) {
-      return { totalEstimatedProfit: 0, totalProjectedPortfolio: 0, growthRate: "0" };
-    }
-
-    const cashInflowPerMonth = monthlyCashFlow > 0 ? monthlyCashFlow : (baseCapital / (installmentMonths || 10));
-    const monthlyInflows = new Array(simulationMonths + installmentMonths + 12).fill(0);
-
-    for (let m = 0; m < installmentMonths; m++) {
-      monthlyInflows[m] += cashInflowPerMonth;
-    }
-
-    let accumulatedProfit = 0;
-
-    for (let month = 0; month < simulationMonths; month++) {
-      const availableCashToReinvest = monthlyInflows[month];
-
-      if (availableCashToReinvest > 0) {
-        const profit = availableCashToReinvest * ((profitMargin || 0) / 100);
-        accumulatedProfit += profit;
-
-        const totalNewContractValue = availableCashToReinvest + profit;
-        const newMonthlyInstallment = totalNewContractValue / (installmentMonths || 1);
-
-        for (let i = 1; i <= installmentMonths; i++) {
-          if (month + i < monthlyInflows.length) {
-            monthlyInflows[month + i] += newMonthlyInstallment;
-          }
-        }
+    // نمو تراكمي على مدى 6، 12، 24 شهراً
+    const calcCapital = (months: number) => {
+      let current = investment;
+      for (let i = 0; i < months; i++) {
+        const monthlyProfit = current * (marginRatio / 12);
+        current += monthlyProfit * reinvestRatio;
       }
-    }
+      return Math.round(current);
+    };
 
-    const initialProfit = baseCapital * ((profitMargin || 0) / 100);
-    const totalEstimatedProfit = initialProfit + accumulatedProfit;
-    const totalProjectedPortfolio = baseCapital + totalEstimatedProfit;
+    const capital6M = calcCapital(6);
+    const capital12M = calcCapital(12);
+    const capital24M = calcCapital(24);
 
     return {
-      totalEstimatedProfit,
-      totalProjectedPortfolio,
-      growthRate: ((totalEstimatedProfit / baseCapital) * 100).toFixed(1),
+      months6: capital6M,
+      months12: capital12M,
+      months24: capital24M,
+      profit12M: capital12M - investment,
     };
-  };
-
-  const { totalEstimatedProfit, totalProjectedPortfolio, growthRate } = calculateRecycledGrowth();
+  }, [investment, profitMargin, reinvestRate]);
 
   return (
-    <div className="bg-card text-card-foreground rounded-2xl border border-border p-6 shadow-sm space-y-6">
-      <div className="flex items-center justify-between border-b border-border pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-xl text-primary">
-            <TrendingUp className="w-6 h-6" />
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-5 relative overflow-hidden"
+    >
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-border/60 pb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2.5 bg-orange-500/10 text-orange-500 rounded-2xl border border-orange-500/20">
+            <Calculator className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xl font-bold">محاكي الأرباح المستقبليّة (التراكمي)</h3>
-            <p className="text-xs text-gray-500">حساب تضاعف رأس المال عند إعادة ضخ أقساط العملاء شهرياً</p>
+            <h3 className="font-extrabold text-base md:text-lg text-foreground flex items-center gap-2">
+              <span>محاكي الأرباح التراكمية المستقبلي</span>
+              <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">توقع نمو رأس المال المستثمر بناءً على إعادة الاستثمار ونسبة الربح.</p>
           </div>
         </div>
+
+        <div className="px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-black flex items-center gap-1.5">
+          <TrendingUp className="w-4 h-4" />
+          <span>عائد متوقع: +<AnimatedNumber value={projections.profit12M} suffix="د.ع" /></span>
+        </div>
       </div>
 
-      {/* عناصر التحكم */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-background/50 p-4 rounded-xl border border-border">
+      {/* أشرطة التحكم التفاعلية (Sliders) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-secondary/30 p-4 rounded-2xl border border-border/50">
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-2">
-            نسبة الفائدة المقترحة (%)
-          </label>
+          <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+            <span className="text-muted-foreground">رأس المال الأول بالتقسيط:</span>
+            <span className="text-orange-500 dir-ltr"><AnimatedNumber value={investment} suffix="د.ع" /></span>
+          </div>
           <input
-            type="number"
+            type="range"
+            min={100000}
+            max={50000000}
+            step={100000}
+            value={investment}
+            onChange={(e) => setInvestment(Number(e.target.value))}
+            className="w-full accent-orange-500 cursor-pointer h-1.5 bg-secondary rounded-lg"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+            <span className="text-muted-foreground">هامش الربح السنوي:</span>
+            <span className="text-purple-500">{profitMargin}%</span>
+          </div>
+          <input
+            type="range"
+            min={5}
+            max={100}
+            step={1}
             value={profitMargin}
-            onChange={(e) => setProfitMargin(Math.max(1, Number(e.target.value)))}
-            className="w-full bg-card border border-border rounded-lg p-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+            onChange={(e) => setProfitMargin(Number(e.target.value))}
+            className="w-full accent-purple-500 cursor-pointer h-1.5 bg-secondary rounded-lg"
           />
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-2">
-            مدة تقسيط العقود (بالأشهر)
-          </label>
+          <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+            <span className="text-muted-foreground">نسبة إعادة تدوير الأرباح:</span>
+            <span className="text-emerald-500">{reinvestRate}%</span>
+          </div>
           <input
-            type="number"
-            value={installmentMonths}
-            onChange={(e) => setInstallmentMonths(Math.max(1, Number(e.target.value)))}
-            className="w-full bg-card border border-border rounded-lg p-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={reinvestRate}
+            onChange={(e) => setReinvestRate(Number(e.target.value))}
+            className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-secondary rounded-lg"
           />
         </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-2">
-            فترة المحاكاة (بالأشهر)
-          </label>
-          <select
-            value={simulationMonths}
-            onChange={(e) => setSimulationMonths(Number(e.target.value))}
-            className="w-full bg-card border border-border rounded-lg p-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value={6}>6 أشهر</option>
-            <option value={12}>12 شهر (سنة)</option>
-            <option value={24}>24 شهر (سنتين)</option>
-            <option value={36}>36 شهر (3 سنوات)</option>
-          </select>
-        </div>
       </div>
 
-      {/* الأرقام المحسوبة */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-primary/5 rounded-xl border border-primary/20 space-y-1">
-          <p className="text-xs text-gray-500 font-medium">رأس المال المشغّل الحالي</p>
-          <p className="text-lg font-bold text-foreground">
-            {Math.round(baseCapital).toLocaleString()} د.ع
+      {/* كروت نتائج النمو التراكمي المتحركة */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+        <motion.div 
+          whileHover={{ scale: 1.02 }}
+          className="p-4 bg-card border border-border rounded-2xl space-y-1 shadow-sm text-right"
+        >
+          <span className="text-[10px] font-bold text-muted-foreground block">بعد 6 أشهر</span>
+          <p className="text-lg font-black text-foreground">
+            <AnimatedNumber value={projections.months6} suffix="د.ع" />
           </p>
-        </div>
+          <span className="text-[10px] font-bold text-emerald-500 block">
+            +<AnimatedNumber value={projections.months6 - investment} suffix="د.ع" /> أرباح
+          </span>
+        </motion.div>
 
-        <div className="p-4 bg-green-500/10 rounded-xl border border-green-500/20 space-y-1">
-          <p className="text-xs text-green-600 dark:text-green-400 font-medium">صافي الأرباح المتوقعة</p>
-          <p className="text-xl font-extrabold text-green-600 dark:text-green-400">
-            +{Math.round(totalEstimatedProfit).toLocaleString()} د.ع
+        <motion.div 
+          whileHover={{ scale: 1.02 }}
+          className="p-4 bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 rounded-2xl space-y-1 shadow-sm text-right"
+        >
+          <span className="text-[10px] font-bold text-orange-500 block">بعد 12 شهراً (سنة)</span>
+          <p className="text-xl font-black text-orange-600 dark:text-orange-400">
+            <AnimatedNumber value={projections.months12} suffix="د.ع" />
           </p>
-          <p className="text-[10px] text-gray-500">نسبة النمو: +{growthRate}%</p>
-        </div>
+          <span className="text-[10px] font-bold text-emerald-500 block">
+            +<AnimatedNumber value={projections.profit12M} suffix="د.ع" /> أرباح صافية
+          </span>
+        </motion.div>
 
-        <div className="p-4 bg-card border border-border rounded-xl space-y-1 shadow-inner">
-          <p className="text-xs text-gray-500 font-medium">إجمالي رأس المال المتوقع</p>
-          <p className="text-lg font-bold text-primary">
-            {Math.round(totalProjectedPortfolio).toLocaleString()} د.ع
+        <motion.div 
+          whileHover={{ scale: 1.02 }}
+          className="p-4 bg-card border border-border rounded-2xl space-y-1 shadow-sm text-right"
+        >
+          <span className="text-[10px] font-bold text-muted-foreground block">بعد 24 شهراً (سنتين)</span>
+          <p className="text-lg font-black text-foreground">
+            <AnimatedNumber value={projections.months24} suffix="د.ع" />
           </p>
-        </div>
+          <span className="text-[10px] font-bold text-emerald-500 block">
+            +<AnimatedNumber value={projections.months24 - investment} suffix="د.ع" /> أرباح
+          </span>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 }

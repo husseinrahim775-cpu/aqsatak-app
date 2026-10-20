@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, Plus, User, ExternalLink, X, Edit3, Trash2 } from "lucide-react";
+import { Package, Plus, User, ExternalLink, X, Edit3, Trash2, Tag, Calendar, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../components/AuthProvider";
 import { 
   getSoldInventory, 
@@ -150,6 +151,7 @@ export default function InventoryPage() {
   // دالة الحذف المباشرة
   const handleDeleteItem = async (item: InventoryItem) => {
     if (!item.id) return;
+    if (!window.confirm(`هل أنت متأكد من حذف المنتج (${item.title}) من المخزن؟`)) return;
     
     try {
       await deleteInventoryItem(item.id);
@@ -162,42 +164,50 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* الهيدر والأزرار */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="space-y-5 md:space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
+    >
+      {/* 1. ترويسة الصفحة Dashboard  Glass Style */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Package className="w-7 h-7 text-blue-500" /> إدارة المخزن والمنتجات
+          <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
+            <Package className="w-6 h-6 text-orange-500" />
+            إدارة المخزن المالي والمنتجات
           </h1>
-          <p className="text-slate-400 text-sm mt-1">عرض السلع المتوفرة، حركات البيع، وربطها بالعملاء</p>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">عرض السلع المتوفرة، حركات البيع، والربط بالخزينة .</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => {
               setEditingItem(null);
               setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
               setIsAddOpen(true);
             }}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة منتج جديد</span>
-          </button>
+          </motion.button>
 
-          <div className="flex items-center gap-1 bg-[#1e293b] p-1 rounded-xl border border-[#334155]">
+          <div className="flex items-center gap-1 bg-secondary/60 backdrop-blur-md p-1 rounded-2xl border border-border">
             <button
               onClick={() => setActiveTab("available")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                activeTab === "available" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+              className={`px-4 py-2 text-xs md:text-sm font-black rounded-xl transition-all ${
+                activeTab === "available" ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               المتوفر
             </button>
             <button
               onClick={() => setActiveTab("sold")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                activeTab === "sold" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"
+              className={`px-4 py-2 text-xs md:text-sm font-black rounded-xl transition-all ${
+                activeTab === "sold" ? "bg-slate-900 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               المباع
@@ -206,219 +216,242 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* قائمة المواد المعروضة */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* 2. شبكة كروت المنتجات العصرية  */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
         {loading ? (
-          <div className="col-span-full card-glass p-8 text-center text-slate-400">جاري تحميل المخزن...</div>
+          <div className="col-span-full bg-card/40 backdrop-blur-md p-12 text-center text-muted-foreground text-sm font-black rounded-3xl border border-dashed border-border animate-pulse">
+            جاري تحميل بضائع المخزن...
+          </div>
         ) : items.length === 0 ? (
-          <div className="col-span-full card-glass p-8 text-center text-slate-400">
+          <div className="col-span-full bg-card/40 backdrop-blur-md p-12 text-center text-muted-foreground text-sm font-black rounded-3xl border border-dashed border-border">
             {activeTab === "available" ? "لا توجد منتجات متوفرة حالياً في المخزن." : "لم يتم بيع أي منتجات بعد."}
           </div>
         ) : (
           items.map((item, index) => (
-            <div key={item.id || index} className="card-glass p-5 space-y-4 flex flex-col justify-between border-t-2 border-t-blue-500 relative group">
+            <motion.div 
+              key={item.id || index} 
+              whileHover={{ y: -4 }}
+              className="bg-card/90 backdrop-blur-md p-5 rounded-3xl border border-border space-y-4 flex flex-col justify-between shadow-sm hover:border-orange-500/40 transition-all relative group"
+            >
               <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                <div className="flex justify-between items-start border-b border-border/60 pb-3">
+                  <span className="text-xs font-black px-3 py-1 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
                     {item.category}
                   </span>
                   
                   <div className="flex items-center gap-2">
                     <div className="text-left">
-                      <span className="text-lg font-bold text-emerald-400 block">${item.price}</span>
+                      {/* ⚡ التعديل الرئيسي: أسود ناصع بالنهاري + أخضر زمردي بالليلي */}
+                      <span className="text-lg md:text-2xl font-black text-slate-950 dark:text-emerald-400 block tracking-tight font-mono">
+                        {Number(item.price).toLocaleString("en-US")} د.ع
+                      </span>
                       {item.costPrice ? (
-                        <span className="text-[10px] text-amber-400/90 font-mono block">
-                          الشراء: ${item.costPrice}
+                        <span className="text-xs text-amber-600 dark:text-amber-400 font-mono block font-black">
+                          التكلفة: {Number(item.costPrice).toLocaleString("en-US")} د.ع
                         </span>
                       ) : null}
                     </div>
                     
-                    {/* أزرار التعديل والحذف */}
-                    <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700/60 mr-2">
+                    {/* أزرار التحكم السريعة */}
+                    <div className="flex items-center gap-1 bg-secondary/80 p-1 rounded-xl border border-border/60 mr-1.5">
                       <button
                         onClick={() => handleOpenEdit(item)}
                         title="تعديل المنتج"
-                        className="text-slate-400 hover:text-blue-400 p-1 transition"
+                        className="text-blue-600 hover:text-blue-700 p-1.5 rounded-lg transition-colors"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteItem(item)}
                         title="حذف المنتج"
-                        className="text-slate-400 hover:text-rose-400 p-1 transition"
+                        className="text-rose-600 hover:text-rose-700 p-1.5 rounded-lg transition-colors"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <h3 className="font-bold text-slate-100 text-lg mt-3">{item.title}</h3>
+                <h3 className="font-black text-foreground text-base md:text-lg mt-3">{item.title}</h3>
 
-                <div className="mt-3 space-y-1.5 text-xs text-slate-300 bg-[#0f172a]/60 p-3 rounded-lg border border-slate-800">
+                {/* مواصفات وسيريال السلعة */}
+                <div className="mt-3 space-y-2 text-xs md:text-sm text-muted-foreground bg-secondary/40 p-3.5 rounded-2xl border border-border/50">
                   {item.specs?.chassisNumber && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">رقم الشاصي / السيريال:</span>
-                      <span className="font-mono text-amber-400">{item.specs.chassisNumber}</span>
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">السيريال / الشاصي:</span>
+                      <span className="font-mono font-black text-orange-500">{item.specs.chassisNumber}</span>
                     </div>
                   )}
                   {item.specs?.color && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">اللون:</span>
-                      <span>{item.specs.color}</span>
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">اللون:</span>
+                      <span className="font-black text-foreground">{item.specs.color}</span>
                     </div>
                   )}
                   {item.specs?.modelYear && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">الموديل:</span>
-                      <span>{item.specs.modelYear}</span>
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">الموديل / السنة:</span>
+                      <span className="font-black text-foreground">{item.specs.modelYear}</span>
                     </div>
                   )}
                 </div>
               </div>
 
               {item.status === "sold" && item.soldToClientId && (
-                <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
-                  <div className="flex items-center gap-1.5 text-slate-300">
-                    <User className="w-4 h-4 text-emerald-400" />
-                    <span>المشتري: <strong className="text-white">{item.soldToClientName}</strong></span>
+                <div className="pt-3 border-t border-border/60 flex justify-between items-center text-xs md:text-sm">
+                  <div className="flex items-center gap-1.5 text-muted-foreground font-bold">
+                    <User className="w-4 h-4 text-slate-800 dark:text-slate-200" />
+                    <span>المشتري: <strong className="text-foreground font-black">{item.soldToClientName}</strong></span>
                   </div>
 
                   <Link
                     href={`/customers?id=${item.soldToClientId}`}
-                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold transition"
+                    className="flex items-center gap-1 text-orange-500 hover:underline font-black transition-all"
                   >
                     <span>سجل العميل</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </Link>
                 </div>
               )}
-            </div>
+            </motion.div>
           ))
         )}
       </div>
 
-      {/* النافذة المنبثقة للإضافة والتعديل */}
-      {isAddOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#1e293b] border border-[#334155] rounded-2xl w-full max-w-lg p-6 space-y-5">
-            <div className="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 className="text-lg font-bold text-white">
-                {editingItem ? "تعديل بيانات المنتج" : "إضافة مادة جديدة للمخزن"}
-              </h3>
-              <button onClick={handleCloseModal} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveItem} className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-300 block mb-1">اسم المادة / المنتج</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="مثال: ايفون 17 أو دراجة ياماها"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                />
+      {/* 3. نافذة الإضافة والتعديل  Modal */}
+      <AnimatePresence>
+        {isAddOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="bg-card border border-border rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl"
+            >
+              <div className="flex justify-between items-center border-b border-border pb-3.5">
+                <h3 className="text-base md:text-lg font-black text-foreground flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-orange-500" />
+                  {editingItem ? "تعديل بيانات المنتج" : "إضافة مادة جديدة للمخزن"}
+                </h3>
+                <button onClick={handleCloseModal} className="p-1.5 hover:bg-secondary rounded-xl text-muted-foreground">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <div>
-                <label className="text-xs text-slate-300 block mb-1">القسم / التصنيف</label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="هواتف">هواتف / أجهزة</option>
-                  <option value="دراجات">دراجات</option>
-                  <option value="سيارات">سيارات</option>
-                  <option value="كهربائيات">كهربائيات</option>
-                  <option value="أخرى">أخرى</option>
-                </select>
-              </div>
-
-              {/* حقلان منفصلان لسعر الشراء وسعر البيع */}
-              <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleSaveItem} className="space-y-4">
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">سعر الشراء / التكلفة (USD)</label>
+                  <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">اسم المادة / المنتج *</label>
                   <input
-                    type="number"
-                    placeholder="0"
-                    value={formData.costPrice}
-                    onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-amber-400 font-mono focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1">سعر البيع المطلوب (USD)</label>
-                  <input
-                    type="number"
+                    type="text"
                     required
-                    placeholder="0"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-emerald-400 font-bold font-mono focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-300 block mb-1">رقم الشاصي / السيريال (اختياري)</label>
-                <input
-                  type="text"
-                  placeholder="رقم الشاصي أو Serial Number"
-                  value={formData.chassisNumber}
-                  onChange={(e) => setFormData({ ...formData, chassisNumber: e.target.value })}
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1">اللون</label>
-                  <input
-                    type="text"
-                    placeholder="أسود، ابيض..."
-                    value={formData.color}
-                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    placeholder="مثال: ايفون 16 برو ماكس أو دراجة ياماها"
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">الموديل / السنة</label>
+                  <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">القسم / التصنيف</label>
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                  >
+                    <option value="هواتف">هواتف / أجهزة ذكية</option>
+                    <option value="دراجات">دراجات وهواتف نارية</option>
+                    <option value="سيارات">سيارات آليات</option>
+                    <option value="كهربائيات">كهربائيات وأجهزة منزلية</option>
+                    <option value="أخرى">أخرى</option>
+                  </select>
+                </div>
+
+                {/* حقول المدخلات - أسود بالنهار وأخضر بالليل */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">سعر التكلفة / الشراء (د.ع)</label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={formData.costPrice}
+                      onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-amber-600 dark:text-amber-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">سعر البيع المطلوب (د.ع) *</label>
+                    <input
+                      type="number"
+                      required
+                      placeholder="0"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-slate-950 dark:text-emerald-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">رقم الشاصي / السيريال (اختياري)</label>
                   <input
                     type="text"
-                    placeholder="2026"
-                    value={formData.modelYear}
-                    onChange={(e) => setFormData({ ...formData, modelYear: e.target.value })}
-                    className="w-full bg-[#0f172a] border border-[#334155] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    placeholder="رقم الشاصي أو Serial Number"
+                    value={formData.chassisNumber}
+                    onChange={(e) => setFormData({ ...formData, chassisNumber: e.target.value })}
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
-              </div>
 
-              <div className="flex gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 rounded-xl font-medium transition"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  className="w-1/2 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-medium transition"
-                >
-                  {editingItem ? "حفظ التعديلات" : "حفظ المنتج"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">اللون</label>
+                    <input
+                      type="text"
+                      placeholder="أسود، أبيض..."
+                      value={formData.color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">الموديل / السنة</label>
+                    <input
+                      type="text"
+                      placeholder="2026"
+                      value={formData.modelYear}
+                      onChange={(e) => setFormData({ ...formData, modelYear: e.target.value })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-3">
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="flex-1 bg-secondary hover:bg-secondary/80 text-foreground py-3 rounded-2xl font-black text-xs md:text-sm border border-border transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 text-white py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
+                  >
+                    {editingItem ? "حفظ التعديلات" : "حفظ المنتج بالنظام"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }

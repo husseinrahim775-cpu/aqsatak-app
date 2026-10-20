@@ -3,13 +3,18 @@
 import { useEffect, useState, useMemo } from "react";
 import MetricCard from "@/components/dashboard/MetricCard";
 import ProfitSimulator from "@/components/dashboard/ProfitSimulator";
+import AnimatedNumber from "@/components/dashboard/AnimatedNumber";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Wallet, Users, Percent, BellRing, Coins, Banknote, 
-  Loader2, MessageSquare, AlertTriangle, Activity, Target, Landmark, CalendarCheck, CalendarDays, CalendarRange
+  Wallet, Users, Percent, Coins, Banknote, 
+  Loader2, MessageSquare, AlertTriangle, Activity, Landmark, 
+  CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, Plus, Calendar, Sun, Moon, Sparkles
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { auth } from "@/services/firebase";
-import { getUserInstallments, getUserPayments, PaymentRecord, InstallmentData } from "@/services/firestore";import Link from "next/link";
+import { getUserInstallments, getUserPayments, PaymentRecord, InstallmentData } from "@/services/firestore";
+import Link from "next/link";
+import { useTheme } from "next-themes";
 
 interface UpcomingAlert {
   customerName: string;
@@ -20,17 +25,64 @@ interface UpcomingAlert {
   daysLeft: number; 
 }
 
-type TimeRange = "today" | "week" | "month" | "all";
+type TimeRange = "today" | "week" | "month" | "custom" | "all";
+
+// 🧠 دالة توليد الترحيب الذكي والعبارات الملهمة بحسب وقت اليوم
+const getSmartGreeting = () => {
+  const hour = new Date().getHours();
+
+  if (hour >= 5 && hour < 12) {
+    const morningPhrases = [
+      "تابع حركة أقساطك وأرباحك وبدء يومك المالي بكل ذكاء وسلاسة.",
+      "بداية يوم جديدة وموفقة! تفقّد تدفق المقبوضات وأحدث العقود.",
+      "صباح الهمة والنشاط، نتمنى لك يوماً مليئاً بالتحصيلات الناجحة."
+    ];
+    return {
+      title: "صباح الخير",
+      subtitle: morningPhrases[Math.floor(Math.random() * morningPhrases.length)],
+      icon: "☀️"
+    };
+  } else if (hour >= 12 && hour < 17) {
+    const afternoonPhrases = [
+      "تابع حركة أقساطك وأرباحك وإدارة المقبوضات بذكاء وسلاسة.",
+      "استمر بالإنجاز! إليك نظرة سريعة على كفاءة التحصيل الحالية.",
+      "مساء الإنجاز، واصل متابعة الدفعات المستحقة لليوم."
+    ];
+    return {
+      title: "مساء الخير",
+      subtitle: afternoonPhrases[Math.floor(Math.random() * afternoonPhrases.length)],
+      icon: "🌤️"
+    };
+  } else {
+    const eveningPhrases = [
+      "طاب مساؤك! ملخص نشاطك المالي والأرباح المحققة لهذا اليوم.",
+      "مساء النور، تفقّد التقارير المالية والتحصيلات قبل ختام اليوم.",
+      "ختام يوم موفق! نظرة شاملة على إجمالي الديون والأقساط المستردة."
+    ];
+    return {
+      title: "مساء الخير",
+      subtitle: eveningPhrases[Math.floor(Math.random() * eveningPhrases.length)],
+      icon: "🌙"
+    };
+  }
+};
 
 export default function DashboardPage() {
   const { user, userData, loading: authLoading } = useAuth() as any;
+  const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
 
-  // 🔒 حارس الحماية: منع الموظف الذي لا يملك صلاحية الداشبورد وتحويله لصفحته المتاحة فوراً
+  // 🌟 حالة الترحيب الذكي
+  const [greeting, setGreeting] = useState({ title: "صباح الخير", subtitle: "", icon: "👋" });
+
+  useEffect(() => {
+    // حساب الترحيب الذكي عند فتح الصفحة
+    setGreeting(getSmartGreeting());
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // محاولة جلب بيانات الموظف محلياً في حال الأوفلاين
     const localSessionStr = localStorage.getItem("active_session") || sessionStorage.getItem("active_session");
     const activeUser = userData || (localSessionStr ? JSON.parse(localSessionStr) : null);
 
@@ -51,11 +103,17 @@ export default function DashboardPage() {
     }
   }, [userData, authLoading]);
 
-  // حالة فلتر الصندوق الزمني (اليوم / الأسبوع / الشهر / الكل)
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
+  
+  // 📅 حالات التاريخ المخصص (من - إلى)
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
 
   const [rawPayments, setRawPayments] = useState<PaymentRecord[]>([]);
   const [rawInstallments, setRawInstallments] = useState<InstallmentData[]>([]);
+
+  // حالة اليوم المحدد بالنقر داخل المخطط البياني
+  const [selectedBarIndex, setSelectedBarIndex] = useState<number | null>(null);
 
   const [stats, setStats] = useState({
     totalRemainingCapital: 0, 
@@ -66,7 +124,6 @@ export default function DashboardPage() {
     collectionEfficiency: 100, 
   });
 
-  // 🎯 تفصيل الوارد المتوقع (يومي / أسبوعي / شهري)
   const [expectedIncome, setExpectedIncome] = useState({
     daily: 0,
     weekly: 0,
@@ -244,7 +301,7 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [user]);
 
-  // 🎯 حساب التحصيل الفعلي حسب الفلتر المختار
+  // 1. 🔍 تصفية المقبوضات بحسب التبويب المختار (شاملاً النطاق المخصص)
   const filteredCollectedAmount = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -266,271 +323,426 @@ export default function DashboardPage() {
         if (pDate >= startOfWeek) return sum + (Number(p.amount) || 0);
       } else if (timeRange === "month") {
         if (pDate >= startOfMonth) return sum + (Number(p.amount) || 0);
+      } else if (timeRange === "custom") {
+        const start = customStartDate ? new Date(customStartDate) : null;
+        const end = customEndDate ? new Date(customEndDate) : null;
+        
+        if (start) start.setHours(0, 0, 0, 0);
+        if (end) end.setHours(23, 59, 59, 999);
+
+        if (start && end) {
+          if (pDate >= start && pDate <= end) return sum + (Number(p.amount) || 0);
+        } else if (start) {
+          if (pDate >= start) return sum + (Number(p.amount) || 0);
+        } else if (end) {
+          if (pDate <= end) return sum + (Number(p.amount) || 0);
+        } else {
+          return sum + (Number(p.amount) || 0);
+        }
       } else {
         return sum + (Number(p.amount) || 0);
       }
       return sum;
     }, 0);
-  }, [rawPayments, timeRange]);
+  }, [rawPayments, timeRange, customStartDate, customEndDate]);
+
+  // 2. 📊 معادلة حساب المقبوضات الحقيقية لكل يوم من أيام الأسبوع الحالي
+  const weeklyDailyBreakdown = useMemo(() => {
+    const daysName = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+    const now = new Date();
+    const currentDayIdxIndex = (now.getDay() + 1) % 7;
+
+    const dayOfWeek = now.getDay();
+    const distanceToSaturday = (dayOfWeek + 1) % 7;
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToSaturday);
+
+    const totals = [0, 0, 0, 0, 0, 0, 0];
+
+    rawPayments.forEach((p) => {
+      const dateStr = p.paidAt || p.createdAt;
+      if (!dateStr) return;
+      const pDate = new Date(dateStr);
+
+      if (pDate >= startOfWeek) {
+        const pDayOfWeek = pDate.getDay();
+        const pSatIndex = (pDayOfWeek + 1) % 7;
+        if (pSatIndex >= 0 && pSatIndex < 7) {
+          totals[pSatIndex] += Number(p.amount) || 0;
+        }
+      }
+    });
+
+    const maxVal = Math.max(...totals, 1);
+
+    return totals.map((amount, idx) => ({
+      dayName: daysName[idx],
+      amount: amount,
+      heightPercent: amount > 0 ? Math.max(15, Math.round((amount / maxVal) * 100)) : 8,
+      isToday: idx === currentDayIdxIndex,
+    }));
+  }, [rawPayments]);
 
   const handleQuickWhatsApp = (alert: UpcomingAlert, isOverdue: boolean) => {
     let cleanPhone = alert.phoneNumber.replace(/[^0-9]/g, "");
     if (cleanPhone.startsWith("0")) cleanPhone = "964" + cleanPhone.slice(1);
 
     const message = isOverdue 
-      ? `مرحباً ${alert.customerName}، نود تذكيرك بأن قسطك البالغ ${Math.round(alert.amount).toLocaleString()} د.ع لمنتج (${alert.productName}) قد تجاوز موعد استحقاقه بـ ${alert.daysLeft} يوم. يرجى التسديد بأقرب وقت لتجنب الغرامات.`
-      : `مرحباً ${alert.customerName}، نود تذكيرك بحلول موعد قسط مبلغ ${Math.round(alert.amount).toLocaleString()} د.ع الخاص بمنتج (${alert.productName}). يرجى التسديد في أقرب وقت.`;
+      ? `مرحباً ${alert.customerName}، نود تذكيرك بأن قسطك البالغ ${Math.round(alert.amount).toLocaleString()} د.ع لمنتج (${alert.productName}) قد تجاوز موعد استحقاقه بـ ${alert.daysLeft} يوم.`
+      : `مرحباً ${alert.customerName}، نود تذكيرك بحلول موعد قسط مبلغ ${Math.round(alert.amount).toLocaleString()} د.ع الخاص بمنتج (${alert.productName}).`;
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
-  // شاشة التحميل
   if (loading) {
     return (
-      <div className="h-[75vh] flex items-center justify-center text-primary">
-        <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" />
+      <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+        <Loader2 className="w-10 h-10 animate-spin" />
+        <span className="text-xs font-bold text-muted-foreground animate-pulse">جاري تحضير Dashboard ...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 md:space-y-6 animate-in fade-in duration-300 pb-10 md:pb-12 max-w-7xl mx-auto px-1 md:px-0">
-      
-      {/* 1. الهيدر وكفاءة التحصيل */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-card p-3.5 md:p-5 rounded-2xl border border-border/70 shadow-sm">
-        <div>
-          <h1 className="text-lg md:text-2xl font-bold tracking-tight text-foreground">المركز المالي وتوزيع الواردات</h1>
-          <p className="text-[11px] md:text-xs text-muted-foreground mt-0.5">تحليل المحصل المالي اليومي، الأسبوعي، والشهري وفق نظام التقسيط الذكي.</p>
-        </div>
+    <AnimatePresence mode="wait">
+      <motion.div 
+        key={theme || "dashboard-reveal"}
+        initial={{ opacity: 0, y: 18, filter: "blur(6px)" }}
+        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+        exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+        transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+        className="space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
+      >
         
-        <div className={`flex items-center gap-2 px-3 py-1.5 md:px-3.5 md:py-2 rounded-xl border transition-colors ${
-          stats.collectionEfficiency >= 90 
-            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" 
-            : stats.collectionEfficiency >= 75 
-            ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" 
-            : "bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400"
-        }`}>
-          <Activity className="w-4 h-4 shrink-0" />
-          <div className="text-right">
-            <p className="text-[9px] md:text-[10px] font-medium opacity-80 leading-none">كفاءة التحصيل</p>
-            <p className="text-sm md:text-base font-extrabold leading-tight">{stats.collectionEfficiency}%</p>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. قسم الوارد المتوقع التفاعلي */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-        
-        {/* الوارد اليومي المتوقع */}
-        <div className="bg-card border border-amber-500/30 p-4 rounded-2xl shadow-sm space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
-              <CalendarDays className="w-4 h-4" /> الوارد اليومي (المتوقع اليوم)
-            </span>
-            <span className="text-[10px] bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full font-bold">أقساط يومية نشطة</span>
-          </div>
-          <p className="text-2xl font-black text-foreground">
-            {expectedIncome.daily.toLocaleString()} <span className="text-xs font-normal text-gray-500">د.ع</span>
-          </p>
-          <p className="text-[10px] text-muted-foreground">مجموع الأقساط اليومية للعملاء المدينين فقط</p>
-        </div>
-
-        {/* الوارد الأسبوعي المتوقع */}
-        <div className="bg-card border border-blue-500/30 p-4 rounded-2xl shadow-sm space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1">
-              <CalendarRange className="w-4 h-4" /> الوارد الأسبوعي (المتوقع)
-            </span>
-            <span className="text-[10px] bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full font-bold">أقساط أسبوعية نشطة</span>
-          </div>
-          <p className="text-2xl font-black text-foreground">
-            {expectedIncome.weekly.toLocaleString()} <span className="text-xs font-normal text-gray-500">د.ع</span>
-          </p>
-          <p className="text-[10px] text-muted-foreground">مجموع الدفعات الأسبوعية للعملاء المدينين فقط</p>
-        </div>
-
-        {/* الوارد الشهري المتوقع */}
-        <div className="bg-card border border-purple-500/30 p-4 rounded-2xl shadow-sm space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1">
-              <Target className="w-4 h-4" /> الوارد الشهري (المتوقع)
-            </span>
-            <span className="text-[10px] bg-purple-500/10 text-purple-600 px-2 py-0.5 rounded-full font-bold">أقساط شهرية نشطة</span>
-          </div>
-          <p className="text-2xl font-black text-foreground">
-            {expectedIncome.monthly.toLocaleString()} <span className="text-xs font-normal text-gray-500">د.ع</span>
-          </p>
-          <p className="text-[10px] text-muted-foreground">مجموع الأقساط الشهرية للعملاء المدينين فقط</p>
-        </div>
-
-      </div>
-
-      {/* 3. شريط الفلترة وسجل المقبوضات الفعليه */}
-      <div className="flex items-center justify-between bg-card p-2 rounded-2xl border border-border shadow-sm flex-wrap gap-2">
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-500 px-2">
-          <CalendarCheck className="w-4 h-4 text-primary" />
-          <span>تصفية مبالغ الصندوق المقبوضة فعلياً:</span>
-        </div>
-        <div className="flex items-center gap-1 bg-secondary/50 p-1 rounded-xl w-full sm:w-auto justify-between sm:justify-start">
-          <button
-            onClick={() => setTimeRange("today")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              timeRange === "today"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            المحصل اليوم
-          </button>
-          <button
-            onClick={() => setTimeRange("week")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              timeRange === "week"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            هذا الأسبوع
-          </button>
-          <button
-            onClick={() => setTimeRange("month")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              timeRange === "month"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            هذا الشهر
-          </button>
-          <button
-            onClick={() => setTimeRange("all")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              timeRange === "all"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            الإجمالي العام
-          </button>
-        </div>
-      </div>
-
-      {/* 4. الكارتات المالية المتبقية */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 md:gap-4">
-        <MetricCard title="إجمالي الديون بالسوق" value={`${stats.totalRemainingDebt.toLocaleString()} د.ع`} icon={Landmark} />
-        <MetricCard title="رأس المال المتبقي" value={`${stats.totalRemainingCapital.toLocaleString()} د.ع`} icon={Wallet} />
-        <MetricCard title="الأرباح المتبقية" value={`${stats.totalRemainingProfits.toLocaleString()} د.ع`} icon={Banknote} />
-        <MetricCard 
-          title={
-            timeRange === "today" ? "المحصل اليوم" :
-            timeRange === "week" ? "المحصل هذا الأسبوع" :
-            timeRange === "month" ? "المحصل هذا الشهر" : "إجمالي المقبوضات"
-          } 
-          value={`${filteredCollectedAmount.toLocaleString()} د.ع`} 
-          icon={Coins} 
-        />
-        <MetricCard title="العملاء النشطين" value={stats.activeCustomers.toString()} icon={Users} />
-        <MetricCard title="متوسط الفائدة" value={`${stats.avgInterest}%`} icon={Percent} />
-      </div>
-
-      {/* 5. القسم الأوسط ومتأخرات السداد */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 md:gap-6">
-        
-        <div className="xl:col-span-2">
-          <ProfitSimulator 
-            initialCapital={stats.totalRemainingCapital} 
-            currentCapital={stats.totalRemainingCapital}
-            defaultProfitMargin={stats.avgInterest || 20}
-            monthlyCashFlow={expectedIncome.monthly + expectedIncome.daily * 30 + expectedIncome.weekly * 4} 
-          />
-        </div>
-
-        {/* كارت المتأخرات */}
-        <div className="bg-card text-card-foreground rounded-2xl border border-rose-500/20 p-3.5 md:p-5 shadow-sm flex flex-col justify-between">
+        {/* 🌟 1. الترويسة الرئيسية لـ Dashboard مع الترحيب التفاعلي الذكي */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-3 md:mb-4 border-b border-border/60 pb-2.5">
-              <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                <AlertTriangle className="w-4 h-4 md:w-5 md:h-5" />
+            <h1 className="text-2xl md:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
+              <span>{greeting.title}، {userData?.name || "Code XR"}</span>
+              <span className="text-2xl animate-bounce">{greeting.icon}</span>
+            </h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">
+              {greeting.subtitle}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-card border border-border shadow-sm">
+              <Activity className="w-4 h-4 text-emerald-500" />
+              <div className="text-right">
+                <span className="text-[10px] text-muted-foreground font-bold block">كفاءة التحصيل</span>
+                <span className="text-sm font-black text-foreground"><AnimatedNumber value={stats.collectionEfficiency} suffix="%" /></span>
               </div>
-              <h3 className="text-sm md:text-base font-bold text-foreground">دفعات متأخرة (تعثر مالي)</h3>
             </div>
-            
-            {overdueAlerts.length === 0 ? (
-              <div className="text-center py-6 md:py-8 bg-muted/20 rounded-xl border border-dashed border-border/50">
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">ممتاز! لا توجد متأخرات مالية 👏</p>
+          </div>
+        </div>
+
+        {/* 💳 2. بطاقة الرصيد الإجمالي ومخطط الأشرطة الملونة */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          
+          {/* البطاقة الرئيسية الكبيرة */}
+          <motion.div 
+            whileHover={{ y: -3 }}
+            className="lg:col-span-5 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-6 shadow-sm flex flex-col justify-between relative overflow-hidden"
+          >
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-muted-foreground">إجمالي الديون بالسوق (الرصيد النشط)</span>
+                <span className="text-xs font-extrabold px-3 py-1 bg-orange-500/10 text-orange-600 rounded-full">
+                  د.ع (IQD)
+                </span>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {overdueAlerts.map((alert, index) => (
-                  <div key={index} className="flex justify-between items-center p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 border border-border/50 transition-colors">
-                    <div className="space-y-0.5 min-w-0 pr-1">
-                      <p className="font-bold text-xs truncate text-foreground">{alert.customerName}</p>
-                      <p className="text-[10px] text-muted-foreground font-mono">{Math.round(alert.amount).toLocaleString()} د.ع - يُستحق في: {alert.dueDate.toISOString().split("T")[0]}</p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[10px] font-bold">
-                        تأخير {alert.daysLeft} يوم
-                      </span>
-                      <button 
-                        onClick={() => handleQuickWhatsApp(alert, true)} 
-                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg transition-transform" 
-                        title="توجيه إنذار واتساب"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+
+              <div className="space-y-1">
+                <h2 className="text-3xl md:text-4xl font-black text-foreground tracking-tight">
+                  <AnimatedNumber value={stats.totalRemainingDebt} suffix="د.ع" />
+                </h2>
+                <p className="text-[11px] text-emerald-500 font-bold flex items-center gap-1 pt-1">
+                  <ArrowUpRight className="w-3.5 h-3.5" /> +{stats.collectionEfficiency}% معدل الاسترداد المالي
+                </p>
+              </div>
+
+              {/* أزرار الإجراءات السريعة Actions */}
+              <div className="flex items-center gap-3 pt-2">
+                <Link 
+                  href="/customers/new" 
+                  className="flex-1 py-3 px-4 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
+                >
+                  <Plus className="w-4 h-4" /> إضافة عقد جديد
+                </Link>
+                <Link 
+                  href="/customers" 
+                  className="flex-1 py-3 px-4 bg-secondary text-foreground font-bold text-xs rounded-2xl flex items-center justify-center gap-2 border border-border hover:bg-secondary/80 transition-colors"
+                >
+                  <Coins className="w-4 h-4 text-orange-500" /> استلام دفعة
+                </Link>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-border/60 grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-muted-foreground block text-[10px]">رأس المال المسترد</span>
+                <span className="font-bold text-foreground text-sm"><AnimatedNumber value={stats.totalRemainingCapital} suffix="د.ع" /></span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">الأرباح المتوقعة</span>
+                <span className="font-bold text-orange-500 text-sm"><AnimatedNumber value={stats.totalRemainingProfits} suffix="د.ع" /></span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* الكروت البرتقالية والرسم البياني المزدوج */}
+          <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            
+            <motion.div 
+              whileHover={{ y: -3 }}
+              className="bg-gradient-to-br from-orange-500 to-red-500 text-white p-5 rounded-3xl shadow-lg shadow-orange-500/20 flex flex-col justify-between"
+            >
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold opacity-90">الوارد اليومي المتوقع</span>
+                <CalendarDays className="w-5 h-5 opacity-80" />
+              </div>
+              <div className="my-3">
+                <h3 className="text-3xl font-black tracking-tight"><AnimatedNumber value={expectedIncome.daily} suffix="د.ع" /></h3>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] font-bold flex items-center justify-between">
+                <span>أقساط يومية نشطة</span>
+                <span>100%</span>
+              </div>
+            </motion.div>
+
+            <motion.div 
+              whileHover={{ y: -3 }}
+              className="bg-card/90 backdrop-blur-md border border-border p-5 rounded-3xl shadow-sm flex flex-col justify-between"
+            >
+              <div className="flex justify-between items-center text-muted-foreground">
+                <span className="text-xs font-bold">الوارد الشهري المتوقع</span>
+                <CalendarRange className="w-5 h-5 text-purple-500" />
+              </div>
+              <div className="my-3">
+                <h3 className="text-3xl font-black text-foreground tracking-tight"><AnimatedNumber value={expectedIncome.monthly} suffix="د.ع" /></h3>
+              </div>
+              <div className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                <span>أقساط شهرية</span>
+                <span className="text-emerald-500">+8% هذا الشهر</span>
+              </div>
+            </motion.div>
+
+            {/* 📊 رسم الأعمدة البيانية التفاعلي بالأرقام الفعلية للأسبوع */}
+            <div className="sm:col-span-2 bg-card/90 backdrop-blur-md border border-border p-5 rounded-3xl shadow-sm space-y-3 relative">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-black text-foreground">تدفق المقبوضات الأسبوعية الحقيقي</h4>
+                  <p className="text-[10px] text-muted-foreground">اضغط على أي يوم لعرض مقبوضاته الفعليّة</p>
+                </div>
+                <span className="text-[10px] font-bold px-3 py-1 bg-secondary rounded-xl text-foreground border border-border">
+                  المحصل الأسبوعي: <AnimatedNumber value={weeklyDailyBreakdown.reduce((a, b) => a + b.amount, 0)} suffix="د.ع" />
+                </span>
+              </div>
+
+              {/* رسم الأعمدة المزود بالتلميح والتفاعل بالحركات */}
+              <div className="h-32 flex items-end justify-between gap-2 pt-6 px-2 border-b border-border/40 pb-2 relative">
+                {weeklyDailyBreakdown.map((item, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => setSelectedBarIndex(selectedBarIndex === idx ? null : idx)}
+                    className="flex-1 h-full flex flex-col justify-end items-center gap-2 cursor-pointer group relative"
+                  >
+                    <AnimatePresence>
+                      {(selectedBarIndex === idx) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5, scale: 0.9 }}
+                          animate={{ opacity: 1, y: -30, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          className="absolute -top-2 bg-foreground text-background text-[10px] font-black px-2.5 py-1 rounded-xl shadow-xl z-20 whitespace-nowrap pointer-events-none"
+                        >
+                          {item.amount.toLocaleString()} د.ع
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <motion.div 
+                      initial={{ height: "0%" }}
+                      animate={{ height: `${item.heightPercent}%` }}
+                      transition={{ duration: 0.7, delay: idx * 0.07, ease: "easeOut" }}
+                      className={`w-full max-w-[28px] rounded-t-xl transition-all ${
+                        item.isToday
+                          ? "bg-gradient-to-t from-orange-500 to-red-500 shadow-md shadow-orange-500/30 ring-2 ring-orange-500/50"
+                          : item.amount > 0
+                          ? "bg-emerald-500/80 hover:bg-emerald-500 shadow-sm"
+                          : "bg-secondary/60 hover:bg-orange-500/30 border border-border/50"
+                      }`}
+                    />
+                    
+                    <span className={`text-[10px] font-bold ${item.isToday ? "text-orange-500 font-black underline" : "text-muted-foreground"}`}>
+                      {item.dayName}
+                    </span>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
+            </div>
 
-      {/* 6. التنبيهات القادمة */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-6">
-        <div className="bg-card text-card-foreground rounded-2xl border border-border/80 p-3.5 md:p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-3 md:mb-4 border-b border-border/60 pb-2.5">
-            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-              <BellRing className="w-4 h-4 md:w-5 md:h-5" />
-            </div>
-            <h3 className="text-sm md:text-base font-bold text-foreground">تنبيهات الاستحقاق القادمة</h3>
           </div>
-          
-          {upcomingAlerts.length === 0 ? (
-            <div className="text-center py-6 md:py-8 bg-muted/20 rounded-xl border border-dashed border-border/50">
-              <p className="text-xs text-muted-foreground">لا توجد دفعات مستحقة قريباً</p>
+
+        </div>
+
+        {/* 📊 3. شريط تصفية المقبوضات مع تحديد الفترات والتواريخ المخصصة */}
+        <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-foreground">
+              <CalendarCheck className="w-4 h-4 text-orange-500" />
+              <span>تصفية مبالغ المقبوضات حسب الفترة:</span>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {upcomingAlerts.map((alert, index) => (
-                <div key={index} className="flex justify-between items-center p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 border border-border/50 transition-colors">
-                  <div className="space-y-0.5 min-w-0 pr-1">
-                    <p className="font-bold text-xs truncate text-foreground">{alert.customerName}</p>
-                    <p className="text-[10px] text-muted-foreground font-mono">القسط: {Math.round(alert.amount).toLocaleString()} د.ع - يُستحق في: {alert.dueDate.toISOString().split("T")[0]}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400">
-                      {alert.daysLeft === 0 ? "اليوم" : `باقي ${alert.daysLeft} يوم`}
-                    </span>
-                    <button 
-                      onClick={() => handleQuickWhatsApp(alert, false)} 
-                      className="p-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg transition-transform" 
-                      title="تذكير واتساب"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+
+            <div className="flex items-center gap-1 bg-secondary/60 p-1 rounded-2xl w-full sm:w-auto justify-between sm:justify-start">
+              {[
+                { id: "today", label: "اليوم" },
+                { id: "week", label: "هذا الأسبوع" },
+                { id: "month", label: "هذا الشهر" },
+                { id: "custom", label: "نطاق مخصص (من - إلى)" },
+                { id: "all", label: "الإجمالي العام" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setTimeRange(tab.id as TimeRange)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    timeRange === tab.id
+                      ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </button>
               ))}
             </div>
-          )}
-          <Link href="/customers" className="w-full mt-3 md:mt-4 text-center text-xs text-primary hover:underline font-medium block py-1">
-            عرض كافة العملاء والدفعات ←
-          </Link>
-        </div>
-      </div>
+          </div>
 
-    </div>
+          {/* 📅 حقول إدخال التاريخ المخصص في حال اختيار "نطاق مخصص" */}
+          <AnimatePresence>
+            {timeRange === "custom" && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="pt-2 border-t border-border/50 flex flex-wrap items-center gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-muted-foreground flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-orange-500" /> من تاريخ:
+                  </span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="bg-background border border-border rounded-xl px-3 py-1.5 text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-muted-foreground flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-orange-500" /> إلى تاريخ:
+                  </span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="bg-background border border-border rounded-xl px-3 py-1.5 text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 🎯 4. شبكة البطاقات المترية المتبقية */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <MetricCard title="العملاء النشطين" value={stats.activeCustomers.toString()} icon={Users} />
+          <MetricCard title="رأس المال المتبقي" value={`${stats.totalRemainingCapital.toLocaleString()} د.ع`} icon={Wallet} />
+          <MetricCard title="الأرباح المتبقية" value={`${stats.totalRemainingProfits.toLocaleString()} د.ع`} icon={Banknote} />
+          <MetricCard title="المحصل بالفترة" value={`${filteredCollectedAmount.toLocaleString()} د.ع`} icon={Coins} />
+          <MetricCard title="متوسط الفائدة" value={`${stats.avgInterest}%`} icon={Percent} />
+          <MetricCard title="إجمالي الديون" value={`${stats.totalRemainingDebt.toLocaleString()} د.ع`} icon={Landmark} />
+        </div>
+
+        {/* 📈 5. محاكي الأرباح + كارت المتأخرات */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2">
+            <ProfitSimulator 
+              initialCapital={stats.totalRemainingCapital} 
+              currentCapital={stats.totalRemainingCapital}
+              defaultProfitMargin={stats.avgInterest || 20}
+              monthlyCashFlow={expectedIncome.monthly + expectedIncome.daily * 30 + expectedIncome.weekly * 4} 
+            />
+          </div>
+
+          {/* كارت المتأخرات والتنبيهات Look */}
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-card/90 backdrop-blur-md rounded-3xl border border-rose-500/20 p-5 md:p-6 shadow-sm hover:border-rose-500/40 transition-all flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4 border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-600 border border-rose-500/20 shadow-sm">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-foreground">دفعات متأخرة (تعثر مالي)</h3>
+                    <p className="text-[10px] text-muted-foreground">قائمة العملاء المتأخرين عن التسديد</p>
+                  </div>
+                </div>
+
+                <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20">
+                  {overdueAlerts.length} تنبيه
+                </span>
+              </div>
+              
+              {overdueAlerts.length === 0 ? (
+                <div className="text-center py-8 bg-secondary/30 rounded-2xl border border-dashed border-border/50">
+                  <p className="text-xs text-emerald-600 font-bold">ممتاز! لا توجد متأخرات مالية 👏</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {overdueAlerts.map((alert, index) => (
+                    <motion.div 
+                      key={index} 
+                      whileHover={{ x: -4, scale: 1.01 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex justify-between items-center p-3.5 rounded-2xl bg-secondary/40 hover:bg-secondary/80 border border-border/50 transition-all shadow-sm group"
+                    >
+                      <div className="space-y-0.5 min-w-0 pr-1">
+                        <p className="font-bold text-xs truncate text-foreground group-hover:text-orange-500 transition-colors">
+                          {alert.customerName}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground font-mono font-bold" dir="ltr">
+                          {Math.round(alert.amount).toLocaleString()} د.ع
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="px-2.5 py-1 rounded-xl bg-rose-500/10 text-rose-600 text-[10px] font-black border border-rose-500/20">
+                          تأخير {alert.daysLeft} يوم
+                        </span>
+
+                        <motion.button 
+                          whileHover={{ scale: 1.08 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleQuickWhatsApp(alert, true)} 
+                          className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all shadow-md shadow-emerald-600/20" 
+                          title="تذكير عبر الواتساب"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </motion.button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+
+      </motion.div>
+    </AnimatePresence>
   );
 }

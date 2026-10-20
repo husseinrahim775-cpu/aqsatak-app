@@ -20,7 +20,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
   const [costPrice, setCostPrice] = useState<number | "">(""); 
   const [downPayment, setDownPayment] = useState<number | "">(""); 
   const [profitRate, setProfitRate] = useState<number | "">(""); 
-  const [totalPriceInput, setTotalPriceInput] = useState<number | "">(""); // 💵 حقل سعر البيع الكلي الجديد
+  const [totalPriceInput, setTotalPriceInput] = useState<number | "">(""); 
 
   // تحديد آخر حقل تم تعديله لمنع التعارض أثناء الحساب اللحظي ("rate" | "total")
   const [lastEdited, setLastEdited] = useState<"rate" | "total">("rate");
@@ -169,40 +169,40 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-3 md:p-4 backdrop-blur-md animate-in fade-in duration-200 print:hidden font-sans">
-      <div className="bg-card border border-border/80 rounded-3xl w-full max-w-lg p-5 md:p-6 shadow-2xl space-y-5 relative overflow-hidden text-right dir-rtl">
+    <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-3 md:p-4 backdrop-blur-md animate-in fade-in duration-200 print:hidden font-sans">
+      <div className="bg-card/95 backdrop-blur-2xl border border-border rounded-3xl w-full max-w-lg p-5 md:p-6 shadow-2xl space-y-5 relative overflow-hidden text-right dir-rtl">
         
-        {/* هيدر الحاسبة */}
-        <div className="flex justify-between items-center border-b border-border/60 pb-3.5">
+        {/* هيدر الحاسبة  */}
+        <div className="flex justify-between items-center border-b border-border pb-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-primary/10 text-primary rounded-2xl border border-primary/20 shadow-sm">
+            <div className="p-2.5 bg-orange-500/10 text-orange-500 rounded-2xl border border-orange-500/20 shadow-sm">
               <Calculator className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base md:text-lg font-black text-foreground flex items-center gap-1.5">
-                حاسبة الأقساط السريعة
-                <Sparkles className="w-4 h-4 text-amber-500" />
+                حاسبة الأقساط السريعة 
+                
               </h2>
-              <p className="text-[11px] text-gray-500">أدخل الأرقام للحساب الفوري المباشر</p>
+              <p className="text-[11px] text-muted-foreground font-bold mt-0.5">أدخل الأرقام للحساب الفوري المباشر</p>
             </div>
           </div>
           <button 
             onClick={onClose} 
-            className="p-2 hover:bg-secondary rounded-xl text-gray-400 hover:text-foreground transition-colors"
+            className="p-2 hover:bg-secondary rounded-xl text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* أزرار نمط الحساب */}
-        <div className="grid grid-cols-2 gap-2 bg-secondary/40 p-1 rounded-2xl border border-border text-xs font-bold">
+        <div className="grid grid-cols-2 gap-2 bg-secondary/50 p-1.5 rounded-2xl border border-border text-xs font-black">
           <button
             type="button"
             onClick={() => setCalcMode("byDuration")}
-            className={`py-2 rounded-xl transition-all ${
+            className={`py-2.5 rounded-xl transition-all ${
               calcMode === "byDuration" 
-                ? "bg-primary text-primary-foreground shadow-sm" 
-                : "text-gray-500 hover:text-foreground"
+                ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20" 
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             تحديد المدة ➔ حساب القسط
@@ -210,68 +210,68 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
           <button
             type="button"
             onClick={() => setCalcMode("byPayment")}
-            className={`py-2 rounded-xl transition-all ${
+            className={`py-2.5 rounded-xl transition-all ${
               calcMode === "byPayment" 
-                ? "bg-primary text-primary-foreground shadow-sm" 
-                : "text-gray-500 hover:text-foreground"
+                ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20" 
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             تحديد مبلغ القسط ➔ حساب المدة
           </button>
         </div>
 
-        {/* حقول الإدخال */}
+        {/* حقول الإدخال المصممة لربط  */}
         <div className="grid grid-cols-2 gap-3 text-xs md:text-sm font-sans">
           <div>
-            <label className="block text-gray-500 font-bold mb-1">سعر شراء المنتج (التكلفة)</label>
+            <label className="block text-foreground font-black mb-1.5">سعر شراء المنتج (التكلفة)</label>
             <input
               type="number"
               placeholder="0"
               value={costPrice}
               onChange={(e) => handleCostChange(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-foreground dir-ltr text-right"
+              className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 text-amber-600 dark:text-amber-400 dir-ltr text-right font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-gray-500 font-bold mb-1">المقدمة (الدفعة الأولى)</label>
+            <label className="block text-foreground font-black mb-1.5">المقدمة (الدفعة الأولى)</label>
             <input
               type="number"
               placeholder="0"
               value={downPayment}
               onChange={(e) => setDownPayment(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-emerald-600 dir-ltr text-right"
+              className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 text-slate-950 dark:text-emerald-400 dir-ltr text-right font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-gray-500 font-bold mb-1">نسبة الفائدة / الربح (%)</label>
+            <label className="block text-foreground font-black mb-1.5">نسبة الفائدة / الربح (%)</label>
             <input
               type="number"
               placeholder="0"
               value={profitRate}
               onChange={(e) => handleProfitRateChange(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-primary dir-ltr text-right"
+              className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 text-orange-500 dir-ltr text-right font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-gray-500 font-bold mb-1">سعر البيع الكلي بالتقسيط</label>
+            <label className="block text-foreground font-black mb-1.5">سعر البيع الكلي بالتقسيط</label>
             <input
               type="number"
               placeholder="0"
               value={totalPriceInput}
               onChange={(e) => handleTotalPriceInputChange(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-emerald-600 dark:text-emerald-400 dir-ltr text-right"
+              className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 text-slate-950 dark:text-emerald-400 dir-ltr text-right font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-gray-500 font-bold mb-1">نوع القسط الدوري</label>
+            <label className="block text-foreground font-black mb-1.5">نوع القسط الدوري</label>
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value as any)}
-              className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+              className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
             >
               <option value="monthly">شهري</option>
               <option value="weekly">أسبوعي</option>
@@ -282,7 +282,7 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
           <div>
             {calcMode === "byDuration" ? (
               <div>
-                <label className="block text-gray-500 font-bold mb-1">
+                <label className="block text-foreground font-black mb-1.5">
                   مدة التقسيط (بـ {getPeriodUnitText()})
                 </label>
                 <input
@@ -291,71 +291,71 @@ export default function InstallmentCalculatorModal({ isOpen, onClose }: Calculat
                   placeholder="0"
                   value={durationCount}
                   onChange={(e) => setDurationCount(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 dir-ltr text-right"
+                  className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 dir-ltr text-right font-mono"
                 />
               </div>
             ) : (
               <div>
-                <label className="block text-gray-500 font-bold mb-1">
-                  مبلغ القسط الـ ({getPeriodSingleText()}) المطلوب
+                <label className="block text-foreground font-black mb-1.5">
+                  مبلغ القسط الـ ({getPeriodSingleText()})
                 </label>
                 <input
                   type="number"
                   placeholder="0"
                   value={customPayment}
                   onChange={(e) => setCustomPayment(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="w-full p-2.5 bg-background border border-border rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/50 text-primary dir-ltr text-right"
+                  className="w-full p-3 bg-background border border-border rounded-2xl font-black outline-none focus:ring-2 focus:ring-orange-500 text-orange-500 dir-ltr text-right font-mono"
                 />
               </div>
             )}
           </div>
         </div>
 
-        {/* بطاقة النتائج المباشرة */}
-        <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20 p-4 rounded-2xl space-y-2.5 text-xs md:text-sm font-sans">
-          <div className="flex justify-between items-center border-b border-primary/20 pb-2">
-            <span className="font-bold text-gray-600 dark:text-gray-300">مبلغ القسط الـ ({getPeriodSingleText()}):</span>
-            <span className="text-xl font-black text-primary">{formatNum(results.periodicPayment)} د.ع</span>
+        {/* بطاقة النتائج المباشرة High Contrast  Card */}
+        <div className="bg-secondary/40 border border-border p-4.5 rounded-3xl space-y-2.5 text-xs md:text-sm font-sans">
+          <div className="flex justify-between items-center border-b border-border pb-2.5">
+            <span className="font-black text-foreground">مبلغ القسط الـ ({getPeriodSingleText()}):</span>
+            <span className="text-xl md:text-2xl font-black text-orange-500 font-mono">{formatNum(results.periodicPayment)} د.ع</span>
           </div>
 
-          <div className="flex justify-between text-gray-600 dark:text-gray-300">
+          <div className="flex justify-between text-muted-foreground font-bold">
             <span>عدد الأقساط المطلوبة:</span>
-            <span className="font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
+            <span className="font-black text-orange-600 dark:text-orange-400 bg-orange-500/10 px-3 py-0.5 rounded-full border border-orange-500/20">
               {results.calculatedInstallmentsCount} {getPeriodUnitText()}
             </span>
           </div>
 
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between text-muted-foreground font-bold">
             <span>سعر البيع النهائي بالتقسيط:</span>
-            <span className="font-bold text-foreground">{formatNum(results.totalFinalPrice)} د.ع</span>
+            <span className="font-black text-slate-950 dark:text-white font-mono">{formatNum(results.totalFinalPrice)} د.ع</span>
           </div>
 
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between text-muted-foreground font-bold">
             <span>إجمالي المتبقي للتقسيط (بعد خصم المقدمة):</span>
-            <span className="font-bold text-foreground">{formatNum(results.totalDue)} د.ع</span>
+            <span className="font-black text-slate-950 dark:text-white font-mono">{formatNum(results.totalDue)} د.ع</span>
           </div>
 
-          <div className="flex justify-between text-gray-600 dark:text-gray-300 pt-2 border-t border-primary/20 items-center">
-            <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-              <TrendingUp className="w-4 h-4" />
+          <div className="flex justify-between pt-2.5 border-t border-border items-center">
+            <span className="font-black text-slate-950 dark:text-emerald-400 flex items-center gap-1">
+              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               صافي أرباح الفائدة (ثابتة):
             </span>
-            <span className="font-black text-emerald-600 dark:text-emerald-400 text-sm md:text-base">{formatNum(results.profitAmount)} د.ع</span>
+            <span className="font-black text-slate-950 dark:text-emerald-400 text-sm md:text-base font-mono">{formatNum(results.profitAmount)} د.ع</span>
           </div>
         </div>
 
-        {/* الأزرار */}
+        {/* الأزرار النهائية */}
         <div className="flex gap-2.5 pt-1">
           <button
             onClick={onClose}
-            className="flex-1 py-3 text-xs md:text-sm font-bold border border-border rounded-2xl hover:bg-secondary transition-colors"
+            className="flex-1 py-3 text-xs md:text-sm font-black border border-border rounded-2xl hover:bg-secondary transition-colors"
           >
-            إغلاق
+            إلغاء
           </button>
 
           <button
             onClick={handleCreateContract}
-            className="flex-1 py-3 text-xs md:text-sm bg-primary text-primary-foreground font-bold rounded-2xl hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-md active:scale-95"
+            className="flex-1 py-3 text-xs md:text-sm bg-gradient-to-r from-orange-500 to-red-500 text-white font-black rounded-2xl hover:opacity-95 transition-all flex items-center justify-center gap-2 shadow-md shadow-orange-500/20 active:scale-95"
           >
             <span>تحويل إلى عقد جديد</span>
             <ArrowRight className="w-4 h-4 rotate-180" />

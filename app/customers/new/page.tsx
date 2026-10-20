@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, Search, Clock, Package, Camera, FileText, Image as ImageIcon } from "lucide-react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { 
+  ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, 
+  Search, Clock, Package, Camera, FileText, Image as ImageIcon, CheckCircle2, Sparkles 
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   addInstallmentRecord, 
   getUserInstallments, 
@@ -24,7 +28,7 @@ interface ExistingCustomer {
   guarantorPhone: string;
 }
 
-export default function NewInstallmentPage() {
+function NewInstallmentContent() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -122,7 +126,6 @@ export default function NewInstallmentPage() {
     }
   }, [user]);
 
-  // دالة تحويل الأرقام للإنجليزي مع فواصل
   const formatNum = (num: number) => {
     return Math.round(num).toLocaleString("en-US");
   };
@@ -275,7 +278,6 @@ export default function NewInstallmentPage() {
     setShowSuggestions(false);
   };
 
-  // ⚡ الحفظ المجاني والمباشر بدون حاجـة لـ Firebase Storage
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -291,7 +293,6 @@ export default function NewInstallmentPage() {
       let contractUrl = "";
       let personalPhotoUrl = "";
 
-      // 📸 ضغط وتحويل المستندات تلقائياً بأسلوب Base64
       if (idCardFile) {
         idCardUrl = await compressAndConvertToBase64(idCardFile);
       }
@@ -355,37 +356,53 @@ export default function NewInstallmentPage() {
   const periodUnitLabel = formData.paymentPeriod === "daily" ? "يوم" : formData.paymentPeriod === "weekly" ? "أسبوع" : "شهر";
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12 font-sans dir-rtl text-right">
-      <div className="flex items-center gap-4">
-        <Link
-          href="/customers"
-          className="p-2 bg-card border border-border rounded-lg hover:bg-border/50 transition-colors"
-        >
-          <ArrowRight className="w-5 h-5 text-foreground" />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">إضافة قسط وعقد جديد</h1>
-          <p className="text-gray-500 text-sm mt-1">أدخل بيانات العميل، الأوراق الثبوتية، والمنتج لحساب وتوثيق القسط.</p>
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="max-w-4xl mx-auto space-y-6 pb-12 font-sans dir-rtl text-right"
+    >
+      {/* 1. ترويسة الصفحة العصرية بأسلوب  Glass Style */}
+      <div className="flex items-center justify-between bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
+        <div className="flex items-center gap-3.5">
+          <Link
+            href="/customers"
+            className="p-2.5 bg-secondary hover:bg-orange-500/10 hover:text-orange-500 text-foreground rounded-2xl border border-border/80 transition-all"
+          >
+            <ArrowRight className="w-5 h-5" />
+          </Link>
+          <div>
+            <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2">
+              <span>إنشاء عقد وقسط جديد</span>
+              <Sparkles className="w-5 h-5 text-orange-500" />
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5 font-medium">أدخل بيانات العميل، الأوراق الثبوتية، والمنتج لتوثيق وحساب القسط .</p>
+          </div>
         </div>
+
+        <span className="hidden sm:inline-flex text-xs font-bold px-3.5 py-1.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-full">
+          عقد ذكي جديد
+        </span>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          
           {/* قسم بيانات العميل */}
-          <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 relative">
-            <div className="flex items-center gap-2 mb-4 text-primary">
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4 relative">
+            <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <User className="w-5 h-5" />
-              <h2 className="font-bold text-lg">بيانات العميل</h2>
+              <h2 className="font-extrabold text-base">بيانات العميل الأساسية</h2>
             </div>
             
             <div className="relative">
-              <label className="block text-sm font-medium mb-1">الاسم الرباعي (أو ابحث عن عميل سابق)</label>
+              <label className="block text-xs font-bold text-muted-foreground mb-1.5">الاسم الرباعي (أو ابحث عن عميل سابق)</label>
               <div className="relative">
                 <input
                   type="text"
                   required
                   placeholder="اكتب الاسم للبحث والتعبئة التلقائية..."
-                  className="w-full p-3 pl-10 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary/50 outline-none"
+                  className="w-full p-3.5 pl-10 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500/50 outline-none transition-all"
                   value={formData.customerName}
                   onChange={(e) => {
                     setFormData({ ...formData, customerName: e.target.value });
@@ -393,45 +410,54 @@ export default function NewInstallmentPage() {
                   }}
                   onFocus={() => setShowSuggestions(true)}
                 />
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3.5" />
+                <Search className="w-4 h-4 text-muted-foreground absolute left-3.5 top-4" />
               </div>
 
-              {showSuggestions && filteredSuggestions.length > 0 && (
-                <div className="absolute z-50 w-full bg-card border border-border rounded-xl shadow-xl mt-1 max-h-52 overflow-y-auto">
-                  <div className="p-2 text-xs font-bold text-gray-400 border-b border-border bg-background/50">
-                    اختيار عميل مسجل سابقاً:
-                  </div>
-                  {filteredSuggestions.map((c, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      className="w-full text-right p-3 hover:bg-primary/10 transition-colors border-b border-border/50 last:border-0 flex flex-col gap-0.5"
-                      onClick={() => selectCustomer(c)}
-                    >
-                      <span className="font-bold text-foreground text-sm">{c.customerName}</span>
-                      <span className="text-xs text-gray-500 dir-ltr text-right">{c.phoneNumber}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* اقتراحات العميل  Dropdown */}
+              <AnimatePresence>
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    className="absolute z-50 w-full bg-card border border-border rounded-2xl shadow-2xl mt-1.5 max-h-56 overflow-y-auto"
+                  >
+                    <div className="p-2.5 text-[10px] font-bold text-muted-foreground border-b border-border/60 bg-secondary/40">
+                      عميل مسجل سابقاً (ضغط للتعبئة):
+                    </div>
+                    {filteredSuggestions.map((c, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className="w-full text-right p-3 hover:bg-orange-500/10 transition-colors border-b border-border/40 last:border-0 flex flex-col gap-0.5"
+                        onClick={() => selectCustomer(c)}
+                      >
+                        <span className="font-bold text-foreground text-xs">{c.customerName}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono" dir="ltr">{c.phoneNumber}</span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">رقم الهاتف</label>
+              <label className="block text-xs font-bold text-muted-foreground mb-1.5">رقم الهاتف (الأساسي)</label>
               <input
                 type="tel"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background text-left dir-ltr"
+                className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold text-left dir-ltr focus:ring-2 focus:ring-orange-500/50 outline-none"
                 value={formData.phoneNumber}
                 onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium mb-1">عنوان السكن الدقيق</label>
+              <label className="block text-xs font-bold text-muted-foreground mb-1.5">عنوان السكن الدقيق</label>
               <input
                 type="text"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background"
+                className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500/50 outline-none"
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
               />
@@ -439,43 +465,47 @@ export default function NewInstallmentPage() {
           </div>
 
           {/* قسم بيانات الكفيل */}
-          <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 mb-4 text-primary">
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 text-purple-500 border-b border-border/60 pb-3">
               <ShieldCheck className="w-5 h-5" />
-              <h2 className="font-bold text-lg">بيانات الكفيل</h2>
+              <h2 className="font-extrabold text-base">بيانات الكفيل الضامن</h2>
             </div>
+
             <div>
-              <label className="block text-sm font-medium mb-1">اسم الكفيل</label>
+              <label className="block text-xs font-bold text-muted-foreground mb-1.5">اسم الكفيل الثلاثي</label>
               <input
                 type="text"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background"
+                className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500/50 outline-none"
                 value={formData.guarantorName}
                 onChange={(e) => setFormData({ ...formData, guarantorName: e.target.value })}
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium mb-1">رقم هاتف الكفيل</label>
+              <label className="block text-xs font-bold text-muted-foreground mb-1.5">رقم هاتف الكفيل</label>
               <input
                 type="tel"
                 required
-                className="w-full p-3 rounded-lg border border-border bg-background text-left dir-ltr"
+                className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold text-left dir-ltr focus:ring-2 focus:ring-orange-500/50 outline-none"
                 value={formData.guarantorPhone}
                 onChange={(e) => setFormData({ ...formData, guarantorPhone: e.target.value })}
               />
             </div>
           </div>
 
-          {/* 📸 قسم مرفقات الأوراق الثبوتية والعقد */}
-          <div className="md:col-span-2 bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 mb-2 text-primary">
+          {/* 📸 قسم مرفقات الأوراق الثبوتية والعقد  Cards */}
+          <div className="md:col-span-2 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <Camera className="w-5 h-5" />
-              <h2 className="font-bold text-lg">المستندات والأوراق الثبوتية (اختياري)</h2>
+              <h2 className="font-extrabold text-base">المستندات والأوراق الثبوتية (اختياري)</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
-                <ImageIcon className="w-8 h-8 text-primary mx-auto" />
+              
+              {/* صورة الهوية */}
+              <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
+                <ImageIcon className="w-8 h-8 text-orange-500 mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الهوية / البطاقة الموحدة</span>
                 <input
                   type="file"
@@ -486,16 +516,17 @@ export default function NewInstallmentPage() {
                 />
                 <label
                   htmlFor="idCard"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                  className="inline-block bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-orange-500/20 transition-colors shadow-sm"
                 >
-                  {idCardFile ? "تم اختيار الملف ✓" : "اختر صورة الهوية"}
+                  {idCardFile ? "تم اختيار الصورة ✓" : "اختر صورة الهوية"}
                 </label>
-                {idCardFile && <p className="text-[10px] text-gray-400 truncate">{idCardFile.name}</p>}
+                {idCardFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{idCardFile.name}</p>}
               </div>
 
-              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
-                <FileText className="w-8 h-8 text-primary mx-auto" />
-                <span className="block text-xs font-bold text-foreground">صورة العقد الورقي</span>
+              {/* العقد الورقي */}
+              <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
+                <FileText className="w-8 h-8 text-orange-500 mx-auto" />
+                <span className="block text-xs font-bold text-foreground">صورة العقد الورقي الموقّع</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -505,15 +536,16 @@ export default function NewInstallmentPage() {
                 />
                 <label
                   htmlFor="contractDoc"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                  className="inline-block bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-orange-500/20 transition-colors shadow-sm"
                 >
-                  {contractFile ? "تم اختيار الملف ✓" : "اختر صورة العقد"}
+                  {contractFile ? "تم اختيار العقد ✓" : "اختر صورة العقد"}
                 </label>
-                {contractFile && <p className="text-[10px] text-gray-400 truncate">{contractFile.name}</p>}
+                {contractFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{contractFile.name}</p>}
               </div>
 
-              <div className="border border-dashed border-border rounded-xl p-4 text-center space-y-2 hover:border-primary/50 transition">
-                <User className="w-8 h-8 text-primary mx-auto" />
+              {/* صورة الزبون */}
+              <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
+                <User className="w-8 h-8 text-orange-500 mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
                 <input
                   type="file"
@@ -524,30 +556,32 @@ export default function NewInstallmentPage() {
                 />
                 <label
                   htmlFor="personalPhoto"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3 py-2 rounded-lg font-semibold cursor-pointer hover:bg-primary/20 transition"
+                  className="inline-block bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-orange-500/20 transition-colors shadow-sm"
                 >
-                  {personalPhotoFile ? "تم اختيار الملف ✓" : "اختر صورة العميل"}
+                  {personalPhotoFile ? "تم اختيار الصورة ✓" : "اختر صورة العميل"}
                 </label>
-                {personalPhotoFile && <p className="text-[10px] text-gray-400 truncate">{personalPhotoFile.name}</p>}
+                {personalPhotoFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{personalPhotoFile.name}</p>}
               </div>
+
             </div>
           </div>
 
           {/* قسم تفاصيل المنتج والتقسيط */}
-          <div className="md:col-span-2 bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 mb-4 text-primary">
+          <div className="md:col-span-2 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <Box className="w-5 h-5" />
-              <h2 className="font-bold text-lg">تفاصيل المنتج وخطة التسديد</h2>
+              <h2 className="font-extrabold text-base">تفاصيل السلعة وخطة التسديد</h2>
             </div>
 
-            <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 mb-2 space-y-2">
-              <label className="text-sm font-bold text-primary flex items-center gap-2">
+            {/* ربط مادة من المخزن  Select Box */}
+            <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-2">
+              <label className="text-xs font-bold text-orange-600 dark:text-orange-400 flex items-center gap-2">
                 <Package className="w-4 h-4" /> اختر مادة متوفرة بالمخزن المالي (تعبئة تلقائية للأسعار)
               </label>
               <select
                 value={selectedProductId}
                 onChange={(e) => handleSelectProduct(e.target.value)}
-                className="w-full p-3 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary/50 outline-none text-sm cursor-pointer"
+                className="w-full p-3.5 rounded-2xl border border-border bg-card text-foreground font-bold text-xs focus:ring-2 focus:ring-orange-500 outline-none cursor-pointer"
               >
                 <option value="">-- اضغط هنا لاختيار مادة من المخزن --</option>
                 {availableProducts.map((item) => (
@@ -558,27 +592,27 @@ export default function NewInstallmentPage() {
               </select>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-1">
               <div className="sm:col-span-2 md:col-span-3">
-                <label className="block text-sm font-medium mb-1">نوع المنتج</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">نوع واسم المنتج</label>
                 <input
                   type="text"
                   required
                   placeholder="مثال: آيفون 15 برو ماكس"
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.productName}
                   onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">سعر الشراء (التكلفة)</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">سعر الشراء / التكلفة (د.ع)</label>
                 <input
                   type="number"
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background dir-ltr text-right"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-black dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.purchasePrice}
                   onChange={(e) =>
                     handlePurchasePriceChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -587,14 +621,14 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">نسبة الربح (%)</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">نسبة الربح المضافة (%)</label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background dir-ltr text-right font-bold"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-black dir-ltr text-right text-orange-500 focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.profitMargin}
                   onChange={(e) =>
                     handleProfitMarginChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -603,14 +637,14 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">سعر البيع الكلي (د.ع)</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">سعر البيع الكلي (د.ع)</label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background font-bold text-primary dir-ltr text-right"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-black text-foreground dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.productPrice}
                   onChange={(e) =>
                     handleProductPriceChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -619,13 +653,13 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">الدفعة المقدمة (د.ع)</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">الدفعة المقدمة (د.ع)</label>
                 <input
                   type="number"
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background text-emerald-600 font-bold dir-ltr text-right"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-black text-emerald-600 dark:text-emerald-400 dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.downPayment}
                   onChange={(e) =>
                     setFormData({
@@ -637,11 +671,11 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1 text-primary font-bold">فترة التسديد (نوع القسط)</label>
+                <label className="block text-xs font-bold text-orange-500 mb-1.5">فترة التسديد (نوع القسط)</label>
                 <select
                   value={formData.paymentPeriod}
                   onChange={(e) => setFormData({ ...formData, paymentPeriod: e.target.value as "daily" | "weekly" | "monthly" })}
-                  className="w-full p-3 rounded-lg border border-primary/50 bg-background text-foreground focus:ring-2 focus:ring-primary font-bold outline-none cursor-pointer"
+                  className="w-full p-3.5 rounded-2xl border border-orange-500/40 bg-background text-foreground text-xs font-extrabold focus:ring-2 focus:ring-orange-500 outline-none cursor-pointer"
                 >
                   <option value="monthly">قسط شهري</option>
                   <option value="weekly">قسط أسبوعي</option>
@@ -650,13 +684,13 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">عدد الدفعات ({periodUnitLabel})</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5">عدد الدفعات ({periodUnitLabel})</label>
                 <input
                   type="number"
                   min="1"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-border bg-background font-bold dir-ltr text-right"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-black dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.months}
                   onChange={(e) =>
                     handleMonthsChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -665,7 +699,7 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1 text-primary font-bold">
+                <label className="block text-xs font-bold text-orange-500 mb-1.5">
                   أو أدخل القسط الـ{periodLabel} (د.ع)
                 </label>
                 <input
@@ -673,7 +707,7 @@ export default function NewInstallmentPage() {
                   min="0"
                   step="any"
                   placeholder="0"
-                  className="w-full p-3 rounded-lg border border-primary/40 bg-background focus:ring-2 focus:ring-primary outline-none font-bold text-primary dir-ltr text-right"
+                  className="w-full p-3.5 rounded-2xl border border-orange-500/40 bg-background focus:ring-2 focus:ring-orange-500 outline-none font-black text-xs text-orange-500 dir-ltr text-right"
                   value={formData.monthlyInstallment}
                   onChange={(e) =>
                     handleMonthlyInstallmentChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -682,14 +716,14 @@ export default function NewInstallmentPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1 flex items-center gap-1">
-                  <Calendar className="w-4 h-4 text-primary" />
-                  <span>تاريخ أول قسط</span>
+                <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-orange-500" />
+                  <span>تاريخ استحقاق أول قسط</span>
                 </label>
                 <input
                   type="date"
                   required
-                  className="w-full p-3 rounded-lg border border-border bg-background"
+                  className="w-full p-3.5 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
                   value={formData.startDate}
                   onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                 />
@@ -698,56 +732,72 @@ export default function NewInstallmentPage() {
           </div>
         </div>
 
-        {/* قسم النتائج الحسابية بالأرقام الإنجليزية الصافية */}
-        <div className="bg-primary text-primary-foreground rounded-xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center text-center md:text-right gap-6 shadow-lg relative overflow-hidden">
-          <Calculator className="absolute opacity-10 w-48 h-48 left-[-20px] top-[-20px] pointer-events-none" />
+        {/* 5. كارت النتائج الحسابية البارز  Hero Calculation Box */}
+        <div className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-3xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center text-center md:text-right gap-6 shadow-xl shadow-orange-500/20 relative overflow-hidden">
+          <Calculator className="absolute opacity-10 w-52 h-52 left-[-20px] top-[-20px] pointer-events-none" />
 
           <div className="z-10 w-full md:w-auto space-y-2">
             <div>
-              <p className="text-primary-foreground/80 text-xs">سعر البيع الكلي</p>
-              <p className="text-lg font-bold">
+              <p className="text-white/80 text-[10px] font-bold">إجمالي سعر البيع بالعقد</p>
+              <p className="text-lg font-black tracking-tight">
                 {formatNum(calculation.totalAmountWithProfit)} د.ع
               </p>
             </div>
             <div>
-              <p className="text-primary-foreground/80 text-xs">المتبقي للتقسيط (بعد المقدمة)</p>
-              <p className="text-xl font-black">{formatNum(calculation.totalDue)} د.ع</p>
+              <p className="text-white/80 text-[10px] font-bold">المتبقي للتقسيط (بعد خصم المقدمة)</p>
+              <p className="text-2xl font-black tracking-tight">{formatNum(calculation.totalDue)} د.ع</p>
             </div>
           </div>
 
-          <div className="z-10 w-full md:w-auto border-y md:border-y-0 md:border-x border-primary-foreground/20 py-4 md:py-0 md:px-8 space-y-2">
-            <p className="text-primary-foreground/80 text-xs flex items-center justify-center md:justify-start gap-1">
+          <div className="z-10 w-full md:w-auto border-y md:border-y-0 md:border-x border-white/20 py-4 md:py-0 md:px-8 space-y-2">
+            <p className="text-white/80 text-[10px] font-bold flex items-center justify-center md:justify-start gap-1">
               <Clock className="w-3.5 h-3.5" />
               <span>مدة التسديد المحسوبة</span>
             </p>
-            <div className="text-xl font-extrabold text-amber-300">
+            <div className="text-2xl font-black text-amber-200">
               {calculation.calculatedMonths} {periodUnitLabel}
               {calculation.calculatedDays > 0 && ` و ${calculation.calculatedDays} يوم`}
             </div>
-            <p className="text-xs text-primary-foreground/70">
-              الربح الصافي: <span className="text-green-300 font-bold">+{formatNum(calculation.totalProfit)} د.ع</span>
+            <p className="text-xs text-white/90 font-bold">
+              الربح الصافي: <span className="text-emerald-300 font-extrabold">+{formatNum(calculation.totalProfit)} د.ع</span>
             </p>
           </div>
 
-          <div className="z-10 bg-background text-foreground px-6 py-4 rounded-xl shadow-inner w-full md:w-auto text-center border-2 border-primary/20">
-            <p className="text-sm font-medium text-gray-500 mb-1">القسط الـ{periodLabel} المطلوب</p>
-            <p className="text-3xl font-extrabold text-primary">
-              {formatNum(calculation.monthlyInstallment)} د.ع
+          <div className="z-10 bg-card text-foreground px-6 py-4 rounded-2xl shadow-lg w-full md:w-auto text-center border border-border">
+            <p className="text-xs font-bold text-muted-foreground mb-1">القسط الـ{periodLabel} المطلوب</p>
+            <p className="text-3xl font-black text-orange-500 tracking-tight">
+              {formatNum(calculation.monthlyInstallment)} <span className="text-xs font-bold text-muted-foreground">د.ع</span>
             </p>
           </div>
         </div>
 
-        <div className="flex justify-end">
-          <button
+        {/* 6. زر الحفظ الرئيسي */}
+        <div className="flex justify-end pt-2">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             type="submit"
             disabled={isSubmitting}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-4 rounded-xl hover:bg-primary/90 transition-all shadow-md font-bold text-lg disabled:opacity-70 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-8 py-4 rounded-2xl shadow-lg shadow-orange-500/20 font-extrabold text-base hover:opacity-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
-            <span>{isSubmitting ? "جاري الحفظ..." : "حفظ القسط وإنشاء سجل"}</span>
-          </button>
+            {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+            <span>{isSubmitting ? "جاري الحفظ والتوثيق..." : "حفظ القسط وإنشاء سجل العقد"}</span>
+          </motion.button>
         </div>
       </form>
-    </div>
+    </motion.div>
+  );
+}
+
+export default function NewInstallmentPage() {
+  return (
+    <Suspense fallback={
+      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+        <Loader2 className="w-10 h-10 animate-spin" />
+        <span className="text-xs font-bold text-muted-foreground animate-pulse">جاري تحضير نموذج العقد...</span>
+      </div>
+    }>
+      <NewInstallmentContent />
+    </Suspense>
   );
 }

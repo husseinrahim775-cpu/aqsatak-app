@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useAuth } from "./AuthProvider";
+import { motion } from "framer-motion";
 import { 
   LayoutDashboard, 
   Users, 
@@ -15,18 +16,18 @@ import {
   LogOut,
   Wallet,
   Package,
-  Vault,
-  Loader2
+  Vault
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "../services/firebase";
 
-// جميع النوافذ المتاحة بالنظام مفلترة بحسب الصلاحيات
 const allMenuItems = [
   { name: 'لوحة التحكم', path: '/dashboard', icon: LayoutDashboard, permissionKey: 'canViewDashboard' },
   { name: 'العملاء والأقساط', path: '/customers', icon: Users, permissionKey: 'canManageCustomers' },
-  { name: 'الحسابات والمدفوعات', path: '/accounts', icon: CreditCard, permissionKey: 'canManageCustomers' }, // 👈 المسار الفعلي /accounts
+  { name: 'الحسابات والمدفوعات', path: '/accounts', icon: CreditCard, permissionKey: 'canManageCustomers' },
   { name: 'الخزينة والصندوق', path: '/treasury', icon: Vault, permissionKey: 'canViewTreasury' },
-  { name: 'المخزن والمبيعات', path: '/inventory', icon: Package, permissionKey: 'canManageStore' }, // 👈 المسار الفعلي /inventory
+  { name: 'المخزن والمبيعات', path: '/inventory', icon: Package, permissionKey: 'canManageStore' },
   { name: 'سجل الديون', path: '/debts', icon: Wallet, permissionKey: 'canManageCustomers' }, 
   { name: 'الإعدادات', path: '/settings', icon: Settings, permissionKey: 'isAdminOnly' },
 ];
@@ -36,11 +37,21 @@ export default function Sidebar() {
   const { theme, setTheme } = useTheme();
   const { user, userData, logout } = useAuth() as any;
   const [mounted, setMounted] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string>("/logo.png");
 
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
+  // 🔄 الاستماع الحي للشعار المرفوع من Firestore
   useEffect(() => {
     setMounted(true);
+
+    const unsubLogo = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().systemLogoUrl) {
+        setLogoUrl(docSnap.data().systemLogoUrl);
+      }
+    });
+
+    return () => unsubLogo();
   }, []);
 
   const handleLogout = async () => {
@@ -49,48 +60,32 @@ export default function Sidebar() {
     }
   };
 
-  // 🎯 تحديد ما إذا كان المستخدم الحالي موظفاً أم مالك الحساب الرئيسي
   const isEmployee = userData?.role === "employee";
   const userPermissions = userData?.permissions || {};
 
-  // 🎯 تصفية القائمة الجانبية بناءً على نوع المستخدم والجلسة النشطة
   const visibleMenuItems = allMenuItems.filter((item) => {
-    // 1. إذا كان أدمن رئيسي (ليس موظفاً)، تُعرض كل القوائم
-    if (!isEmployee) {
-      return true;
-    }
-
-    // 2. إذا كان موظفاً، تُخفى شاشة الإعدادات دائماً
-    if (item.permissionKey === "isAdminOnly") {
-      return false;
-    }
-
-    // 3. فحص الجدول الخاص بالصلاحيات المسندة للموظف
+    if (!isEmployee) return true;
+    if (item.permissionKey === "isAdminOnly") return false;
     const permKey = item.permissionKey as keyof typeof userPermissions;
     return userPermissions?.[permKey] ?? false;
   });
 
   return (
-    <aside className="w-64 bg-card border-l border-border h-screen sticky top-0 flex flex-col justify-between p-4 shadow-sm select-none">
+    <aside className="w-20 bg-card/90 backdrop-blur-2xl border-l border-border h-screen sticky top-0 flex flex-col justify-between items-center py-6 shadow-sm select-none z-50">
       
-      <div>
-        {/* اسم النظام والشعار المحسّن للمتصفحات وSafari */}
-        <div className="mb-8 mt-4 text-center flex flex-col items-center justify-center">
-          <div className="flex items-center justify-center gap-2 mb-1">
-            <img 
-              src="/logo.png" 
-              alt="أقساطك" 
-              className="w-9 h-9 object-contain"
-            />
-            <h2 className="text-3xl font-extrabold text-primary">أقساطك</h2>
-          </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
-            {isEmployee ? `حساب موظف: ${userData?.name || "الموظف"}` : "نظام الإدارة المالي"}
-          </p>
+      {/* 1. الشعار والأيقونات */}
+      <div className="flex flex-col items-center gap-7 w-full">
+        {/* الشعار الديناميكي V14 المربوط بـ Firestore */}
+        <div className="w-11 h-11 rounded-2xl p-0.5 bg-gradient-to-tr from-orange-500 to-red-500 shadow-md shadow-orange-500/20 flex items-center justify-center overflow-hidden">
+          <img 
+            src={logoUrl} 
+            alt="أقساطك" 
+            className="w-full h-full object-contain rounded-xl bg-white p-0.5"
+          />
         </div>
         
-        {/* روابط التنقل المفلترة حسب الصلاحيات */}
-        <nav className="flex flex-col gap-2">
+        {/* أيقونات التنقل المصغرة مع التلميح (Tooltip) */}
+        <nav className="flex flex-col gap-3 w-full px-3">
           {visibleMenuItems.map((item) => {
             const isActive = pathname.startsWith(item.path);
             const Icon = item.icon;
@@ -99,66 +94,87 @@ export default function Sidebar() {
               <Link 
                 key={item.path} 
                 href={item.path}
-                className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-200 ${
-                  isActive 
-                    ? "bg-primary text-primary-foreground shadow-md font-bold" 
-                    : "text-foreground hover:bg-border/50 hover:text-primary font-medium"
-                }`}
+                title={item.name}
+                className="relative flex justify-center group"
               >
-                <Icon className="w-5 h-5" />
-                <span className="text-base">{item.name}</span>
+                <motion.div
+                  whileHover={{ scale: 1.1, y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`p-3.5 rounded-2xl transition-all duration-300 relative ${
+                    isActive 
+                      ? "bg-gradient-to-tr from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/25" 
+                      : "text-foreground/70 hover:bg-secondary hover:text-orange-500"
+                  }`}
+                >
+                  <Icon className="w-5 h-5" />
+                  
+                  {/* شريط الإضاءة المعتمد للتبويب النشط */}
+                  {isActive && (
+                    <motion.div 
+                      layoutId="activeSideDot"
+                      className="absolute -right-3 top-1/2 -translate-y-1/2 w-1.5 h-5 bg-orange-500 rounded-l-full"
+                      transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                    />
+                  )}
+                </motion.div>
+
+                {/* نص مساعدة يظهر عند تحريك الماوس (Hover Label) */}
+                <span className="absolute right-16 top-1/2 -translate-y-1/2 bg-foreground text-background text-[11px] font-bold px-2.5 py-1 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md whitespace-nowrap z-50">
+                  {item.name}
+                </span>
               </Link>
             );
           })}
 
-          {/* زر الأدمن الخاص بإدارة الحسابات (يظهر فقط للسوبر أدمن) */}
+          {/* زر الأدمن المصغر */}
           {(!isEmployee && user?.email === ADMIN_EMAIL) && (
-            <div className="pt-3 mt-3 border-t border-border/60">
-              <Link
-                href="/admin"
-                className={`flex items-center gap-3 p-3 rounded-xl font-bold transition-all duration-200 ${
-                  pathname.startsWith("/admin")
-                    ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
-                    : "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 hover:bg-purple-500/20"
-                }`}
-              >
-                <ShieldCheck className="w-5 h-5 text-purple-500" />
-                <span className="text-base">إدارة الحسابات</span>
+            <div className="pt-2 border-t border-border/60 flex justify-center w-full">
+              <Link href="/admin" title="إدارة الحسابات" className="relative group">
+                <motion.div
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`p-3.5 rounded-2xl transition-all duration-300 ${
+                    pathname.startsWith("/admin")
+                      ? "bg-purple-600 text-white shadow-lg shadow-purple-500/25"
+                      : "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                  }`}
+                >
+                  <ShieldCheck className="w-5 h-5" />
+                </motion.div>
               </Link>
             </div>
           )}
         </nav>
       </div>
 
-      {/* الأدوات السفلية (زر الثيم + زر تسجيل الخروج) */}
+      {/* 2. الأزرار السفلية (الوضع الليلي وتسجيل الخروج) */}
       {mounted && (
-        <div className="flex flex-col gap-2 pt-4 border-t border-border">
-          <button
+        <div className="flex flex-col gap-3 items-center w-full px-3">
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
             type="button"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="flex items-center justify-center gap-2 p-2.5 w-full rounded-xl border border-border bg-background text-foreground hover:bg-border/50 transition-colors text-xs font-bold"
+            className="p-3.5 rounded-2xl border border-border bg-background/80 text-foreground hover:bg-secondary transition-all shadow-sm"
+            title={theme === "dark" ? "الوضع النهاري" : "الوضع الليلي"}
           >
             {theme === "dark" ? (
-              <>
-                <Sun className="w-4 h-4 text-yellow-500" />
-                <span>الوضع النهاري</span>
-              </>
+              <Sun className="w-5 h-5 text-amber-500" />
             ) : (
-              <>
-                <Moon className="w-4 h-4 text-blue-600" />
-                <span>الوضع الليلي</span>
-              </>
+              <Moon className="w-5 h-5 text-indigo-500" />
             )}
-          </button>
+          </motion.button>
 
-          <button
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
             type="button"
             onClick={handleLogout}
-            className="flex items-center justify-center gap-2 p-2.5 w-full rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all text-xs font-bold"
+            className="p-3.5 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all"
+            title="تسجيل الخروج"
           >
-            <LogOut className="w-4 h-4" />
-            <span>تسجيل الخروج</span>
-          </button>
+            <LogOut className="w-5 h-5" />
+          </motion.button>
         </div>
       )}
     </aside>

@@ -1,24 +1,59 @@
 @import "tailwindcss";
 
-/* الألوان الأساسية (الوضع النهاري) */
+/* ==============================================================================
+   🎨 لوحة التحكم بالألوان الرئيسية للسيستم (COLOR PALETTE CONTROLLER)
+   ------------------------------------------------------------------------------
+   💡 ملاحظة: تعديل القيم هنا يغير ألوان النظام بالكامل وفي كل الصفحات تلقائياً.
+   القيم مكتوبة بصيغة HSL (Hue, Saturation, Lightness).
+   ============================================================================== */
+
+/* ☀️ 1. الألوان الأساسية (الوضع النهاري - LIGHT MODE) */
 :root {
+  /* ✏️ لون خلفية الصفحة الرئيسية (رمادي نهاري ناعم) */
   --background: 240 20% 98%;
+
+  /* ✏️ لون النصوص والأنشطة الرئيسية (أسود داكن مريح للعين وحاد) */
   --foreground: 222.2 84% 4.9%;
+
+  /* ✏️ لون النصوص الفرعية والتوضيحية بالنهاري (تم تغميقه لإبراز النصوص بوضوح) */
+  --muted-foreground: 215.4 25% 25%;
+
+  /* ✏️ لون خلفية الكروت والبطاقات (أبيض نقي) */
   --card: 0 0% 100%;
   --card-foreground: 222.2 84% 4.9%;
+
+  /* ✏️ اللون الرئيسي للأنظمة والإنشاءات (أزرق ذكي) */
   --primary: 221.2 83.2% 53.3%;
   --primary-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
+
+  /* ✏️ لون حدود البطاقات والكروت (تم تغميقه لإبراز الكروت بوضوح في الثيم الأبيض) */
+  --border: 215 25% 78%; 
+
+  /* ✏️ التدرج البرتقالي التفاعلي الخاص بـ Dashboard  */
+  --accent-gradient-from: #f97316;
+  --accent-gradient-to: #ef4444;
 }
 
-/* ألوان الوضع الليلي */
+/* 🌙 2. ألوان الوضع الليلي (DARK MODE) */
 .dark {
+  /* ✏️ خلفية الصفحة الرئيسية بالليل (أسود عميق داكن) */
   --background: 0 0% 0%;
+
+  /* ✏️ لون النصوص بالليل (أبيض ناصع) */
   --foreground: 0 0% 98%;
+
+  /* ✏️ لون النصوص الفرعية والتوضيحية بالليل */
+  --muted-foreground: 240 5% 65%;
+
+  /* ✏️ خلفية الكروت بالليل (رمادي ليلي زجاجي) */
   --card: 0 0% 5%;
   --card-foreground: 0 0% 98%;
+
+  /* ✏️ اللون الرئيسي بالليل */
   --primary: 217.2 91.2% 59.8%;
   --primary-foreground: 222.2 47.4% 11.2%;
+
+  /* ✏️ لون حدود الكروت بالليل */
   --border: 0 0% 15%;
 }
 
@@ -32,11 +67,75 @@
   --color-border: hsl(var(--border));
 }
 
+/* ==============================================================================
+   ⚡ 3. تسريع التبديل وإلغاء الـ Transitions الثقيلة لتسريع النظام فوراً
+   ------------------------------------------------------------------------------
+   تمنع البطأ والثقل عند تحويل وضع الرؤية بين النهاري والليلي.
+   ============================================================================== */
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable; /* تثبيت شريط التمرير لمنع القفز والاهتزاز الأفقي */
+}
+
+/* إلغاء أي تأخير حركي عام على عناصر الصفحة للتحويل الفوري */
+html, body, div, section, main, table, tr, td, article {
+  transition: none !important;
+}
+
+/* تنعيم خفيف جداً وفوري لخلفية الصفحة والنص فقط */
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: Arial, Helvetica, sans-serif;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.12s ease-out, color 0.12s ease-out !important;
+}
+
+/* ==============================================================================
+   🔢 4. توحيد وإجبار ظهور جميع الأرقام والتواريخ بالصيغة الإنجليزية (1234567890)
+   ============================================================================== */
+@layer base {
+  * {
+    font-variant-numeric: lining-nums tabular-nums !important;
+    font-feature-settings: "lnum" 1, "tnum" 1 !important;
+  }
+
+  input,
+  textarea,
+  select,
+  span,
+  p,
+  td,
+  th,
+  div,
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-variant-numeric: lining-nums tabular-nums !important;
+    font-feature-settings: "lnum" 1, "tnum" 1 !important;
+  }
+}
+
+/* ضمان أن حقول الإدخال والتواريخ تكتب وتظهر الأرقام الإنجليزية دائماً */
+input[type="number"],
+input[type="text"],
+input[type="date"],
+input[type="month"] {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  direction: ltr !important;
+  text-align: right !important;
+}
+
+/* ========================================================
+   تأثيرات البطاقات والزجاجية (Dashboard  Visuals)
+   ======================================================== */
+.glass-card {
+  background-color: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1.5px solid rgba(15, 23, 42, 0.18); 
+  border-radius: 1.5rem;
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.05);
 }
 
 .dark .glass-card {
@@ -44,21 +143,65 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+/* ========================================================
+   أنيميشن الهيكل العظمي للشحن (Skeleton Wave Animation)
+   ======================================================== */
+@keyframes skeletonWave {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.v14-skeleton {
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.6) 25%, rgba(241, 245, 249, 0.9) 50%, rgba(226, 232, 240, 0.6) 75%);
+  background-size: 200% 100%;
+  animation: skeletonWave 1.4s ease-in-out infinite;
+  border-radius: 1rem;
+}
+
+.dark .v14-skeleton {
+  background: linear-gradient(90deg, rgba(30, 41, 59, 0.4) 25%, rgba(51, 65, 85, 0.7) 50%, rgba(30, 41, 59, 0.4) 75%);
+  background-size: 200% 100%;
+}
+
+/* ========================================================
+   موجة التلوين عند تغيير الأقسام (Section Tab Wave Glow)
+   ======================================================== */
+@keyframes colorWaveGlow {
+  0% {
+    box-shadow: 0 0 0px rgba(249, 115, 22, 0);
+  }
+  50% {
+    box-shadow: 0 10px 30px -5px rgba(249, 115, 22, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0px rgba(249, 115, 22, 0);
+  }
+}
+
+.tab-wave-active {
+  animation: colorWaveGlow 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* 👈 كلاسات الشارات المعدلة لإظهار النص بشكل حاد وواضح جداً */
 
 /* شارة تم الدفع (أخضر غامق مع نص أبيض بارز) */
 .badge-paid {
-  background-color: #15803d !important; /* أخضر غامق واضح */
-  color: #ffffff !important; /* نص أبيض صريح */
+  background-color: #15803d !important;
+  color: #ffffff !important;
   font-weight: 800 !important;
 }
 
 /* شارة مستحق (أصفر دافئ مع نص أسود غامق) */
 .badge-due {
-  background-color: #fef08a !important; /* خلفية صفراء */
-  color: #854d0e !important; /* نص بني/ذهبي غامق جداً يسهل قراءته */
+  background-color: #fef08a !important;
+  color: #854d0e !important;
   font-weight: 800 !important;
 }
 
@@ -72,18 +215,19 @@ body {
   background-color: #713f12 !important;
   color: #fef08a !important;
 }
+
+/* ========================================================
+   إعدادات الطباعة المخصصة
+   ======================================================== */
 @media print {
-  /* إخفاء القوائم والأزرار والعناصر التي لا نحتاجها في الطباعة */
   header, nav, aside, footer, button, .no-print {
     display: none !important;
   }
 
-  /* إخفاء محتوى الصفحة العادي أثناء الطباعة لعدم زيادة عدد الصفحات */
   .max-w-5xl > div:not(.print-container) {
     display: none !important;
   }
 
-  /* جعل حاوية الطباعة ظاهرة وفي بداية الورقة */
   .print-container {
     display: block !important;
     position: absolute !important;
@@ -96,7 +240,6 @@ body {
     color: #000000 !important;
   }
 
-  /* تحديد حجم ورقة الطباعة ومنع إيجاد صفحات فارغة إضافية */
   html, body {
     height: auto !important;
     overflow: visible !important;
@@ -107,4 +250,22 @@ body {
     size: A4 portrait;
     margin: 8mm;
   }
+}
+
+/* ========================================================
+   أنيميشن ظهور هادئ وخفيف جداً لـ Dashboard  (بدون قفزات)
+   ======================================================== */
+@keyframes pageSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px);
+  }
+}
+
+.animate-theme-reveal {
+  animation: pageSlideUp 0.2s ease-out forwards;
 }
