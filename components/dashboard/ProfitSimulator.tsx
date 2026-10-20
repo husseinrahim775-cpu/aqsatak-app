@@ -3,8 +3,7 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Calculator, TrendingUp, Sparkles, DollarSign, Calendar, RefreshCw } from "lucide-react";
-import AnimatedNumber from "./AnimatedNumber";
-
+import AnimatedNumber from "@/components/dashboard/AnimatedNumber";
 interface ProfitSimulatorProps {
   initialCapital: number;
   currentCapital: number;
