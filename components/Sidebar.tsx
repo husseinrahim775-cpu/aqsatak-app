@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useAuth } from "./AuthProvider";
 import { motion } from "framer-motion";
@@ -20,7 +20,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "../services/firebase";
+import { db, auth } from "../services/firebase";
+import { signOut } from "firebase/auth";
 
 const allMenuItems = [
   { name: 'لوحة التحكم', path: '/dashboard', icon: LayoutDashboard, permissionKey: 'canViewDashboard' },
@@ -34,6 +35,7 @@ const allMenuItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { user, userData, logout } = useAuth() as any;
   const [mounted, setMounted] = useState(false);
@@ -41,22 +43,39 @@ export default function Sidebar() {
 
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 الاستماع الحي للشعار المرفوع من Firestore
+  // 🔄 الاستماع الحي للشعار المرفوع من Firestore مع حماية الخطأ
   useEffect(() => {
     setMounted(true);
 
-    const unsubLogo = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().systemLogoUrl) {
-        setLogoUrl(docSnap.data().systemLogoUrl);
+    const unsubLogo = onSnapshot(
+      doc(db, "settings", "global"), 
+      (docSnap) => {
+        if (docSnap.exists() && docSnap.data().systemLogoUrl) {
+          setLogoUrl(docSnap.data().systemLogoUrl);
+        }
+      },
+      (error) => {
+        // تجاهل أخطاء الصلاحيات أثناء الخروج
+        if (error.code === "permission-denied") return;
+        console.warn("تعذر تحميل الشعار الحي:", error);
       }
-    });
+    );
 
     return () => unsubLogo();
   }, []);
 
+  // 🚪 دالة تسجيل الخروج النظيفة
   const handleLogout = async () => {
     if (window.confirm("هل أنت متأكد من تسجيل الخروج؟")) {
-      if (logout) await logout();
+      try {
+        sessionStorage.clear();
+        localStorage.clear();
+        if (logout) await logout();
+        await signOut(auth);
+        window.location.replace("/login");
+      } catch (e) {
+        window.location.replace("/login");
+      }
     }
   };
 

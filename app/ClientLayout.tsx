@@ -33,39 +33,57 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth() as any;
-  const isLoginPage = pathname === "/login";
-  const isPendingPage = pathname === "/pending";
+
+  // 🎯 فحص شمول لكافة مسارات صفحة تسجيل الدخول وحالة الجلسة
+  const isExplicitLogin = pathname === "/login" || pathname === "/login/";
+  const isRootPage = pathname === "/";
+  const isLoginPage = isExplicitLogin || (isRootPage && !user);
+
+  // 1. 🟢 إخفاء القائمة الجانبية والأشرطة العلوية/السفلية تماماً في صفحة تسجيل الدخول
+  if (isLoginPage) {
+    return (
+      <main className="w-full min-h-screen bg-background flex items-center justify-center p-0 m-0 overflow-hidden">
+        {children}
+      </main>
+    );
+  }
+
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [isCalcOpen, setIsCalcOpen] = useState(false); // 🧮 حالة فتح الحاسبة
+  const [isCalcOpen, setIsCalcOpen] = useState(false);
   const [waveGlow, setWaveGlow] = useState(false);
-  const [mobileLogo, setMobileLogo] = useState<string>("./logo.png"); // 🖼️ حالة اللوجو الديناميكي للموبايل
+  const [mobileLogo, setMobileLogo] = useState<string>("/logo.png");
 
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 1. الاستماع الحي للشعار المرفوع وتحديث شريط الموبايل و Favicon المتصفح حياً
+  // 🔄 1. الاستماع الحي للشعار المرفوع وتحديث الشعار والـ Favicon
   useEffect(() => {
-    const unsubLogo = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().systemLogoUrl) {
-        const newLogoUrl = docSnap.data().systemLogoUrl;
-        setMobileLogo(newLogoUrl);
+    const unsubLogo = onSnapshot(
+      doc(db, "settings", "global"), 
+      (docSnap) => {
+        if (docSnap.exists() && docSnap.data().systemLogoUrl) {
+          const newLogoUrl = docSnap.data().systemLogoUrl;
+          setMobileLogo(newLogoUrl);
 
-        // 🌐 تحديث أيقونة تبويب المتصفح (Favicon) ديناميكياً
-        let faviconLink: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-        if (!faviconLink) {
-          faviconLink = document.createElement("link");
-          faviconLink.rel = "shortcut icon";
-          document.getElementsByTagName("head")[0].appendChild(faviconLink);
+          let faviconLink: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+          if (!faviconLink) {
+            faviconLink = document.createElement("link");
+            faviconLink.rel = "shortcut icon";
+            document.getElementsByTagName("head")[0].appendChild(faviconLink);
+          }
+          faviconLink.href = newLogoUrl;
         }
-        faviconLink.href = newLogoUrl;
+      },
+      (error) => {
+        if (error.code === "permission-denied") return;
       }
-    });
+    );
 
     return () => unsubLogo();
   }, []);
 
-  // 🔄 2. المراقبة الحية لحالة الحساب وتاريخ الاشتراك
+  // 🔄 2. المراقبة الحية لحالة الحساب وتأكيد التفعيل
   useEffect(() => {
     if (!user || isLoginPage) return;
 
@@ -94,25 +112,26 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             await signOut(auth);
             router.replace("/login");
           } 
-          else if (status !== "active" && !isPendingPage) {
+          else if (status !== "active" && pathname !== "/pending") {
             router.replace("/pending");
           }
         } else {
-          if (!isPendingPage && navigator.onLine) {
+          if (pathname !== "/pending" && navigator.onLine) {
             router.replace("/pending");
           }
         }
       }, (error) => {
-        console.warn("تعذر الاتصال المباشر بـ Firebase (وضع الأوفلاين):", error);
+        if (error.code === "permission-denied") return;
+        console.warn("وضع الأوفلاين أو تعذر الاتصال المباشر بـ Firebase:", error);
       });
     } catch (e) {
       console.warn("خطأ في تشغيل استماع Firestore:", e);
     }
 
     return () => unsubscribeDoc();
-  }, [user, pathname, router, logout, isLoginPage, isPendingPage]);
+  }, [user, pathname, router, logout, isLoginPage]);
 
-  // 3. التحكم في الوضع الليلي وموجة الحركة عند التنقل بين الصفحات
+  // 3. التحكم في الوضع الليلي وتأثير الحركة عند تنقل الصفحات
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
       setIsDarkMode(true);
@@ -120,7 +139,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // تفعيل إضاءة الموجة عند تغيير المسار (Pathname)
     setWaveGlow(true);
     const timer = setTimeout(() => setWaveGlow(false), 800);
     return () => clearTimeout(timer);
@@ -140,18 +158,24 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   const handleLogout = async () => {
     if (window.confirm("هل أنت متأكد من تسجيل الخروج؟")) {
-      if (logout) await logout();
+      try {
+        sessionStorage.clear();
+        localStorage.clear();
+        if (logout) await logout();
+        await signOut(auth);
+        window.location.replace("/login");
+      } catch (e) {
+        window.location.replace("/login");
+      }
     }
   };
 
-  // 📋 قائمة العناصر الرئيسية للشريط السفلي
   const baseNavItems = [
     { name: "الرئيسية", href: "/dashboard", icon: LayoutDashboard },
     { name: "العملاء", href: "/customers", icon: Users },
     { name: "الحسابات", href: "/accounts", icon: Wallet },
   ];
 
-  // 📋 قائمة العناصر الإضافية (تظهر داخل قائمة "المزيد")
   const extraNavItems = [
     { name: "الخزينة والصندوق", href: "/treasury", icon: Vault },
     { name: "المخزن والمبيعات", href: "/inventory", icon: Package },
@@ -159,14 +183,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     { name: "الإعدادات", href: "/settings", icon: Settings },
   ];
 
-  // 🔒 إضافة قسم "الإدارة" فقط وحصرياً لمن يملك إيميل الأدمن
   const isAdmin = user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   if (isAdmin) {
     extraNavItems.push({ name: "لوحة الإدارة", href: "/admin", icon: ShieldCheck });
-  }
-
-  if (isLoginPage) {
-    return <main className="flex-1 w-full">{children}</main>;
   }
 
   return (
@@ -177,7 +196,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         onClose={() => setIsCalcOpen(false)} 
       />
 
-      {/* 1. الشريط العلوي للموبايل بأسلوب Dashboard  */}
+      {/* 1. الشريط العلوي للموبايل */}
       <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-xl border-b border-border p-4 shadow-sm sticky top-0 z-40">
         <div className="flex items-center gap-2 font-extrabold text-xl text-primary tracking-tight">
           <img src={mobileLogo} alt="أقساطك" className="w-8 h-8 rounded-2xl object-cover shadow-sm border border-primary/20 bg-white p-0.5" />
@@ -185,7 +204,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         
         <div className="flex items-center gap-2">
-          {/* 🧮 زر الحاسبة المودرن لشاشة الموبايل */}
           <button
             onClick={() => setIsCalcOpen(true)}
             className="p-2.5 bg-orange-500/10 border border-orange-500/20 rounded-2xl text-orange-600 hover:bg-orange-500/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
@@ -211,18 +229,16 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {/* 2. القائمة الجانبية للشاشات الكبيرة بعرض w-20 المودرن */}
+      {/* 2. القائمة الجانبية للشاشات الكبيرة */}
       <div className="hidden md:block sticky top-0 h-screen w-20 z-50">
         <Sidebar />
       </div>
 
-      {/* 3. المحتوى الرئيسي مع الترويسة العلوية لـ  */}
+      {/* 3. المحتوى الرئيسي لجميع صفحات النظام */}
       <main className="flex-1 w-full overflow-y-auto p-4 pb-24 md:p-8 md:pb-8 transition-all duration-300">
         <div className={`max-w-7xl mx-auto h-full space-y-4 rounded-3xl transition-all duration-500 ${waveGlow ? 'tab-wave-active' : ''}`}>
           
-          {/* 🧮 الهيدر العلوي بأسلوب  للشاشات الكبيرة */}
           <div className="hidden md:flex justify-between items-center mb-4 pb-3 border-b border-border/50">
-            {/* أسرار التنقل السريعة  Tabs */}
             <div className="flex items-center gap-1.5 bg-card/80 backdrop-blur-md p-1.5 rounded-full border border-border shadow-sm">
               {[
                 { name: "الرئيسية", href: "/dashboard" },
@@ -249,7 +265,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               })}
             </div>
 
-            {/* زر الحاسبة السريعة */}
             <motion.button
               whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
@@ -263,7 +278,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             </motion.button>
           </div>
 
-          {/* محتوى الصفحات محمي بواسطة SubscriptionGuard مع حركة Framer Motion */}
           <AnimatePresence mode="wait">
             <motion.div
               key={pathname}
@@ -272,6 +286,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.25, ease: "easeOut" }}
             >
+              {/* 🛡️ تغليف الصفحات بحماية حارس الاشتراك */}
               <SubscriptionGuard>
                 {children}
               </SubscriptionGuard>
@@ -280,7 +295,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
-      {/* 📱 4. النافذة المنبثقة لبقية الأقسام (عند الضغط على "المزيد" في الموبايل) */}
+      {/* 4. النافذة المنبثقة "المزيد" */}
       <AnimatePresence>
         {showMoreMenu && (
           <motion.div 
@@ -334,10 +349,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         )}
       </AnimatePresence>
 
-      {/* 📱 5. الشريط السفلي المطور للموبايل بأسلوب  Pill Tabs */}
+      {/* 5. الشريط السفلي للموبايل */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/85 backdrop-blur-xl border-t border-border shadow-2xl z-40 px-3 pb-safe">
         <nav className="flex items-center justify-around py-2">
-          {/* العناصر الأساسية */}
           {baseNavItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
@@ -373,7 +387,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             );
           })}
 
-          {/* زر "المزيد" لفتح النافذة المنبثقة لباقي الأقسام */}
           <button
             type="button"
             onClick={() => setShowMoreMenu(!showMoreMenu)}
