@@ -16,7 +16,8 @@ import {
   LogOut,
   Wallet,
   Package,
-  Vault
+  Vault,
+  FileText
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -27,6 +28,7 @@ const allMenuItems = [
   { name: 'لوحة التحكم', path: '/dashboard', icon: LayoutDashboard, permissionKey: 'canViewDashboard' },
   { name: 'العملاء والأقساط', path: '/customers', icon: Users, permissionKey: 'canManageCustomers' },
   { name: 'الحسابات والمدفوعات', path: '/accounts', icon: CreditCard, permissionKey: 'canManageCustomers' },
+  { name: 'التقارير المالية', path: '/reports', icon: FileText, permissionKey: 'canViewDashboard' },
   { name: 'الخزينة والصندوق', path: '/treasury', icon: Vault, permissionKey: 'canViewTreasury' },
   { name: 'المخزن والمبيعات', path: '/inventory', icon: Package, permissionKey: 'canManageStore' },
   { name: 'سجل الديون', path: '/debts', icon: Wallet, permissionKey: 'canManageCustomers' }, 
@@ -165,6 +167,7 @@ export default function Sidebar() {
           )}
         </nav>
       </div>
+      
 
       {/* 2. الأزرار السفلية (الوضع الليلي وتسجيل الخروج) */}
       {mounted && (

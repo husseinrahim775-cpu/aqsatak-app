@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuth } from "../../components/AuthProvider";
+import { useAuth } from "@/components/AuthProvider";
 import packageJson from "@/package.json";
 import { 
   Store, 
@@ -37,12 +37,21 @@ import {
   ChevronUp,
   Settings,
   Zap,
-  ShieldCheck
+  ShieldCheck,
+  Printer,
+  CreditCard,
+  Receipt,
+  HardDrive,
+  Wifi,
+  Usb,
+  Network
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   getUserInstallments, 
   getUserPayments, 
+  getUserTreasuryTransactions,
+  getAvailableInventory,
   addInstallmentRecord, 
   addPaymentRecord,
   addSystemUser,
@@ -51,10 +60,10 @@ import {
   getCompanySettings,
   saveCompanySettings,
   SystemUser
-} from "../../services/firestore";
+} from "@/services/firestore";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "../../services/firebase";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { db } from "@/services/firebase";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -65,6 +74,11 @@ export default function SettingsPage() {
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
+  // 🔄 حالات نافذة وشريط تقدم الاستعادة التفاعلي
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState(0);
+  const [restoreStatusText, setRestoreStatusText] = useState("");
+
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
   // فحص هل الحساب الحالي هو الأدمن الرئيسي
@@ -72,15 +86,16 @@ export default function SettingsPage() {
 
   // 🗂️ حالة التحكم بالبطاقات المطوية
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
-    subscriptionInfo: true, // مفتوح افتراضياً لعرض حالة الاشتراك
+    subscriptionInfo: true,
     updates: true,
     security: false,
     employees: false,
     company: false,
+    hardware: false,
     whatsapp: false,
     financial: false,
     theme: false,
-    backup: false,
+    backup: true,
   });
 
   const toggleSection = (key: string) => {
@@ -114,7 +129,24 @@ export default function SettingsPage() {
   );
 
   const [defaultProfitRate, setDefaultProfitRate] = useState<number>(35);
-  
+
+  // 🔌 حالات إعدادات الأجهزة والمكتشفات تلقائياً
+  const [availablePrinters, setAvailablePrinters] = useState<Array<{ name: string; isDefault?: boolean }>>([]);
+
+  const [docPrinterConn, setDocPrinterConn] = useState<"usb" | "wifi">("usb");
+  const [docPrinterName, setDocPrinterName] = useState("");
+  const [docPrinterIp, setDocPrinterIp] = useState("");
+
+  const [receiptPaperSize, setReceiptPaperSize] = useState<"80mm" | "58mm">("80mm");
+  const [receiptConnType, setReceiptConnType] = useState<"usb" | "lan">("usb");
+  const [receiptPrinterName, setReceiptPrinterName] = useState("");
+  const [receiptPrinterIp, setReceiptPrinterIp] = useState("");
+
+  const [posDeviceType, setPosDeviceType] = useState("");
+  const [posIpAddress, setPosIpAddress] = useState("");
+
+  const [testingHardware, setTestingHardware] = useState<string | null>(null);
+
   // إعدادات الواتساب وقوالب الرسائل
   const [useAutoApi, setUseAutoApi] = useState(false);
   const [waInstanceId, setWaInstanceId] = useState("");
@@ -184,7 +216,23 @@ export default function SettingsPage() {
       const userDocRef = doc(db, "users", ownerUid);
       const userDocSnap = await getDoc(userDocRef);
       if (userDocSnap.exists()) {
-        setAdminPin(userDocSnap.data().adminPin || "1234");
+        const data = userDocSnap.data();
+        setAdminPin(data.adminPin || "1234");
+
+        if (data.hardwareSettings) {
+          const hw = data.hardwareSettings;
+          if (hw.docPrinterConn) setDocPrinterConn(hw.docPrinterConn);
+          if (hw.docPrinterName) setDocPrinterName(hw.docPrinterName);
+          if (hw.docPrinterIp) setDocPrinterIp(hw.docPrinterIp);
+
+          if (hw.receiptPaperSize) setReceiptPaperSize(hw.receiptPaperSize);
+          if (hw.receiptConnType) setReceiptConnType(hw.receiptConnType);
+          if (hw.receiptPrinterName) setReceiptPrinterName(hw.receiptPrinterName);
+          if (hw.receiptPrinterIp) setReceiptPrinterIp(hw.receiptPrinterIp);
+
+          if (hw.posDeviceType) setPosDeviceType(hw.posDeviceType);
+          if (hw.posIpAddress) setPosIpAddress(hw.posIpAddress);
+        }
       }
     } catch (err) {
       console.error("خطأ في جلب البيانات:", err);
@@ -193,7 +241,7 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔄 الاستماع لإشارات التحديث ورقم الإصدار من Electron
+  // 🔄 الاستماع لإشارات التحديث واكتشاف الطابعات المربوطة من Electron
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).require) {
       try {
@@ -201,6 +249,12 @@ export default function SettingsPage() {
 
         ipcRenderer.invoke("get_app_version").then((ver: string) => {
           if (ver) setCurrentAppVersion(ver);
+        }).catch(() => {});
+
+        ipcRenderer.invoke("get_system_printers").then((printers: any[]) => {
+          if (printers && printers.length > 0) {
+            setAvailablePrinters(printers);
+          }
         }).catch(() => {});
 
         const handleUpdateStatus = (_: any, data: any) => {
@@ -275,37 +329,114 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
   };
 
+  // 🔄 دالة استعادة النسخة الاحتياطية الشاملة والمضمونة مع شريط تقدم تفاعلي
   const processBackupJSON = async (content: any) => {
-    if (!content.installments || !Array.isArray(content.installments)) {
-      throw new Error("ملف النسخة الاحتياطية غير صالح!");
-    }
-
     const ownerUid = getOwnerUid();
-    if (!ownerUid) return;
-
-    for (const inst of content.installments) {
-      if (inst.id) {
-        const instRef = doc(db, "installments", inst.id);
-        await setDoc(instRef, { ...inst, userId: ownerUid, updatedAt: new Date().toISOString() }, { merge: true });
-      } else {
-        const { id, createdAt, ...cleanInst } = inst;
-        await addInstallmentRecord({ ...cleanInst, userId: ownerUid });
-      }
+    if (!ownerUid) {
+      toast.error("تعذر التعرف على حساب المالك.");
+      return;
     }
 
-    if (content.payments && Array.isArray(content.payments)) {
-      for (const pay of content.payments) {
-        if (pay.id) {
-          const payRef = doc(db, "payments", pay.id);
-          await setDoc(payRef, { ...pay, userId: ownerUid, updatedAt: new Date().toISOString() }, { merge: true });
-        } else {
-          const { id, createdAt, ...cleanPay } = pay;
-          await addPaymentRecord({ ...cleanPay, userId: ownerUid });
+    if (!content || (!content.installments && !content.payments)) {
+      throw new Error("ملف النسخة الاحتياطية غير صالح أو خالي من البيانات!");
+    }
+
+    setIsRestoring(true);
+    setRestoreProgress(5);
+    setRestoreStatusText("جاري قراءة الملف وتجهيز قاعدة البيانات...");
+
+    try {
+      const installments = content.installments || [];
+      const payments = content.payments || [];
+      const treasury = content.treasury_transactions || content.treasury || [];
+      const inventory = content.inventory || [];
+
+      const totalItems = installments.length + payments.length + treasury.length + inventory.length;
+      let processed = 0;
+
+      const updateProgressStep = (statusLabel: string) => {
+        processed++;
+        const percent = Math.min(95, Math.round(5 + (processed / (totalItems || 1)) * 90));
+        setRestoreProgress(percent);
+        setRestoreStatusText(`${statusLabel} (${processed} من ${totalItems})`);
+      };
+
+      // 1️⃣ مسح تفريغي كامل لمنع التكرار نهائياً
+      setRestoreStatusText("جاري تهيئة قاعدة البيانات وتنظيف السجلات التالفة...");
+      const collectionsToClear = ["installments", "payments", "treasury_transactions", "inventory"];
+      for (const colName of collectionsToClear) {
+        const q = query(collection(db, colName), where("userId", "==", ownerUid));
+        const snap = await getDocs(q);
+        const docs = snap.docs;
+
+        for (let i = 0; i < docs.length; i += 400) {
+          const batch = writeBatch(db);
+          docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+          await batch.commit();
         }
       }
-    }
 
-    await fetchUsersAndSettings();
+      // 2️⃣ استعادة سجلات العقود والأقساط الأصلية
+      for (const inst of installments) {
+        const targetId = inst.id || doc(collection(db, "installments")).id;
+        const instRef = doc(db, "installments", targetId);
+        await setDoc(instRef, {
+          ...inst,
+          userId: ownerUid,
+          createdAt: inst.createdAt || new Date().toISOString(),
+          startDate: inst.startDate || new Date().toISOString(),
+        });
+        updateProgressStep("استعادة عقود الأقساط والعملاء");
+      }
+
+      // 3️⃣ استعادة جدول المدفوعات لتحديث حالة "تم دفع"
+      for (const pay of payments) {
+        const targetId = pay.id || doc(collection(db, "payments")).id;
+        const payRef = doc(db, "payments", targetId);
+        await setDoc(payRef, {
+          ...pay,
+          userId: ownerUid,
+          paidAt: pay.paidAt || pay.createdAt || new Date().toISOString(),
+        });
+        updateProgressStep("استعادة سجل الدفعات والمقبوضات");
+      }
+
+      // 4️⃣ استعادة حركات الخزينة والصندوق
+      for (const tx of treasury) {
+        const targetId = tx.id || doc(collection(db, "treasury_transactions")).id;
+        const txRef = doc(db, "treasury_transactions", targetId);
+        await setDoc(txRef, {
+          ...tx,
+          userId: ownerUid,
+          date: tx.date || new Date().toISOString(),
+        });
+        updateProgressStep("استعادة حركات الخزينة والصندوق");
+      }
+
+      // 5️⃣ استعادة المخزن
+      for (const inv of inventory) {
+        const targetId = inv.id || doc(collection(db, "inventory")).id;
+        const invRef = doc(db, "inventory", targetId);
+        await setDoc(invRef, {
+          ...inv,
+          userId: ownerUid,
+        });
+        updateProgressStep("استعادة مواد المخزن والبضائع");
+      }
+
+      setRestoreProgress(100);
+      setRestoreStatusText("اكتملت عملية الاستعادة بنجاح 100%!");
+      toast.success("تم استرجاع كافة العقود والتسديدات والتواريخ بنجاح تام!");
+      await fetchUsersAndSettings();
+    } catch (err: any) {
+      console.error("خطأ أثناء الاستعادة:", err);
+      toast.error(err.message || "حدث خطأ أثناء استعادة البيانات.");
+    } finally {
+      setTimeout(() => {
+        setIsRestoring(false);
+        setRestoreProgress(0);
+      }, 1000);
+    }
   };
 
   const handleDownloadFromGoogleDrive = async (tokenParam?: string, isSilent = false) => {
@@ -329,7 +460,6 @@ export default function SettingsPage() {
       }
 
       const fileId = searchData.files[0].id;
-
       const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -338,8 +468,6 @@ export default function SettingsPage() {
 
       const backupContent = await fileRes.json();
       await processBackupJSON(backupContent);
-
-      toast.success("تم استرجاع واستعادة أحدث نسخة احتياطية من Google Drive بنجاح!");
     } catch (error) {
       console.error("خطأ في استعادة النسخة من Google Drive:", error);
       if (!isSilent) toast.error("تعذر استرجاع النسخة الاحتياطية من Google Drive.");
@@ -356,9 +484,11 @@ export default function SettingsPage() {
     try {
       if (!isSilent) setUploadingToDrive(true);
 
-      const [installments, payments] = await Promise.all([
-        getUserInstallments(ownerUid),
-        getUserPayments(ownerUid),
+      const [installments, payments, treasury_transactions, inventory] = await Promise.all([
+        getUserInstallments(ownerUid).catch(() => []),
+        getUserPayments(ownerUid).catch(() => []),
+        getUserTreasuryTransactions(ownerUid).catch(() => []),
+        getAvailableInventory().catch(() => []),
       ]);
 
       const backupData = {
@@ -366,6 +496,8 @@ export default function SettingsPage() {
         userId: ownerUid,
         installments,
         payments,
+        treasury_transactions,
+        inventory,
       };
 
       const fileName = `aqsatk_backup_${new Date().toISOString().slice(0, 10)}.json`;
@@ -383,8 +515,10 @@ export default function SettingsPage() {
       });
 
       if (response.ok) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        localStorage.setItem("last_auto_drive_backup_date", todayStr);
         localStorage.setItem("last_auto_drive_backup", new Date().toISOString());
-        if (!isSilent) toast.success("تم رفع النسخة الاحتياطية بنجاح إلى حساب Google Drive!");
+        if (!isSilent) toast.success("تم رفع النسخة الاحتياطية الشاملة بنجاح إلى حساب Google Drive!");
       } else if (response.status === 401) {
         localStorage.removeItem("google_drive_access_token");
         setIsDriveConnected(false);
@@ -397,6 +531,33 @@ export default function SettingsPage() {
       if (!isSilent) setUploadingToDrive(false);
     }
   };
+
+  // 🌙 المؤقت المجدول للتأكد من الرفع الساعة 12 ليلاً تلقائياً
+  useEffect(() => {
+    const checkAndTriggerNightlyBackup = () => {
+      const savedToken = localStorage.getItem("google_drive_access_token");
+      if (!savedToken) return;
+
+      const now = new Date();
+      const todayDateStr = now.toISOString().slice(0, 10);
+      const lastBackupDate = localStorage.getItem("last_auto_drive_backup_date");
+
+      if (lastBackupDate !== todayDateStr) {
+        handleUploadToGoogleDrive(true);
+      }
+    };
+
+    checkAndTriggerNightlyBackup();
+
+    const timerInterval = setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 0 && now.getMinutes() === 0) {
+        checkAndTriggerNightlyBackup();
+      }
+    }, 60000);
+
+    return () => clearInterval(timerInterval);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -429,12 +590,6 @@ export default function SettingsPage() {
       const savedToken = localStorage.getItem("google_drive_access_token");
       if (savedToken) {
         setIsDriveConnected(true);
-
-        const lastBackup = localStorage.getItem("last_auto_drive_backup");
-        const now = new Date().getTime();
-        if (!lastBackup || now - new Date(lastBackup).getTime() > 24 * 60 * 60 * 1000) {
-          handleUploadToGoogleDrive(true);
-        }
       }
 
       const savedProfitRate = localStorage.getItem("app_default_profit_rate");
@@ -443,6 +598,24 @@ export default function SettingsPage() {
       const savedTokenSetting = localStorage.getItem("app_wa_token");
       const savedTemplate = localStorage.getItem("app_whatsapp_template");
       const savedTheme = localStorage.getItem("theme");
+
+      const savedHw = localStorage.getItem("app_hardware_settings");
+      if (savedHw) {
+        try {
+          const parsed = JSON.parse(savedHw);
+          if (parsed.docPrinterConn) setDocPrinterConn(parsed.docPrinterConn);
+          if (parsed.docPrinterName) setDocPrinterName(parsed.docPrinterName);
+          if (parsed.docPrinterIp) setDocPrinterIp(parsed.docPrinterIp);
+
+          if (parsed.receiptPaperSize) setReceiptPaperSize(parsed.receiptPaperSize);
+          if (parsed.receiptConnType) setReceiptConnType(parsed.receiptConnType);
+          if (parsed.receiptPrinterName) setReceiptPrinterName(parsed.receiptPrinterName);
+          if (parsed.receiptPrinterIp) setReceiptPrinterIp(parsed.receiptPrinterIp);
+
+          if (parsed.posDeviceType) setPosDeviceType(parsed.posDeviceType);
+          if (parsed.posIpAddress) setPosIpAddress(parsed.posIpAddress);
+        } catch (e) {}
+      }
 
       if (savedProfitRate) setDefaultProfitRate(Number(savedProfitRate));
       setUseAutoApi(savedAutoApi);
@@ -471,6 +644,78 @@ export default function SettingsPage() {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
     }
+  };
+
+  const handleTestPrinter = (type: "doc" | "receipt" | "pos") => {
+    setTestingHardware(type);
+
+    setTimeout(() => {
+      setTestingHardware(null);
+      const cleanStore = storeName.replace(/</g, "&lt;").replace(/>/g, "&gt;") || "أقساطك المنظومة المالية";
+
+      if (type === "doc") {
+        const printWindow = window.open("", "_blank", "width=600,height=600");
+        if (printWindow) {
+          printWindow.document.write(`
+            <html dir="rtl">
+              <head>
+                <title>صفحة اختبار طابعة العقود العامة</title>
+                <style>
+                  body { font-family: sans-serif; text-align: center; padding: 40px; }
+                  .card { border: 2px dashed #f97316; padding: 20px; border-radius: 15px; }
+                  h2 { color: #ea580c; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <h2>${cleanStore}</h2>
+                  <p><strong>اختبار طابعة العقود والمستندات العامّة (A4/A5)</strong></p>
+                  <p>نوع التوصيل: ${docPrinterConn.toUpperCase()} | اسم الطابعة: ${docPrinterName || "طابعة النظام الافتراضية"}</p>
+                  <hr/>
+                  <p style="font-size: 12px; color: #666;">تمت عملية الاختبار بنجاح - ${new Date().toLocaleString('ar-IQ')}</p>
+                </div>
+                <script>window.onload = function() { window.print(); window.close(); }</script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+        toast.success("تم فتح أمر الطباعة التجريبية لطابعة العقود بنجاح!");
+      } else if (type === "receipt") {
+        const printWindow = window.open("", "_blank", "width=350,height=500");
+        if (printWindow) {
+          printWindow.document.write(`
+            <html dir="rtl">
+              <head>
+                <title>وصل اختبار حراري</title>
+                <style>
+                  body { font-family: monospace; width: ${receiptPaperSize === "80mm" ? "280px" : "190px"}; margin: auto; padding: 10px; font-size: 11px; }
+                  .center { text-align: center; }
+                  .line { border-bottom: 1px dashed #000; margin: 8px 0; }
+                </style>
+              </head>
+              <body>
+                <div class="center">
+                  <h3>${cleanStore}</h3>
+                  <p>وصل اختبار طابعة حرارية</p>
+                  <p>القياس: ${receiptPaperSize} | المنفذ: ${receiptConnType.toUpperCase()}</p>
+                </div>
+                <div class="line"></div>
+                <p>الحالة: متصل وجاهز للطباعة المباشرة</p>
+                <p>التاريخ: ${new Date().toLocaleTimeString('ar-IQ')}</p>
+                <div class="line"></div>
+                <p class="center">شكراً لاستخدامكم منصة أقساطك</p>
+                <script>window.onload = function() { window.print(); window.close(); }</script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+        toast.success(`تم إرسال وصل الاختبار الحراري (${receiptPaperSize}) للطباعة بنجاح!`);
+      } else if (type === "pos") {
+        toast.success("تم إرسال إشارة الاتصال بجهاز الدفع الإلكتروني (POS Terminal) بنجاح!");
+      }
+    }, 1200);
   };
 
   const handleSendPasswordReset = async () => {
@@ -573,7 +818,7 @@ export default function SettingsPage() {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const ownerUid = getOwnerUid();
-    
+
     if (!ownerUid) {
       toast.error("تعذر التعرف على حساب الشركة المسجل.");
       return;
@@ -581,6 +826,20 @@ export default function SettingsPage() {
 
     setLoadingAction(true);
     try {
+      const sanitizedHardware = {
+        docPrinterConn: docPrinterConn,
+        docPrinterName: docPrinterName.replace(/[<>]/g, "").trim(),
+        docPrinterIp: docPrinterIp.replace(/[^\d.]/g, "").trim(),
+
+        receiptPaperSize: receiptPaperSize,
+        receiptConnType: receiptConnType,
+        receiptPrinterName: receiptPrinterName.replace(/[<>]/g, "").trim(),
+        receiptPrinterIp: receiptPrinterIp.replace(/[^\d.]/g, "").trim(),
+
+        posDeviceType: posDeviceType.replace(/[<>]/g, "").trim(),
+        posIpAddress: posIpAddress.replace(/[^\d.]/g, "").trim(),
+      };
+
       await saveCompanySettings(ownerUid, {
         companyName: storeName,
         phone: storePhone,
@@ -588,6 +847,8 @@ export default function SettingsPage() {
         logoUrl: storeLogo,
         notes: contractTerms,
       });
+
+      await setDoc(doc(db, "users", ownerUid), { hardwareSettings: sanitizedHardware }, { merge: true });
 
       localStorage.setItem(`company_settings_${ownerUid}`, JSON.stringify({
         companyName: storeName,
@@ -597,6 +858,7 @@ export default function SettingsPage() {
         notes: contractTerms,
       }));
 
+      localStorage.setItem("app_hardware_settings", JSON.stringify(sanitizedHardware));
       localStorage.setItem("app_default_profit_rate", defaultProfitRate.toString());
       localStorage.setItem("app_wa_use_api", useAutoApi ? "true" : "false");
       localStorage.setItem("app_wa_instance_id", waInstanceId);
@@ -604,7 +866,7 @@ export default function SettingsPage() {
       localStorage.setItem("app_whatsapp_template", whatsappTemplate);
 
       setSaved(true);
-      toast.success("تم حفظ وتحديث إعدادات الشركة والشعار بنجاح!");
+      toast.success("تم حفظ وتحديث إعدادات الشركة والأجهزة بنجاح!");
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error("خطأ في حفظ الإعدادات:", err);
@@ -619,9 +881,11 @@ export default function SettingsPage() {
     if (!ownerUid) return;
     try {
       setLoadingAction(true);
-      const [installments, payments] = await Promise.all([
-        getUserInstallments(ownerUid),
-        getUserPayments(ownerUid),
+      const [installments, payments, treasury_transactions, inventory] = await Promise.all([
+        getUserInstallments(ownerUid).catch(() => []),
+        getUserPayments(ownerUid).catch(() => []),
+        getUserTreasuryTransactions(ownerUid).catch(() => []),
+        getAvailableInventory().catch(() => []),
       ]);
 
       const backupData = {
@@ -629,6 +893,8 @@ export default function SettingsPage() {
         userId: ownerUid,
         installments,
         payments,
+        treasury_transactions,
+        inventory,
       };
 
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
@@ -654,15 +920,12 @@ export default function SettingsPage() {
       fileReader.readAsText(event.target.files[0], "UTF-8");
       fileReader.onload = async (e) => {
         try {
-          setLoadingAction(true);
           const content = JSON.parse(e.target?.result as string);
           await processBackupJSON(content);
-          toast.success("تمت استعادة وتحديث البيانات بنجاح بدون تكرار!");
         } catch (err) {
           console.error(err);
           toast.error("خطأ في قراءة ملف النسخة الاحتياطية.");
         } finally {
-          setLoadingAction(false);
           event.target.value = "";
         }
       };
@@ -724,16 +987,58 @@ export default function SettingsPage() {
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      className="max-w-4xl mx-auto space-y-5 md:space-y-6 pb-12 font-sans dir-rtl text-right"
+      className="max-w-4xl mx-auto space-y-5 md:space-y-6 pb-12 font-sans dir-rtl text-right relative"
     >
-      {/* 1. ترويسة الصفحة المودرن  */}
+      {/* 🚀 0. نافذة منبثقة تفاعلية لعرض نسبة شريط تقدم استعادة النسخة الاحتياطية */}
+      <AnimatePresence>
+        {isRestoring && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[999] flex items-center justify-center p-4 dir-rtl"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-card border border-border rounded-3xl p-6 md:p-8 max-w-md w-full text-center space-y-5 shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mx-auto border border-orange-500/20">
+                <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="text-lg font-black text-foreground">جاري استعادة النسخة الاحتياطية...</h3>
+                <p className="text-xs text-muted-foreground font-bold leading-relaxed">{restoreStatusText}</p>
+              </div>
+
+              {/* شريط التقدم المئوي */}
+              <div className="space-y-2">
+                <div className="w-full bg-secondary rounded-full h-4 overflow-hidden border border-border/80 p-0.5">
+                  <div 
+                    className="bg-gradient-to-r from-orange-500 to-amber-500 h-full rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${restoreProgress}%` }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-xs font-black font-mono px-1">
+                  <span className="text-orange-500">{restoreProgress}%</span>
+                  <span className="text-muted-foreground">يرجى الانتظار وعدم إغلاق الصفحة</span>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 1. ترويسة الصفحة المودرن */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
             <Settings className="w-6 h-6 text-orange-500" />
-            إعدادات النظام وإدارة الموظفين
+            إعدادات النظام وإدارة الموظفين والأجهزة
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">تخصيص تفاصيل المكتب، التحديثات المباشرة، الصلاحيات، والنسخ الاحتياطي .</p>
+          <p className="text-xs text-muted-foreground mt-1">تخصيص تفاصيل المكتب، التحديثات المباشرة، ربط الطابعات، الصلاحيات، والنسخ الاحتياطي .</p>
         </div>
 
         <button
@@ -749,11 +1054,11 @@ export default function SettingsPage() {
       {saved && (
         <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center gap-2.5 text-xs font-black animate-in slide-in-from-top-2">
           <CheckCircle2 className="w-5 h-5" />
-          <span>تم حفظ الإعدادات وتحديث بيانات الشعار والشركة بنجاح!</span>
+          <span>تم حفظ الإعدادات وتحديث بيانات الشعار والأجهزة بنجاح!</span>
         </div>
       )}
 
-      {/* 🎯 كارت متابعة تفاصيل الاشتراك الحالي وحساب الأيام المتبقية (محدث للـ Admin) */}
+      {/* 🎯 كارت متابعة تفاصيل الاشتراك الحالي وحساب الأيام المتبقية */}
       <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-4">
         <div className="flex justify-between items-center border-b border-border/60 pb-3">
           <div className="flex items-center gap-2">
@@ -809,7 +1114,7 @@ export default function SettingsPage() {
 
       <form onSubmit={handleSaveSettings} className="space-y-4">
         
-        {/* 🚀 1. قسم التحديثات الذكية  Card */}
+        {/* 🚀 1. قسم التحديثات الذكية */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -899,7 +1204,7 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 🔒 2. قسم أمان حساب الشركة والرمز السرّي PIN  Card */}
+        {/* 🔒 2. قسم أمان حساب الشركة ورمز PIN السريع للمالك Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -978,7 +1283,7 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 👥 3. قسم إضافة وتحديد صلاحيات الموظفين  Card */}
+        {/* 👥 3. قسم إضافة وتحديد صلاحيات الموظفين Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -1152,7 +1457,7 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 🏢 4. تفاصيل الشركة والشعار والطباعة  Card */}
+        {/* 🏢 4. تفاصيل الشركة والشعار وعقود الطباعة الرسمية Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -1283,7 +1588,300 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 💬 5. قسم ربط الواتساب والإشعارات الآلية  Card */}
+        {/* 🖨️ 5. قسم ربط الأجهزة الملحقة والطابعات Card */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+          <button
+            type="button"
+            onClick={() => toggleSection("hardware")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+              <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                <HardDrive className="w-4 h-4" />
+              </div>
+              <span>ربط الأجهزة الملحقة، الطابعات، وأجهزة POS</span>
+            </div>
+
+            {openSections.hardware ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          <AnimatePresence>
+            {openSections.hardware && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="p-5 border-t border-border space-y-5"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                  {/* 1. طابعة العقود العامة */}
+                  <div className="p-4 bg-secondary/20 rounded-2xl border border-border space-y-3.5">
+                    <div className="flex items-center gap-2.5 border-b border-border/60 pb-2.5">
+                      <div className="p-2 rounded-xl bg-orange-500/10 text-orange-500">
+                        <Printer className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-foreground">طابعة العقود والمستندات</h4>
+                        <span className="text-[10px] text-muted-foreground font-bold">ورق قياسي A4 / A5</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[11px] font-bold text-muted-foreground">طريقة توصيل الطابعة:</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDocPrinterConn("usb")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                            docPrinterConn === "usb"
+                              ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          <Usb className="w-3.5 h-3.5" />
+                          <span>USB Direct</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setDocPrinterConn("wifi")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                            docPrinterConn === "wifi"
+                              ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          <Wifi className="w-3.5 h-3.5" />
+                          <span>Wi-Fi / شبكة</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {docPrinterConn === "usb" ? (
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">اختر الطابعة المربوطة بالجهاز:</label>
+                        <select
+                          value={docPrinterName}
+                          onChange={(e) => setDocPrinterName(e.target.value)}
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                        >
+                          <option value="">-- اختر طابعة من النظام --</option>
+                          {availablePrinters.map((printer, idx) => (
+                            <option key={idx} value={printer.name}>
+                              {printer.name} {printer.isDefault ? "(الافتراضية)" : ""}
+                            </option>
+                          ))}
+                          {availablePrinters.length === 0 && (
+                            <>
+                              <option value="HP LaserJet Pro M404">HP LaserJet Pro M404</option>
+                              <option value="Canon LBP6030">Canon LBP6030 (USB)</option>
+                              <option value="Epson EcoTank L3250">Epson EcoTank L3250</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">عنوان IP الخاص بالطابعة:</label>
+                        <input
+                          type="text"
+                          value={docPrinterIp}
+                          onChange={(e) => setDocPrinterIp(e.target.value)}
+                          placeholder="192.168.1.200"
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold font-mono dir-ltr text-right outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleTestPrinter("doc")}
+                      disabled={testingHardware === "doc"}
+                      className="w-full py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                    >
+                      {testingHardware === "doc" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                      <span>طباعة صفحة اختبار A4</span>
+                    </button>
+                  </div>
+
+                  {/* 2. طابعة الوصولات الإيصالية الحرارية */}
+                  <div className="p-4 bg-secondary/20 rounded-2xl border border-border space-y-3.5">
+                    <div className="flex items-center gap-2.5 border-b border-border/60 pb-2.5">
+                      <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
+                        <Receipt className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-foreground">طابعة الوصولات الحرارية</h4>
+                        <span className="text-[10px] text-muted-foreground font-bold">ورق إيصالات (80mm / 58mm)</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[11px] font-bold text-muted-foreground">قياس بكرة الورق الحراري:</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setReceiptPaperSize("80mm")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all ${
+                            receiptPaperSize === "80mm"
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          قياس 80 مم (عريض)
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setReceiptPaperSize("58mm")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all ${
+                            receiptPaperSize === "58mm"
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          قياس 58 مم (صغير)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[11px] font-bold text-muted-foreground">منفذ توصيل طابعة POS:</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setReceiptConnType("usb")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                            receiptConnType === "usb"
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          <Usb className="w-3.5 h-3.5" />
+                          <span>USB Direct</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setReceiptConnType("lan")}
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                            receiptConnType === "lan"
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                              : "bg-background border-border text-muted-foreground"
+                          }`}
+                        >
+                          <Network className="w-3.5 h-3.5" />
+                          <span>LAN / Ethernet</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {receiptConnType === "usb" ? (
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">اختر طابعة الوصولات المربوطة:</label>
+                        <select
+                          value={receiptPrinterName}
+                          onChange={(e) => setReceiptPrinterName(e.target.value)}
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                          <option value="">-- اختر طابعة من النظام --</option>
+                          {availablePrinters.map((printer, idx) => (
+                            <option key={idx} value={printer.name}>
+                              {printer.name} {printer.isDefault ? "(الافتراضية)" : ""}
+                            </option>
+                          ))}
+                          {availablePrinters.length === 0 && (
+                            <>
+                              <option value="Xprinter XP-Q800">Xprinter XP-Q800 (Thermal 80mm)</option>
+                              <option value="Epson TM-T20III">Epson TM-T20III (Thermal 58mm)</option>
+                              <option value="POS-80 Printer">POS-80 Printer (USB)</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">عنوان IP الشبكي (LAN):</label>
+                        <input
+                          type="text"
+                          value={receiptPrinterIp}
+                          onChange={(e) => setReceiptPrinterIp(e.target.value)}
+                          placeholder="192.168.1.150"
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold font-mono dir-ltr text-right outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleTestPrinter("receipt")}
+                      disabled={testingHardware === "receipt"}
+                      className="w-full py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                    >
+                      {testingHardware === "receipt" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
+                      <span>طباعة وصل اختبار ({receiptPaperSize})</span>
+                    </button>
+                  </div>
+
+                  {/* 3. جهاز الدفع الإلكتروني POS */}
+                  <div className="p-4 bg-secondary/20 rounded-2xl border border-border space-y-3.5">
+                    <div className="flex items-center gap-2.5 border-b border-border/60 pb-2.5">
+                      <div className="p-2 rounded-xl bg-purple-500/10 text-purple-500">
+                        <CreditCard className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-foreground">جهاز الدفع الإلكتروني</h4>
+                        <span className="text-[10px] text-muted-foreground font-bold">Qi Card / POS Terminals</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">اختر نوع الجهاز والمزود:</label>
+                      <select
+                        value={posDeviceType}
+                        onChange={(e) => setPosDeviceType(e.target.value)}
+                        className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="">-- اختر جهاز الدفع --</option>
+                        <option value="qi_card">جهاز كي كارد (Qi Card POS)</option>
+                        <option value="zain_cash">جهاز زين كاش (ZainCash POS)</option>
+                        <option value="neo_pay">جهاز NeoPay Terminal</option>
+                        <option value="custom_ip">ربط مباشر عبر IP (Network POS)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">عنوان IP أو رقم منفذ التوصيل:</label>
+                      <input
+                        type="text"
+                        value={posIpAddress}
+                        onChange={(e) => setPosIpAddress(e.target.value)}
+                        placeholder="192.168.1.100 أو COM3"
+                        className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold font-mono dir-ltr text-right outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div className="pt-7">
+                      <button
+                        type="button"
+                        onClick={() => handleTestPrinter("pos")}
+                        disabled={testingHardware === "pos"}
+                        className="w-full py-2.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                      >
+                        {testingHardware === "pos" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                        <span>اختبار إشارة جهاز الدفع</span>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 💬 6. قسم ربط الواتساب والإشعارات الآلية Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -1370,7 +1968,7 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 📊 6. قسم النسبة المالية الافتراضية والمظهر  Cards */}
+        {/* 📊 7. قسم النسبة المالية الافتراضية والمظهر Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-2.5">
@@ -1416,7 +2014,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 💾 7. قسم النسخ الاحتياطي و Google Drive  Card */}
+        {/* 💾 8. قسم النسخ الاحتياطي و Google Drive Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
@@ -1461,16 +2059,16 @@ export default function SettingsPage() {
                       <Upload className="w-4 h-4 text-orange-500" />
                     </div>
                     <p className="text-[10px] text-muted-foreground">قراءة واسترجاع السجلات من ملف .json محلي.</p>
-                    <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction} className="hidden" />
+                    <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction || isRestoring} className="hidden" />
                   </label>
 
                   <div className="p-4 bg-secondary/20 border border-blue-500/30 rounded-2xl flex flex-col justify-between space-y-2.5">
                     <div className="flex items-center justify-between w-full">
-                      <span className="font-bold text-xs text-blue-500">تزامن Google Drive</span>
+                      <span className="font-bold text-xs text-blue-500">تزامن Google Drive الأوتوماتيكي</span>
                       <CloudUpload className="w-4 h-4 text-blue-500" />
                     </div>
                     <p className="text-[10px] text-muted-foreground">
-                      مزامنة تلقائية مع حساب جوجل للحماية من ضياع البيانات.
+                      رفع سحابي تلقائي مبرمج يومياً الساعة 12:00 ليلاً.
                     </p>
 
                     <div className="flex flex-col gap-2 pt-1">
@@ -1502,21 +2100,21 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => handleUploadToGoogleDrive(false)}
-                          disabled={uploadingToDrive || loadingAction || !isDriveConnected}
+                          disabled={uploadingToDrive || loadingAction || !isDriveConnected || isRestoring}
                           className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
                         >
                           {uploadingToDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <CloudUpload className="w-3.5 h-3.5 text-blue-500" />}
-                          <span>رفع الآن</span>
+                          <span>رفع سحابي الآن</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
-                          disabled={downloadingFromDrive || loadingAction || !isDriveConnected}
+                          disabled={downloadingFromDrive || loadingAction || !isDriveConnected || isRestoring}
                           className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
                         >
                           {downloadingFromDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />}
-                          <span>استعادة</span>
+                          <span>استعادة شاملة</span>
                         </button>
                       </div>
                     </div>

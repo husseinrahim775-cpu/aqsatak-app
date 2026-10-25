@@ -20,11 +20,22 @@ import {
   ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, 
   Edit, Trash2, X, Receipt, Printer, Camera, FileText, Image as ImageIcon, Download, 
   ExternalLink, Eye, EyeOff, ChevronDown, ChevronUp, RefreshCw, Upload, CheckCircle2, AlertCircle, Sparkles,
-  Clock, CalendarDays
+  Clock, CalendarDays, ChevronRight, ChevronLeft
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { ContractPrintTemplate, PaymentReceiptPrintTemplate } from "@/components/PrintTemplates";
+
+// دالة مساعدة لتنظيف النصوص من أي محتوى قد يسبب ثغرات XSS في الطباعة
+const sanitizeText = (str: string | undefined | null) => {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
 
 function CustomerDetailsContent() {
   const searchParams = useSearchParams();
@@ -50,7 +61,7 @@ function CustomerDetailsContent() {
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
 
-  // 🔒 حالة إظهار / إخفاء المستندات (مغلقة افتراضياً)
+  // 🔒 حالة إظهار / إخفاء المستندات
   const [showDocs, setShowDocs] = useState(false);
   const [updatingDocType, setUpdatingDocType] = useState<string | null>(null);
 
@@ -73,12 +84,15 @@ function CustomerDetailsContent() {
   });
   const [isSaving, setIsSaving] = useState(false);
 
+  // 🗓️ حالات تعديل الدفعة والمنقي المخصص للأشهر والتواريخ
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({
     amount: 0,
     targetMonth: "",
     notes: "",
   });
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [isSavingPayment, setIsSavingPayment] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -155,8 +169,100 @@ function CustomerDetailsContent() {
     }
   };
 
-  // 📱💻 دالة الطباعة المتوافقة مع كافة الأجهزة
-  const triggerPrint = () => {
+  // 🖨️ دالة الطباعة
+  const triggerPrint = (type: "contract" | "payment", paymentData?: PaymentRecord) => {
+    let paperSize = "80mm";
+    try {
+      const savedHw = localStorage.getItem("app_hardware_settings");
+      if (savedHw) {
+        const parsed = JSON.parse(savedHw);
+        if (parsed.receiptPaperSize) paperSize = parsed.receiptPaperSize;
+      }
+    } catch (e) {}
+
+    const custName = mainInfo ? sanitizeText(mainInfo.customerName) : "";
+    const custPhone = mainInfo ? sanitizeText(mainInfo.phoneNumber) : "";
+
+    if (type === "payment" && paymentData) {
+      const receiptWidth = paperSize === "80mm" ? "280px" : "190px";
+      const printWin = window.open("", "_blank", "width=400,height=600");
+      
+      if (printWin) {
+        const amountStr = paymentData.amount.toLocaleString("en-US");
+        const monthStr = sanitizeText(paymentData.targetMonth || "-");
+        const notesStr = sanitizeText(paymentData.notes || "تسديد قسط");
+        const dateStr = new Date(paymentData.paidAt || Date.now()).toLocaleDateString("en-GB");
+        const timeStr = new Date(paymentData.paidAt || Date.now()).toLocaleTimeString("ar-IQ", { hour: '2-digit', minute: '2-digit' });
+
+        printWin.document.write(`
+          <!DOCTYPE html>
+          <html dir="rtl" lang="ar">
+            <head>
+              <title>إيصال قبض</title>
+              <meta charset="utf-8">
+              <style>
+                body { 
+                  font-family: 'Courier New', Courier, monospace, system-ui; 
+                  width: ${receiptWidth}; 
+                  margin: 0 auto; 
+                  padding: 10px; 
+                  font-size: 12px; 
+                  color: #000;
+                }
+                .center { text-align: center; }
+                .bold { font-weight: bold; }
+                .line { border-bottom: 1px dashed #000; margin: 8px 0; }
+                .num-ltr { direction: ltr; display: inline-block; unicode-bidi: embed; }
+              </style>
+            </head>
+            <body>
+              <div class="center">
+                <h2 style="margin: 0 0 5px 0;">وصل إيصال دفع</h2>
+                <p style="margin: 3px 0;">العميل: <span class="bold">${custName}</span></p>
+                <p style="margin: 3px 0;">الهاتف: <span class="num-ltr bold">${custPhone}</span></p>
+              </div>
+              <div class="line"></div>
+              
+              <div style="font-size: 13px; margin: 8px 0;">
+                <span>المبلغ المدفوع: </span>
+                <strong class="num-ltr" style="font-size: 15px;">${amountStr}</strong>
+                <span> د.ع</span>
+              </div>
+              
+              <div style="margin: 4px 0;">
+                <span>عن فترة/شهر: </span>
+                <span class="num-ltr bold">${monthStr}</span>
+              </div>
+
+              <div style="margin: 4px 0;">
+                <span>ملاحظات: </span>
+                <span>${notesStr}</span>
+              </div>
+
+              <div class="line"></div>
+              
+              <div class="center" style="font-size: 10px; margin-top: 6px;">
+                <span>التاريخ: </span>
+                <span class="num-ltr">${dateStr}</span>
+                <span class="num-ltr">${timeStr}</span>
+              </div>
+
+              <script>
+                window.onload = function() { 
+                  setTimeout(function() {
+                    window.print(); 
+                    window.close(); 
+                  }, 300);
+                }
+              </script>
+            </body>
+          </html>
+        `);
+        printWin.document.close();
+      }
+      return;
+    }
+
     setTimeout(() => {
       if (!printAreaRef.current) return;
 
@@ -180,6 +286,11 @@ function CustomerDetailsContent() {
                 color: black; 
                 -webkit-print-color-adjust: exact !important; 
                 print-color-adjust: exact !important; 
+              }
+              .font-mono, [dir="ltr"], .num-ltr { 
+                direction: ltr !important; 
+                display: inline-block !important; 
+                unicode-bidi: embed !important; 
               }
               @media print {
                 .no-print { display: none !important; }
@@ -288,11 +399,20 @@ function CustomerDetailsContent() {
 
   const openEditPaymentModal = (payment: PaymentRecord) => {
     setEditingPayment(payment);
+    const target = payment.targetMonth || "";
     setEditPaymentForm({
       amount: payment.amount,
-      targetMonth: payment.targetMonth || "",
+      targetMonth: target,
       notes: payment.notes || "",
     });
+
+    if (target.includes("-")) {
+      const yearPart = parseInt(target.split("-")[0]);
+      if (!isNaN(yearPart)) setPickerYear(yearPart);
+    } else {
+      setPickerYear(new Date().getFullYear());
+    }
+    setShowDatePickerModal(false);
   };
 
   const handleSavePaymentEdit = async () => {
@@ -424,7 +544,7 @@ function CustomerDetailsContent() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="max-w-5xl mx-auto space-y-6 pb-12 relative font-sans dir-rtl text-right"
     >
-      {/* 1. الترويسة الرئيسية لـ  Glass Look */}
+      {/* 1. الترويسة الرئيسية */}
       <div className="flex items-center justify-between bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div className="flex items-center gap-4">
           <Link href="/customers" className="p-3 bg-secondary hover:bg-orange-500/10 hover:text-orange-500 text-foreground rounded-2xl border border-border/80 transition-all">
@@ -445,7 +565,7 @@ function CustomerDetailsContent() {
         </span>
       </div>
 
-      {/* 2. بطاقات بيانات العميل والكفيل  Grid */}
+      {/* 2. بطاقات بيانات العميل والكفيل */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2.5 text-orange-500 border-b border-border/60 pb-3.5">
@@ -459,7 +579,9 @@ function CustomerDetailsContent() {
             </div>
             <div className="flex justify-between items-center bg-secondary/30 p-3 rounded-2xl">
               <span className="text-muted-foreground font-bold">رقم الهاتف الأساسي:</span>
-              <span className="font-black text-foreground font-mono text-base dir-ltr">{mainInfo.phoneNumber}</span>
+              <span className="font-black text-foreground font-mono text-base inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                {mainInfo.phoneNumber}
+              </span>
             </div>
             <div className="flex justify-between items-center bg-secondary/30 p-3 rounded-2xl">
               <span className="text-muted-foreground font-bold">العنوان السكني:</span>
@@ -480,13 +602,15 @@ function CustomerDetailsContent() {
             </div>
             <div className="flex justify-between items-center bg-secondary/30 p-3 rounded-2xl">
               <span className="text-muted-foreground font-bold">رقم هاتف الكفيل:</span>
-              <span className="font-black text-foreground font-mono text-base dir-ltr">{mainInfo.guarantorPhone || "لا يوجد"}</span>
+              <span className="font-black text-foreground font-mono text-base inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                {mainInfo.guarantorPhone || "لا يوجد"}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 🔒 3. بطاقة المستندات والأوراق الثبوتية (مغلقة افتراضياً) */}
+      {/* 🔒 3. بطاقة المستندات والأوراق الثبوتية */}
       <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
         <button
           type="button"
@@ -729,7 +853,7 @@ function CustomerDetailsContent() {
         )}
       </div>
 
-      {/* 4. تفاصيل الأقساط وجدول الدفعات  Card Look */}
+      {/* 4. تفاصيل الأقساط وجدول الدفعات */}
       {installments.map((item, idx) => {
         const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
         const periodUnitName = item.paymentPeriod === "daily" ? "أيام" : item.paymentPeriod === "weekly" ? "أسابيع" : "أشهر";
@@ -753,13 +877,12 @@ function CustomerDetailsContent() {
               </div>
               
               <div className="flex items-center gap-2.5">
-                {/* 1. زر طباعة العقد */}
                 <button
                   type="button"
                   onClick={() => {
                     setPrintPaymentData(null);
                     setPrintContractData(item);
-                    triggerPrint();
+                    triggerPrint("contract");
                   }}
                   className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white text-xs md:text-sm font-black rounded-2xl transition-all flex items-center gap-2 shadow-md shadow-orange-500/20"
                 >
@@ -767,13 +890,11 @@ function CustomerDetailsContent() {
                   <span>طباعة العقد</span>
                 </button>
 
-                {/* 2. شارة فترة القسط - تصميم كحلي عريض وواضح جداً بالنهار والليل */}
                 <span className="inline-flex items-center gap-1.5 text-xs md:text-sm font-black px-3.5 py-1.5 rounded-2xl bg-slate-900 text-white border border-slate-700 dark:bg-slate-800 dark:text-slate-100 shadow-sm">
                   <Clock className="w-4 h-4 text-amber-400" />
                   <span>قسط {periodLabel}</span>
                 </span>
 
-                {/* 3. شارة عدد الأشهر - تصميم كحلي عريض وواضح جداً بالنهار والليل */}
                 <span className="inline-flex items-center gap-1.5 text-xs md:text-sm font-black px-3.5 py-1.5 rounded-2xl bg-slate-900 text-white border border-slate-700 dark:bg-slate-800 dark:text-slate-100 shadow-sm">
                   <CalendarDays className="w-4 h-4 text-orange-400" />
                   <span>{item.months} {periodUnitName}</span>
@@ -781,27 +902,34 @@ function CustomerDetailsContent() {
               </div>
             </div>
 
-            {/* الأرقام المترية المكبرة بوضوح شمس */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-5 rounded-2xl text-xs md:text-sm border border-border/50">
               <div>
                 <p className="text-muted-foreground font-bold">سعر المنتج</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono">{item.productPrice.toLocaleString("en-US")} د.ع</p>
+                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                  {item.productPrice.toLocaleString("en-US")} د.ع
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground font-bold">الدفعة المقدمة</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono">{item.downPayment.toLocaleString("en-US")} د.ع</p>
+                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                  {item.downPayment.toLocaleString("en-US")} د.ع
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground font-bold">المتبقي للتقسيط</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono">{Math.round(item.totalDue).toLocaleString("en-US")} د.ع</p>
+                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                  {Math.round(item.totalDue).toLocaleString("en-US")} د.ع
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground font-bold">القسط الـ{periodLabel}</p>
-                <p className="font-black text-orange-500 text-base md:text-lg mt-1 font-mono">{Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع</p>
+                <p className="font-black text-orange-500 text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                  {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
+                </p>
               </div>
             </div>
 
-            {/* جدول الاستحقاقات المكبر */}
+            {/* جدول الاستحقاقات */}
             <div className="border border-border/80 rounded-2xl overflow-hidden mt-5 shadow-sm">
               <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
                 <Calendar className="w-5 h-5 text-orange-500" />
@@ -832,8 +960,14 @@ function CustomerDetailsContent() {
                       return (
                         <tr key={mIdx} className="hover:bg-secondary/20 transition-colors">
                           <td className="p-3.5 font-black text-orange-500">الدفعة #{mIdx + 1}</td>
-                          <td className="p-3.5 font-black text-foreground font-mono">{Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع</td>
-                          <td className="p-3.5 text-muted-foreground font-mono font-black" dir="ltr">{dueDateFormatted}</td>
+                          <td className="p-3.5 font-black text-foreground font-mono">
+                            <span dir="ltr" style={{ unicodeBidi: "embed" }}>
+                              {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-muted-foreground font-mono font-black">
+                            <span dir="ltr" style={{ unicodeBidi: "embed" }}>{dueDateFormatted}</span>
+                          </td>
                           <td className="p-3.5 text-center">
                             {isPaid ? (
                               <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-3.5 py-1.5 rounded-full text-xs font-black shadow-sm inline-block">
@@ -903,9 +1037,15 @@ function CustomerDetailsContent() {
                         const paidDate = p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-GB").split("/").reverse().join("-") : "-";
                         return (
                           <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
-                            <td className="p-3.5 font-bold">{paidDate}</td>
-                            <td className="p-3.5 font-black text-emerald-600 dark:text-emerald-400 font-mono text-base">+{p.amount.toLocaleString("en-US")} د.ع</td>
-                            <td className="p-3.5 font-black text-muted-foreground font-mono" dir="ltr">{p.targetMonth || "-"}</td>
+                            <td className="p-3.5 font-bold">
+                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>{paidDate}</span>
+                            </td>
+                            <td className="p-3.5 font-black text-emerald-600 dark:text-emerald-400 font-mono text-base">
+                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>+{p.amount.toLocaleString("en-US")} د.ع</span>
+                            </td>
+                            <td className="p-3.5 font-black text-muted-foreground font-mono">
+                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>{p.targetMonth || "-"}</span>
+                            </td>
                             <td className="p-3.5 text-muted-foreground font-bold text-xs max-w-[200px] truncate" title={p.notes}>
                               {p.notes || "دفعة اعتيادية"}
                             </td>
@@ -916,7 +1056,7 @@ function CustomerDetailsContent() {
                                   onClick={() => {
                                     setPrintContractData(null);
                                     setPrintPaymentData(p);
-                                    triggerPrint();
+                                    triggerPrint("payment", p);
                                   }}
                                   className="p-2 text-emerald-600 hover:bg-emerald-500/10 rounded-xl transition-colors"
                                   title="طباعة وصل إيصال"
@@ -944,7 +1084,7 @@ function CustomerDetailsContent() {
         );
       })}
 
-      {/* 🖼️ نافذة تكبير الصورة والتحميل  Modal */}
+      {/* 🖼️ نافذة تكبير الصورة والتحميل */}
       <AnimatePresence>
         {previewImage && (
           <motion.div 
@@ -1041,7 +1181,8 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.productPrice}
                       onChange={(e) => setEditForm({...editForm, productPrice: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      dir="ltr"
                     />
                   </div>
                   <div>
@@ -1050,7 +1191,8 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.downPayment}
                       onChange={(e) => setEditForm({...editForm, downPayment: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      dir="ltr"
                     />
                   </div>
                 </div>
@@ -1061,7 +1203,8 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.monthlyInstallment}
                       onChange={(e) => setEditForm({...editForm, monthlyInstallment: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      dir="ltr"
                     />
                   </div>
                   <div>
@@ -1070,7 +1213,8 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.months}
                       onChange={(e) => setEditForm({...editForm, months: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      dir="ltr"
                     />
                   </div>
                 </div>
@@ -1097,80 +1241,177 @@ function CustomerDetailsContent() {
         )}
       </AnimatePresence>
 
-      {/* modal تعديل الدفعة */}
+      {/* 💳 modal تعديل الدفعة المصمم تماماً بنمط واجهة التسديد والمنقي المخصص */}
       <AnimatePresence>
-        {editingPayment && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 print:hidden"
-          >
-            <motion.div 
-              initial={{ scale: 0.95, y: 10 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 10 }}
-              className="bg-card rounded-3xl w-full max-w-md p-6 shadow-2xl border border-border space-y-4"
-            >
-              <div className="flex justify-between items-center border-b border-border pb-3">
-                <h2 className="text-base font-black text-foreground">تعديل الدفعة / الغرامة</h2>
-                <button onClick={() => setEditingPayment(null)} className="p-1 hover:bg-secondary rounded-xl transition-colors">
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
-              </div>
-              
-              <div className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-muted-foreground mb-1">المبلغ (د.ع)</label>
-                  <input
-                    type="number"
-                    value={editPaymentForm.amount}
-                    onChange={(e) => setEditPaymentForm({...editPaymentForm, amount: Number(e.target.value)})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-muted-foreground mb-1">عن فترة (تاريخ YYYY-MM-DD أو شهر YYYY-MM)</label>
-                  <input
-                    type="text"
-                    dir="ltr"
-                    placeholder="YYYY-MM-DD"
-                    value={editPaymentForm.targetMonth}
-                    onChange={(e) => setEditPaymentForm({...editPaymentForm, targetMonth: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none text-left"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-muted-foreground mb-1">ملاحظات / غرامة</label>
-                  <textarea
-                    value={editPaymentForm.notes}
-                    onChange={(e) => setEditPaymentForm({...editPaymentForm, notes: e.target.value})}
-                    rows={3}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none resize-none"
-                    placeholder="مثال: غرامة تأخير..."
-                  />
-                </div>
+        {editingPayment && (() => {
+          const matchedInst = installments.find(inst => inst.id === editingPayment.installmentId);
+          const isMonthly = matchedInst?.paymentPeriod === "monthly" || !matchedInst?.paymentPeriod;
 
-                <div className="pt-2 flex gap-3">
-                  <button
-                    onClick={() => setEditingPayment(null)}
-                    className="flex-1 py-3 text-xs font-bold rounded-2xl border border-border hover:bg-secondary transition-colors"
-                    disabled={isSavingPayment}
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    onClick={handleSavePaymentEdit}
-                    disabled={isSavingPayment || !editPaymentForm.amount}
-                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
-                  >
-                    {isSavingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ التعديلات'}
+          return (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 print:hidden"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 10 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 10 }}
+                className="bg-card rounded-3xl w-full max-w-md p-6 shadow-2xl border border-border space-y-4 relative overflow-hidden"
+              >
+                <div className="flex justify-between items-center border-b border-border/70 pb-3">
+                  <h2 className="text-base font-black text-foreground">تعديل الدفعة / الغرامة</h2>
+                  <button onClick={() => setEditingPayment(null)} className="p-1.5 hover:bg-secondary rounded-xl transition-colors">
+                    <X className="w-5 h-5 text-muted-foreground" />
                   </button>
                 </div>
-              </div>
+                
+                <div className="space-y-4">
+                  {/* المبلغ */}
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">المبلغ (د.ع)</label>
+                    <input
+                      type="number"
+                      value={editPaymentForm.amount}
+                      onChange={(e) => setEditPaymentForm({...editPaymentForm, amount: Number(e.target.value)})}
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-orange-500 outline-none text-right font-mono"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  {/* اختيارات التاريخ بنمط شبكة التسديد السوداء المخصصة */}
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-orange-500" />
+                      <span>{isMonthly ? "اختر الشهر والسنة المستحقة" : "اختر تاريخ الدفعة المستحقة"}</span>
+                    </label>
+
+                    {/* الزر الرئيسي لعرض التاريخ المحدد */}
+                    <button
+                      type="button"
+                      onClick={() => setShowDatePickerModal(!showDatePickerModal)}
+                      className="w-full p-3.5 bg-background border border-border hover:border-orange-500 rounded-2xl text-xs font-bold flex items-center justify-between transition shadow-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-orange-500" />
+                        <span className="font-mono text-sm font-black dir-ltr text-right">
+                          {editPaymentForm.targetMonth || "اختر تاريخ الاستحقاق..."}
+                        </span>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${showDatePickerModal ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {/* المنقي السلس المخصص بنفس الشكل المتوفر في التسديد */}
+                    {showDatePickerModal && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-2.5 p-4 bg-secondary/40 border border-border/90 rounded-2xl space-y-3.5 shadow-inner"
+                      >
+                        {isMonthly ? (
+                          <>
+                            {/* شريط اختيار السنة */}
+                            <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                              <button
+                                type="button"
+                                onClick={() => setPickerYear(pickerYear - 1)}
+                                className="p-1.5 bg-background border border-border/80 hover:bg-secondary rounded-xl text-xs font-bold flex items-center gap-1"
+                              >
+                                <ChevronRight className="w-4 h-4" />
+                                <span>السابقة</span>
+                              </button>
+
+                              <span className="font-mono text-base font-black text-orange-500">{pickerYear}</span>
+
+                              <button
+                                type="button"
+                                onClick={() => setPickerYear(pickerYear + 1)}
+                                className="p-1.5 bg-background border border-border/80 hover:bg-secondary rounded-xl text-xs font-bold flex items-center gap-1"
+                              >
+                                <span>التالية</span>
+                                <ChevronLeft className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* شبكة الأشهر (شهر 1 إلى شهر 12) */}
+                            <div className="grid grid-cols-3 gap-2 pt-1">
+                              {Array.from({ length: 12 }).map((_, mIdx) => {
+                                const mNum = mIdx + 1;
+                                const formattedMonth = `${pickerYear}-${String(mNum).padStart(2, '0')}`;
+                                const isSelected = editPaymentForm.targetMonth === formattedMonth;
+
+                                return (
+                                  <button
+                                    key={mNum}
+                                    type="button"
+                                    onClick={() => {
+                                      setEditPaymentForm({ ...editPaymentForm, targetMonth: formattedMonth });
+                                      setShowDatePickerModal(false);
+                                    }}
+                                    className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all ${
+                                      isSelected
+                                        ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 scale-105"
+                                        : "bg-background border border-border/80 hover:border-orange-500 text-foreground"
+                                    }`}
+                                  >
+                                    شهر {mNum}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          /* اختيار يومي / أسبوعي بالرزنامة المباشرة */
+                          <div>
+                            <input
+                              type="date"
+                              value={editPaymentForm.targetMonth}
+                              onChange={(e) => {
+                                setEditPaymentForm({ ...editPaymentForm, targetMonth: e.target.value });
+                                setShowDatePickerModal(false);
+                              }}
+                              className="w-full p-3 bg-background border border-border rounded-xl text-xs font-mono font-bold text-center outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                            />
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* ملاحظات / غرامة */}
+                  <div>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">ملاحظات / غرامة</label>
+                    <textarea
+                      value={editPaymentForm.notes}
+                      onChange={(e) => setEditPaymentForm({...editPaymentForm, notes: e.target.value})}
+                      rows={3}
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none resize-none"
+                      placeholder="مثال: [دفع نقدي] أو غرامة تأخير..."
+                    />
+                  </div>
+
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      onClick={() => setEditingPayment(null)}
+                      className="flex-1 py-3 text-xs font-bold rounded-2xl border border-border hover:bg-secondary transition-colors"
+                      disabled={isSavingPayment}
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      onClick={handleSavePaymentEdit}
+                      disabled={isSavingPayment || !editPaymentForm.amount}
+                      className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
+                    >
+                      {isSavingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ التعديلات'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
     </motion.div>
   );

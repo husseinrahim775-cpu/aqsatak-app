@@ -913,6 +913,10 @@ export const saveCompanySettings = async (ownerUid: string, settings: CompanySet
   }
 };
 
+/**
+ * 🛡️ دالة آمنة ومعدلة لتصفير الخزينة والصندوق فقط
+ * تم حمايتها لمنع مسح سجل دفعات العملاء (payments) تماماً لتفادي تصفير الحسابات والتقارير.
+ */
 export const clearUserTreasuryData = async (ownerUid: string) => {
   try {
     const qTreasury = query(
@@ -924,19 +928,11 @@ export const clearUserTreasuryData = async (ownerUid: string) => {
       deleteDoc(doc(db, "treasury_transactions", docSnap.id))
     );
 
-    const qPayments = query(
-      collection(db, "payments"),
-      where("userId", "==", ownerUid)
-    );
-    const paymentsSnap = await getDocs(qPayments);
-    const deletePaymentsPromises = paymentsSnap.docs.map((docSnap) =>
-      deleteDoc(doc(db, "payments", docSnap.id))
-    );
-
-    await Promise.all([...deleteTreasuryPromises, ...deletePaymentsPromises]);
+    // ❌ تم إغلاق وحذف كود مسح payments لحماية ملفات وتسديدات العملاء والتقارير والحسابات!
+    await Promise.all(deleteTreasuryPromises);
     return true;
   } catch (error) {
-    console.error("خطأ في مسح حركات الخزينة والدفعات:", error);
+    console.error("خطأ في مسح حركات الخزينة اليدوية:", error);
     throw error;
   }
 };

@@ -27,7 +27,10 @@ import {
   FileText,
   ChevronRight,
   ChevronLeft,
-  ArrowRight
+  ArrowRight,
+  CreditCard,
+  QrCode,
+  Layers
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -42,19 +45,31 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month">("all");
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [posStatusText, setPosStatusText] = useState("");
   
   const [selectedInstallmentId, setSelectedInstallmentId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState<number | "">("");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [targetMonth, setTargetMonth] = useState(""); 
   
-  // 📅 حالات التقويم المخصص 
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "pos" | "transfer">("cash");
+  const [paymentMode, setPaymentMode] = useState<"single" | "range">("single");
+  const [rangeStartDate, setRangeStartDate] = useState("");
+  const [rangeEndDate, setRangeEndDate] = useState("");
+
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonthObj, setSelectedMonthObj] = useState<{ num: string; name: string } | null>(null);
   const [datePickerStep, setDatePickerStep] = useState<"months" | "days">("months");
+
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [endYear, setEndYear] = useState(new Date().getFullYear());
 
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -100,14 +115,46 @@ export default function AccountsPage() {
   }, [installments]);
 
   const filteredPayments = useMemo(() => {
-    return payments.filter((p) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    let result = payments.filter((p) => {
       const matchSearch =
         (p.customerName && p.customerName.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (p.productName && p.productName.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (p.installmentId && p.installmentId.includes(searchQuery));
-      return matchSearch;
+
+      if (!matchSearch) return false;
+
+      if (!p.paidAt) return dateFilter === "all";
+      const pDate = new Date(p.paidAt);
+
+      if (dateFilter === "today") {
+        return pDate >= today;
+      } else if (dateFilter === "week") {
+        return pDate >= startOfWeek;
+      } else if (dateFilter === "month") {
+        return pDate >= startOfMonth;
+      }
+
+      return true;
     });
-  }, [payments, searchQuery]);
+
+    return result.sort((a, b) => {
+      const timeA = a.paidAt ? new Date(a.paidAt).getTime() : 0;
+      const timeB = b.paidAt ? new Date(b.paidAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [payments, searchQuery, dateFilter]);
+
+  const currentFilteredSum = useMemo(() => {
+    return filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  }, [filteredPayments]);
 
   const filteredInstallmentsForSearch = useMemo(() => {
     if (!customerSearchTerm) return installments;
@@ -130,14 +177,61 @@ export default function AccountsPage() {
       : "شهري";
   }, [selectedInstallment]);
 
+  const calculateRangePeriods = useCallback((startStr: string, endStr: string) => {
+    if (!startStr || !endStr || !selectedInstallment) return [];
+    
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (start > end) return [];
+
+    const period = selectedInstallment.paymentPeriod || "monthly";
+    const dates: string[] = [];
+    const curr = new Date(start);
+
+    while (curr <= end) {
+      const y = curr.getFullYear();
+      const m = String(curr.getMonth() + 1).padStart(2, '0');
+      const d = String(curr.getDate()).padStart(2, '0');
+
+      if (period === "monthly") {
+        dates.push(`${y}-${m}`);
+        curr.setMonth(curr.getMonth() + 1);
+      } else if (period === "weekly") {
+        dates.push(`${y}-${m}-${d}`);
+        curr.setDate(curr.getDate() + 7);
+      } else {
+        dates.push(`${y}-${m}-${d}`);
+        curr.setDate(curr.getDate() + 1);
+      }
+    }
+    return dates;
+  }, [selectedInstallment]);
+
+  useEffect(() => {
+    if (paymentMode === "range" && rangeStartDate && rangeEndDate && selectedInstallment) {
+      const periods = calculateRangePeriods(rangeStartDate, rangeEndDate);
+      if (periods.length > 0) {
+        const totalCalc = Math.round(selectedInstallment.monthlyInstallment * periods.length);
+        setPaymentAmount(totalCalc);
+      }
+    }
+  }, [paymentMode, rangeStartDate, rangeEndDate, selectedInstallment, calculateRangePeriods]);
+
   const handleOpenModal = (installmentId?: string) => {
     setPaymentNotes("");
     setTargetMonth("");
     setCustomerSearchTerm("");
     setShowCustomerDropdown(false);
     setShowDatePicker(false);
+    setShowStartPicker(false);
+    setShowEndPicker(false);
     setDatePickerStep("months");
     setSelectedMonthObj(null);
+    setPaymentMethod("cash");
+    setPaymentMode("single");
+    setRangeStartDate("");
+    setRangeEndDate("");
+    setPosStatusText("");
 
     if (installmentId) {
       handleInstallmentSelection(installmentId);
@@ -158,6 +252,33 @@ export default function AccountsPage() {
     setShowCustomerDropdown(false);
   };
 
+  // 💳 دالة الاتصال الحقيقية الصارمة بجهاز POS
+  const triggerPosPayment = async (amount: number, customerName: string): Promise<{ success: boolean; txnId?: string; error?: string }> => {
+    try {
+      setPosStatusText(`جاري إرسال الطلب لجهاز POS... المرجو تمرير بطاقة العميل للمبلغ (${amount.toLocaleString()} د.ع)`);
+      
+      const response = await fetch("/api/pos/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount, customerName, userId: user?.uid }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, txnId: data.transactionId };
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        return { success: false, error: errData.message || "فشلت عملية الدفع على جهاز POS أو تم الغاؤها." };
+      }
+    } catch (e) {
+      // 🚫 منع التسديد في حال عدم الربط
+      return { 
+        success: false, 
+        error: "لم يتم العثور على جهاز POS مربوط بالنظام! يرجى الربط من الإعدادات أو اختيار طريقة دفع نقدي." 
+      };
+    }
+  };
+
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.uid || !selectedInstallmentId || !paymentAmount) {
@@ -168,20 +289,67 @@ export default function AccountsPage() {
     try {
       setSubmitting(true);
       const inst = selectedInstallment;
-      const amountNum = Number(paymentAmount);
+      let posTxnDetails = "";
 
-      await addPaymentRecord({
-        userId: user.uid,
-        installmentId: selectedInstallmentId,
-        customerName: inst?.customerName || "غير محدد",
-        productName: inst?.productName || "غير محدد",
-        amount: amountNum,
-        paidAt: new Date().toISOString(),
-        targetMonth: targetMonth || undefined,
-        notes: paymentNotes || "",
-      });
+      // 🛑 الفحص الصارم عند اختيار جهاز POS
+      if (paymentMethod === "pos") {
+        const posResult = await triggerPosPayment(Number(paymentAmount), inst?.customerName || "عميل");
+        
+        if (!posResult.success) {
+          toast.error(posResult.error || "خطأ في عملية الـ POS.");
+          setSubmitting(false);
+          setPosStatusText("");
+          return; // إيقاف العملية ومنع التسجيل
+        }
 
-      toast.success("تم تسجيل الدفعة بنجاح!");
+        posTxnDetails = `[دفع إلكتروني POS - رقم العملية: ${posResult.txnId}]`;
+        toast.success(`تم استلام المبلغ بنجاح عبر جهاز POS! (${Number(paymentAmount).toLocaleString()} د.ع)`);
+      }
+
+      const methodText = paymentMethod === "pos" ? posTxnDetails : paymentMethod === "transfer" ? "[تحويل مالي/زين كاش]" : "[دفع نقدي]";
+      const combinedNotes = paymentNotes ? `${methodText} ${paymentNotes}` : methodText;
+
+      if (paymentMode === "range" && rangeStartDate && rangeEndDate) {
+        const periods = calculateRangePeriods(rangeStartDate, rangeEndDate);
+        if (periods.length === 0) {
+          toast.error("يرجى التأكد من أن تاريخ البداية أقدم من تاريخ النهاية.");
+          setSubmitting(false);
+          setPosStatusText("");
+          return;
+        }
+
+        const singlePeriodAmount = Math.round(Number(paymentAmount) / periods.length);
+
+        for (const pDate of periods) {
+          await addPaymentRecord({
+            userId: user.uid,
+            installmentId: selectedInstallmentId,
+            customerName: inst?.customerName || "غير محدد",
+            productName: inst?.productName || "غير محدد",
+            amount: singlePeriodAmount,
+            paidAt: new Date().toISOString(),
+            targetMonth: pDate,
+            notes: `${combinedNotes} (تسديد دفعة فترة ${pDate})`,
+          });
+        }
+        toast.success(`تم تسجيل ${periods.length} دفعات بنجاح من (${rangeStartDate}) إلى (${rangeEndDate})!`);
+      } else {
+        const amountNum = Number(paymentAmount);
+        await addPaymentRecord({
+          userId: user.uid,
+          installmentId: selectedInstallmentId,
+          customerName: inst?.customerName || "غير محدد",
+          productName: inst?.productName || "غير محدد",
+          amount: amountNum,
+          paidAt: new Date().toISOString(),
+          targetMonth: targetMonth || undefined,
+          notes: combinedNotes,
+        });
+        if (paymentMethod !== "pos") {
+          toast.success("تم تسجيل الدفعة بنجاح!");
+        }
+      }
+
       setIsModalOpen(false);
       await fetchData();
     } catch (error) {
@@ -189,6 +357,7 @@ export default function AccountsPage() {
       toast.error("حدث خطأ أثناء حفظ الدفعة، يرجى إعادة المحاولة.");
     } finally {
       setSubmitting(false);
+      setPosStatusText("");
     }
   };
 
@@ -239,11 +408,20 @@ export default function AccountsPage() {
     }
   };
 
-  const daysInSelectedMonth = useMemo(() => {
-    if (!selectedMonthObj) return 30;
-    const monthNum = parseInt(selectedMonthObj.num, 10);
-    return new Date(selectedYear, monthNum, 0).getDate();
-  }, [selectedYear, selectedMonthObj]);
+  const monthsList = [
+    { num: "01", name: "شهر 1" },
+    { num: "02", name: "شهر 2" },
+    { num: "03", name: "شهر 3" },
+    { num: "04", name: "شهر 4" },
+    { num: "05", name: "شهر 5" },
+    { num: "06", name: "شهر 6" },
+    { num: "07", name: "شهر 7" },
+    { num: "08", name: "شهر 8" },
+    { num: "09", name: "شهر 9" },
+    { num: "10", name: "شهر 10" },
+    { num: "11", name: "شهر 11" },
+    { num: "12", name: "شهر 12" },
+  ];
 
   if (loading) {
     return (
@@ -256,7 +434,6 @@ export default function AccountsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12 font-sans dir-rtl text-right relative">
-      {/* الهيدر وزر إضافة دفعة */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-black text-foreground tracking-tight">الحسابات والمدفوعات 💳</h1>
@@ -271,7 +448,6 @@ export default function AccountsPage() {
         </button>
       </div>
 
-      {/* البطاقات الإحصائية الرئيسية */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <motion.div 
           whileHover={{ y: -4, scale: 1.01 }}
@@ -328,7 +504,6 @@ export default function AccountsPage() {
         </motion.div>
       </div>
 
-      {/* البحث وفلترة المقبوضات */}
       <div className="relative bg-card border border-border rounded-2xl p-2 shadow-sm">
         <div className="flex items-center gap-2 px-3 py-1">
           <Search className="w-5 h-5 text-orange-500 shrink-0" />
@@ -342,21 +517,64 @@ export default function AccountsPage() {
         </div>
       </div>
 
-      {/* سجل المقبوضات */}
       <div className="bg-card border border-border rounded-3xl p-5 shadow-sm space-y-4">
-        <div className="flex justify-between items-center border-b border-border/80 pb-3">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-border/80 pb-3">
           <div className="flex items-center gap-2">
             <Coins className="w-5 h-5 text-emerald-500" />
             <h3 className="text-sm md:text-base font-black text-foreground">سجل المقبوضات والدفعات المستلمة</h3>
+            <span className="text-xs font-bold px-3 py-1 rounded-xl bg-secondary text-foreground border border-border">
+              {filteredPayments.length} سجل
+            </span>
           </div>
-          <span className="text-xs font-bold px-3 py-1 rounded-xl bg-secondary text-foreground border border-border">
-            {filteredPayments.length} سجل
-          </span>
+
+          <div className="flex items-center gap-1.5 bg-secondary/60 p-1 rounded-2xl border border-border w-full md:w-auto justify-between overflow-x-auto">
+            <button
+              onClick={() => setDateFilter("all")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                dateFilter === "all" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              الكل ({payments.length})
+            </button>
+            <button
+              onClick={() => setDateFilter("today")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                dateFilter === "today" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              تسديدات اليوم 📅
+            </button>
+            <button
+              onClick={() => setDateFilter("week")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                dateFilter === "week" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              هذا الأسبوع 🗓️
+            </button>
+            <button
+              onClick={() => setDateFilter("month")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                dateFilter === "month" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              هذا الشهر 📊
+            </button>
+          </div>
         </div>
+
+        {dateFilter !== "all" && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex justify-between items-center text-xs font-bold text-emerald-600 dark:text-emerald-400">
+            <span>
+              مجموع التحصيل {dateFilter === "today" ? "لليوم" : dateFilter === "week" ? "لهذا الأسبوع" : "لهذا الشهر"}:
+            </span>
+            <span className="font-mono text-sm font-black dir-ltr">{currentFilteredSum.toLocaleString()} د.ع</span>
+          </div>
+        )}
 
         {filteredPayments.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground font-bold space-y-2">
-            <p className="text-sm">لا توجد دفعات مستلمة مسجلة</p>
+            <p className="text-sm">لا توجد دفعات مستلمة مسجلة في هذا النطاق الزمني</p>
             <p className="text-xs">اضغط على زر "تسجيل دفعة جديدة" للبدء في تحصيل الأقساط.</p>
           </div>
         ) : (
@@ -368,7 +586,7 @@ export default function AccountsPage() {
                   <th className="p-3">المنتج / القسط</th>
                   <th className="p-3">عن فترة/تاريخ</th>
                   <th className="p-3">المبلغ المستلم</th>
-                  <th className="p-3">تاريخ التحصيل</th>
+                  <th className="p-3">تاريخ التحصيل (من الأحدث للأقدم)</th>
                   <th className="p-3 rounded-l-xl text-center">إجراءات</th>
                 </tr>
               </thead>
@@ -392,7 +610,7 @@ export default function AccountsPage() {
                     <td className="p-3 text-foreground font-mono">
                       <div className="flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-orange-500" />
-                        <span>{p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ", { year: "numeric", month: "numeric", day: "numeric" }) : "غير محدد"}</span>
+                        <span className="font-bold text-orange-500">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ", { year: "numeric", month: "numeric", day: "numeric" }) : "غير محدد"}</span>
                       </div>
                     </td>
                     <td className="p-3 text-center">
@@ -409,7 +627,6 @@ export default function AccountsPage() {
         )}
       </div>
 
-      {/* 🌟 نافذة تسجيل دفعة جديدة */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 md:p-4">
@@ -480,39 +697,121 @@ export default function AccountsPage() {
                   <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-2xl space-y-1 text-xs">
                     <p className="text-foreground font-bold"><span>اسم العميل:</span> {selectedInstallment.customerName}</p>
                     <p className="text-foreground font-bold"><span>المنتج:</span> {selectedInstallment.productName}</p>
-                    <p className="text-orange-500 font-extrabold">المبلغ المفترض: {Math.round(selectedInstallment.monthlyInstallment || 0).toLocaleString()} د.ع</p>
+                    <p className="text-orange-500 font-extrabold">المبلغ المفترض للقسط الواحد: {Math.round(selectedInstallment.monthlyInstallment || 0).toLocaleString()} د.ع</p>
                   </div>
                 )}
 
-                <div className="relative">
-                  <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-orange-500" />
-                    <span>الدفعة تخص أي تاريخ / فترة؟ ({periodLabel})</span>
-                  </label>
+                <div>
+                  <label className="block text-xs font-bold text-muted-foreground mb-1.5">طريقة التسديد والدفع</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("cash")}
+                      className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMethod === "cash"
+                          ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                          : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <Coins className="w-4 h-4" />
+                      <span>نقدي 💵</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDatePicker(!showDatePicker);
-                      setDatePickerStep("months");
-                    }}
-                    className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm cursor-pointer"
-                  >
-                    <span className={targetMonth ? "text-foreground font-mono" : "text-muted-foreground"}>
-                      {targetMonth ? targetMonth : `اختر تاريخ الاستحقاق الـ${periodLabel}...`}
-                    </span>
-                    <Calendar className="w-4 h-4 text-orange-500" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("pos")}
+                      className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMethod === "pos"
+                          ? "bg-blue-500/15 border-blue-500 text-blue-600 dark:text-blue-400 shadow-sm"
+                          : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>جهاز POS 💳</span>
+                    </button>
 
-                  <AnimatePresence>
-                    {showDatePicker && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute z-[10002] mt-2 w-full bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
-                      >
-                        {datePickerStep === "months" && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("transfer")}
+                      className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMethod === "transfer"
+                          ? "bg-purple-500/15 border-purple-500 text-purple-600 dark:text-purple-400 shadow-sm"
+                          : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>زين كاش/كارت 📱</span>
+                    </button>
+                  </div>
+                </div>
+
+                {posStatusText && (
+                  <div className="p-3 bg-blue-500/10 text-blue-600 rounded-2xl text-xs font-bold border border-blue-500/20 flex items-center gap-2 animate-pulse">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{posStatusText}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-muted-foreground mb-1.5">نوع وعمق عملية التسديد</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMode("single")}
+                      className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMode === "single"
+                          ? "bg-orange-500/15 border-orange-500 text-orange-600 dark:text-orange-400"
+                          : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <Calendar className="w-4 h-4" />
+                      <span>تاريخ قسط واحد</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMode("range")}
+                      className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMode === "range"
+                          ? "bg-orange-500/15 border-orange-500 text-orange-600 dark:text-orange-400"
+                          : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                      }`}
+                    >
+                      <Layers className="w-4 h-4" />
+                      <span>تسديد عدة فترات (من - إلى)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {paymentMode === "single" ? (
+                  <div className="relative">
+                    <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-orange-500" />
+                      <span>الدفعة تخص أي تاريخ / فترة؟ ({periodLabel})</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDatePicker(!showDatePicker);
+                        setDatePickerStep("months");
+                      }}
+                      className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm cursor-pointer"
+                    >
+                      <span className={targetMonth ? "text-foreground font-mono" : "text-muted-foreground"}>
+                        {targetMonth ? targetMonth : `اختر تاريخ الاستحقاق الـ${periodLabel}...`}
+                      </span>
+                      <Calendar className="w-4 h-4 text-orange-500" />
+                    </button>
+
+                    <AnimatePresence>
+                      {showDatePicker && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute z-[10002] mt-2 w-full bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                        >
                           <div className="space-y-3">
                             <div className="flex items-center justify-between border-b border-border/50 pb-2">
                               <button
@@ -535,20 +834,7 @@ export default function AccountsPage() {
                             </div>
 
                             <div className="grid grid-cols-3 gap-2 pt-1">
-                              {[
-                                { num: "01", name: "شهر 1" },
-                                { num: "02", name: "شهر 2" },
-                                { num: "03", name: "شهر 3" },
-                                { num: "04", name: "شهر 4" },
-                                { num: "05", name: "شهر 5" },
-                                { num: "06", name: "شهر 6" },
-                                { num: "07", name: "شهر 7" },
-                                { num: "08", name: "شهر 8" },
-                                { num: "09", name: "شهر 9" },
-                                { num: "10", name: "شهر 10" },
-                                { num: "11", name: "شهر 11" },
-                                { num: "12", name: "شهر 12" },
-                              ].map((m) => {
+                              {monthsList.map((m) => {
                                 const monthString = `${selectedYear}-${m.num}`;
                                 const isSelected = targetMonth === monthString;
                                 return (
@@ -556,13 +842,8 @@ export default function AccountsPage() {
                                     key={m.num}
                                     type="button"
                                     onClick={() => {
-                                      if (selectedInstallment?.paymentPeriod === "daily" || selectedInstallment?.paymentPeriod === "weekly") {
-                                        setSelectedMonthObj(m);
-                                        setDatePickerStep("days");
-                                      } else {
-                                        setTargetMonth(monthString);
-                                        setShowDatePicker(false);
-                                      }
+                                      setTargetMonth(monthString);
+                                      setShowDatePicker(false);
                                     }}
                                     className={`p-2.5 rounded-2xl text-xs font-bold transition-all ${
                                       isSelected
@@ -576,60 +857,146 @@ export default function AccountsPage() {
                               })}
                             </div>
                           </div>
-                        )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative">
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">من شهر / فترة</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowStartPicker(!showStartPicker);
+                          setShowEndPicker(false);
+                        }}
+                        className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm"
+                      >
+                        <span className={rangeStartDate ? "text-foreground font-mono" : "text-muted-foreground"}>
+                          {rangeStartDate || "اختر البداية..."}
+                        </span>
+                        <Calendar className="w-4 h-4 text-orange-500" />
+                      </button>
 
-                        {datePickerStep === "days" && selectedMonthObj && (
-                          <div className="space-y-3">
+                      <AnimatePresence>
+                        {showStartPicker && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute z-[10002] mt-2 w-64 right-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                          >
                             <div className="flex items-center justify-between border-b border-border/50 pb-2">
                               <button
                                 type="button"
-                                onClick={() => setDatePickerStep("months")}
-                                className="p-1 rounded-xl bg-secondary text-foreground hover:text-orange-500 font-bold text-xs flex items-center gap-1"
+                                onClick={() => setStartYear((y) => y - 1)}
+                                className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs"
                               >
-                                <ArrowRight className="w-3.5 h-3.5" />
-                                <span>رجوع للأشهر</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
                               </button>
-                              <span className="font-mono font-bold text-xs text-orange-500">
-                                {selectedYear} - {selectedMonthObj.name}
-                              </span>
+                              <span className="font-mono font-bold text-xs text-orange-500">{startYear}</span>
+                              <button
+                                type="button"
+                                onClick={() => setStartYear((y) => y + 1)}
+                                className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
                             </div>
 
-                            <p className="text-[10px] text-muted-foreground font-bold text-center">اضغط على اليوم المطلوب للتحديد مباشرة:</p>
-
-                            <div className="grid grid-cols-7 gap-1.5 max-h-48 overflow-y-auto p-1">
-                              {Array.from({ length: daysInSelectedMonth }, (_, i) => {
-                                const dayNumStr = String(i + 1).padStart(2, "0");
-                                const fullDateStr = `${selectedYear}-${selectedMonthObj.num}-${dayNumStr}`;
-                                const isSelected = targetMonth === fullDateStr;
-
+                            <div className="grid grid-cols-3 gap-2">
+                              {monthsList.map((m) => {
+                                const mStr = `${startYear}-${m.num}`;
                                 return (
                                   <button
-                                    key={i}
+                                    key={m.num}
                                     type="button"
                                     onClick={() => {
-                                      setTargetMonth(fullDateStr);
-                                      setShowDatePicker(false);
+                                      setRangeStartDate(mStr);
+                                      setShowStartPicker(false);
                                     }}
-                                    className={`p-2 rounded-xl text-xs font-mono font-bold transition-all ${
-                                      isSelected
-                                        ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20"
-                                        : "bg-secondary/60 hover:bg-orange-500/10 text-foreground hover:text-orange-500"
-                                    }`}
+                                    className="p-2 rounded-xl text-xs font-bold bg-secondary/50 hover:bg-orange-500/10 hover:text-orange-500 text-foreground"
                                   >
-                                    {i + 1}
+                                    {m.name}
                                   </button>
                                 );
                               })}
                             </div>
-                          </div>
+                          </motion.div>
                         )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                      </AnimatePresence>
+                    </div>
+
+                    <div className="relative">
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">إلى شهر / فترة</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEndPicker(!showEndPicker);
+                          setShowStartPicker(false);
+                        }}
+                        className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm"
+                      >
+                        <span className={rangeEndDate ? "text-foreground font-mono" : "text-muted-foreground"}>
+                          {rangeEndDate || "اختر النهاية..."}
+                        </span>
+                        <Calendar className="w-4 h-4 text-orange-500" />
+                      </button>
+
+                      <AnimatePresence>
+                        {showEndPicker && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute z-[10002] mt-2 w-64 left-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                          >
+                            <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                              <button
+                                type="button"
+                                onClick={() => setEndYear((y) => y - 1)}
+                                className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs"
+                              >
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="font-mono font-bold text-xs text-orange-500">{endYear}</span>
+                              <button
+                                type="button"
+                                onClick={() => setEndYear((y) => y + 1)}
+                                className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2">
+                              {monthsList.map((m) => {
+                                const mStr = `${endYear}-${m.num}`;
+                                return (
+                                  <button
+                                    key={m.num}
+                                    type="button"
+                                    onClick={() => {
+                                      setRangeEndDate(mStr);
+                                      setShowEndPicker(false);
+                                    }}
+                                    className="p-2 rounded-xl text-xs font-bold bg-secondary/50 hover:bg-orange-500/10 hover:text-orange-500 text-foreground"
+                                  >
+                                    {m.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                )}
 
                 <div>
-                  <label className="block text-xs font-bold text-muted-foreground mb-1">المبلغ المستلم (د.ع)</label>
+                  <label className="block text-xs font-bold text-muted-foreground mb-1">المبلغ الإجمالي المستلم (د.ع)</label>
                   <input
                     type="number"
                     required
@@ -647,7 +1014,7 @@ export default function AccountsPage() {
                     <span>ملاحظات الدفعة (اختياري)</span>
                   </label>
                   <textarea
-                    placeholder="اكتب أي ملاحظة تخص هذا القسط (مثال: تعثر مالي، تم دفع جزء من المبلغ...)"
+                    placeholder="اكتب أي ملاحظة تخص هذا القسط..."
                     value={paymentNotes}
                     onChange={(e) => setPaymentNotes(e.target.value)}
                     rows={2}
@@ -660,6 +1027,7 @@ export default function AccountsPage() {
                     type="button"
                     onClick={() => setIsModalOpen(false)}
                     className="flex-1 py-3 bg-secondary border border-border text-foreground font-bold rounded-2xl hover:bg-secondary/80 transition-colors text-xs"
+                    disabled={submitting}
                   >
                     إلغاء
                   </button>
@@ -668,8 +1036,7 @@ export default function AccountsPage() {
                     disabled={submitting || !selectedInstallmentId}
                     className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-2xl hover:opacity-95 transition-opacity flex items-center justify-center gap-2 text-xs shadow-md shadow-orange-500/20 disabled:opacity-50"
                   >
-                    {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                    <span>تأكيد التسديد</span>
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>تأكيد التسديد</span>}
                   </button>
                 </div>
               </form>
@@ -678,7 +1045,6 @@ export default function AccountsPage() {
         )}
       </AnimatePresence>
 
-      {/* نافذة تعديل دفعة */}
       <AnimatePresence>
         {isEditModalOpen && editingPayment && (
           <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 md:p-4">

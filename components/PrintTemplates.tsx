@@ -90,7 +90,7 @@ export const ContractPrintTemplate = React.forwardRef<
 
   return (
     <div ref={ref} className="p-8 bg-white text-black font-sans space-y-6 text-right dir-rtl leading-relaxed">
-      <div className="border-b-2 border-black pb-4 mb-4">
+      <div className="border-b-2 border-slate-900 pb-4 mb-4">
         <div className="flex justify-between items-center gap-4">
           <div className="w-32 h-20 flex items-center justify-start shrink-0">
             {storeInfo.logo ? (
@@ -104,7 +104,7 @@ export const ContractPrintTemplate = React.forwardRef<
           </div>
 
           <div className="text-center flex-1 space-y-1">
-            <h1 className="text-2xl font-black tracking-normal text-black">{storeInfo.name}</h1>
+            <h1 className="text-2xl font-black text-black">{storeInfo.name}</h1>
             <h2 className="text-xl font-bold text-gray-800">عقد بيع بالتقسيط والتزام تسديد</h2>
             <p className="text-xs text-gray-600 font-normal">تاريخ المحرر: {new Date().toLocaleDateString("ar-IQ")}</p>
           </div>
@@ -113,54 +113,62 @@ export const ContractPrintTemplate = React.forwardRef<
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 text-sm border p-4 rounded-lg bg-gray-50 border-gray-300">
+      <div className="grid grid-cols-2 gap-4 text-sm border border-slate-400 p-4 rounded-lg bg-slate-50">
         <div>
-          <p className="font-bold text-gray-900 mb-1">الطرف الأول (الدائن / البائع):</p>
+          <p className="font-bold text-slate-900 mb-1">الطرف الأول (الدائن / البائع):</p>
           <p className="font-semibold">{storeInfo.name}</p>
-          {storeInfo.phone && <p>الهاتف: <span className="font-bold dir-ltr inline-block">{storeInfo.phone}</span></p>}
+          {storeInfo.phone && (
+            <p>
+              الهاتف: <span className="font-bold inline-block" dir="ltr" style={{ direction: "ltr", unicodeBidi: "isolate" }}>{storeInfo.phone}</span>
+            </p>
+          )}
           {storeInfo.address && <p>العنوان: {storeInfo.address}</p>}
         </div>
         <div>
-          <p className="font-bold text-gray-900 mb-1">الطرف الثاني (المدين / العميل):</p>
+          <p className="font-bold text-slate-900 mb-1">الطرف الثاني (المدين / العميل):</p>
           <p>الاسم: <span className="font-bold">{installment.customerName}</span></p>
-          <p>رقم الهاتف: <span className="font-bold dir-ltr inline-block">{installment.phoneNumber}</span></p>
+          <p>
+            رقم الهاتف: <span className="font-bold inline-block" dir="ltr" style={{ direction: "ltr", unicodeBidi: "isolate" }}>{installment.phoneNumber}</span>
+          </p>
           <p>العنوان: {installment.address || "غير محدد"}</p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <h3 className="font-bold text-base border-b border-gray-400 pb-1">تفاصيل المباع وخطة التقسيط:</h3>
-        <table className="w-full text-sm border-collapse border border-gray-300 text-center">
-          <thead className="bg-gray-100">
+        <h3 className="font-bold text-base border-b border-slate-400 pb-1">تفاصيل المباع وخطة التقسيط:</h3>
+        <table className="w-full text-sm border-collapse border border-slate-400 text-center">
+          <thead className="bg-slate-100">
             <tr>
-              <th className="border border-gray-300 p-2">اسم المادة / المنتج</th>
-              <th className="border border-gray-300 p-2">السعر الكلي</th>
-              <th className="border border-gray-300 p-2">المقدمة</th>
-              <th className="border border-gray-300 p-2">المتبقي للتقسيط</th>
-              <th className="border border-gray-300 p-2">نوع القسط</th>
-              <th className="border border-gray-300 p-2">مبلغ القسط</th>
+              <th className="border border-slate-400 p-2">اسم المادة / المنتج</th>
+              <th className="border border-slate-400 p-2">السعر الكلي</th>
+              <th className="border border-slate-400 p-2">المقدمة</th>
+              <th className="border border-slate-400 p-2">المتبقي للتقسيط</th>
+              <th className="border border-slate-400 p-2">نوع القسط</th>
+              <th className="border border-slate-400 p-2">مبلغ القسط</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td className="border border-gray-300 p-2 font-bold">{installment.productName}</td>
-              <td className="border border-gray-300 p-2">{Math.round(installment.productPrice).toLocaleString()} د.ع</td>
-              <td className="border border-gray-300 p-2">{Math.round(installment.downPayment).toLocaleString()} د.ع</td>
-              <td className="border border-gray-300 p-2 font-bold">{Math.round(installment.totalDue).toLocaleString()} د.ع</td>
-              <td className="border border-gray-300 p-2">{periodLabel}</td>
-              <td className="border border-gray-300 p-2 font-bold text-lg">{Math.round(installment.monthlyInstallment).toLocaleString()} د.ع</td>
+              <td className="border border-slate-400 p-2 font-bold">{installment.productName}</td>
+              <td className="border border-slate-400 p-2">{Math.round(installment.productPrice).toLocaleString()} د.ع</td>
+              <td className="border border-slate-400 p-2">{Math.round(installment.downPayment).toLocaleString()} د.ع</td>
+              <td className="border border-slate-400 p-2 font-bold">{Math.round(installment.totalDue).toLocaleString()} د.ع</td>
+              <td className="border border-slate-400 p-2">{periodLabel}</td>
+              <td className="border border-slate-400 p-2 font-bold text-lg">{Math.round(installment.monthlyInstallment).toLocaleString()} د.ع</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div className="border p-4 rounded-lg border-gray-300 space-y-1 text-sm">
-        <p className="font-bold text-gray-900">بيانات الكفيل الضامن:</p>
+      <div className="border border-slate-400 p-4 rounded-lg space-y-1 text-sm bg-white">
+        <p className="font-bold text-slate-900">بيانات الكفيل الضامن:</p>
         <p>اسم الكفيل: <span className="font-bold">{installment.guarantorName || "لا يوجد"}</span></p>
-        <p>رقم هاتف الكفيل: <span className="font-bold dir-ltr inline-block">{installment.guarantorPhone || "لا يوجد"}</span></p>
+        <p>
+          رقم هاتف الكفيل: <span className="font-bold inline-block" dir="ltr" style={{ direction: "ltr", unicodeBidi: "isolate" }}>{installment.guarantorPhone || "لا يوجد"}</span>
+        </p>
       </div>
 
-      <div className="space-y-1 text-xs text-gray-800 leading-normal border-t pt-3">
+      <div className="space-y-1 text-xs text-gray-800 leading-normal border-t border-slate-400 pt-3">
         <p className="font-bold">الشروط والتعهدات:</p>
         {storeInfo.terms.map((term, index) => (
           <p key={index}>{term}</p>
@@ -233,7 +241,7 @@ export const PaymentReceiptPrintTemplate = React.forwardRef<
     : new Date().toLocaleDateString("ar-IQ");
 
   return (
-    <div ref={ref} className="p-6 bg-white text-black font-sans space-y-4 max-w-sm mx-auto text-right dir-rtl border-2 border-dashed border-gray-400 rounded-xl">
+    <div ref={ref} className="p-6 bg-white text-black font-sans space-y-4 max-w-sm mx-auto text-right dir-rtl border border-dashed border-slate-400 rounded-xl">
       <div className="text-center border-b pb-3 space-y-1">
         {storeInfo.logo && (
           <div className="flex justify-center mb-2">
@@ -262,12 +270,12 @@ export const PaymentReceiptPrintTemplate = React.forwardRef<
         {payment.targetMonth && (
           <div className="flex justify-between">
             <span className="text-gray-600">عن فترة / شهر:</span>
-            <span className="font-bold">{payment.targetMonth}</span>
+            <span className="font-bold" dir="ltr">{payment.targetMonth}</span>
           </div>
         )}
       </div>
 
-      <div className="bg-gray-100 p-3 rounded-lg text-center border border-gray-300">
+      <div className="bg-gray-100 p-3 rounded-lg text-center border border-slate-300">
         <p className="text-xs text-gray-600">المبلغ المقبوض</p>
         <p className="text-2xl font-black text-black">
           {Math.round(payment.amount).toLocaleString()} د.ع
@@ -275,14 +283,14 @@ export const PaymentReceiptPrintTemplate = React.forwardRef<
       </div>
 
       {payment.notes && (
-        <p className="text-[11px] text-gray-600 bg-gray-50 p-2 rounded border">
+        <p className="text-[11px] text-gray-600 bg-gray-50 p-2 rounded border border-slate-300">
           <span className="font-bold">ملاحظات:</span> {payment.notes}
         </p>
       )}
 
       <div className="pt-4 text-center text-xs space-y-2">
         <p className="font-bold">شكراً لتسديدكم في الموعد المحدد!</p>
-        <div className="flex justify-between text-[10px] text-gray-500 pt-2 border-t">
+        <div className="flex justify-between text-[10px] text-gray-500 pt-2 border-t border-slate-300">
           <span>توقيع الموظف المستلم</span>
           <span>توقيع المسدد</span>
         </div>
@@ -374,7 +382,7 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
         }
       `}</style>
 
-      {/* 🖼️ الهيدر الاحترافي مع تكبير وتوسيط اللوجو */}
+      {/* الهيدر الأنيق الأصلي */}
       <div className="border-b-2 border-black pb-4 mb-4">
         <div className="flex justify-between items-center gap-4">
           <div className="w-36 h-20 flex items-center justify-start shrink-0">
@@ -400,25 +408,27 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
         </div>
       </div>
 
-      {/* 👤 تفاصيل العميل والملخص المالي مرتبة بأعمدة واضحة بدون خطوط مطاطية */}
-      <div className="grid grid-cols-2 gap-6 text-sm border p-4 rounded-xl bg-gray-50 border-gray-300">
+      {/* تفاصيل العميل والملخص المالي بأسلوبه الناعم مع حدود متناسقة وواضحة */}
+      <div className="grid grid-cols-2 gap-6 text-sm border p-4 rounded-xl bg-gray-50 border-slate-400">
         <div className="space-y-1.5">
-          <p className="text-gray-500 text-xs font-semibold">بيانات العميل:</p>
+          <p className="text-gray-600 text-xs font-semibold">بيانات العميل:</p>
           <p className="font-bold text-base text-black">{customer.customerName}</p>
-          <p className="text-xs text-gray-700">رقم الهاتف: <span className="font-bold dir-ltr inline-block text-black">{customer.phoneNumber}</span></p>
-          {customer.address && <p className="text-xs text-gray-700">العنوان: {customer.address}</p>}
+          <p className="text-xs text-gray-800 font-medium">
+            رقم الهاتف: <span className="font-bold inline-block text-black" dir="ltr" style={{ direction: "ltr", unicodeBidi: "isolate" }}>{customer.phoneNumber}</span>
+          </p>
+          {customer.address && <p className="text-xs text-gray-800 font-medium">العنوان: {customer.address}</p>}
         </div>
 
-        <div className="space-y-1.5 text-left border-r pr-6 border-gray-300">
+        <div className="space-y-1.5 text-left border-r pr-6 border-slate-400">
           <div className="flex justify-between items-center">
-            <span className="text-xs text-gray-600 font-semibold">إجمالي المطلوب للتقسيط:</span>
+            <span className="text-xs text-gray-700 font-semibold">إجمالي المطلوب للتقسيط:</span>
             <span className="font-bold text-sm text-black">{Math.round(calculatedTotalOriginalDue || customer.totalOriginalDue).toLocaleString()} د.ع</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-xs text-gray-600 font-semibold">المبلغ المسدد فعلياً:</span>
+            <span className="text-xs text-gray-700 font-semibold">المبلغ المسدد فعلياً:</span>
             <span className="font-bold text-sm text-emerald-700">{Math.round(customer.totalPaid).toLocaleString()} د.ع</span>
           </div>
-          <div className="flex justify-between items-center pt-1 border-t border-gray-200">
+          <div className="flex justify-between items-center pt-1 border-t border-slate-300">
             <span className="text-xs text-gray-900 font-bold">المتبقي الذمة المالية:</span>
             <span className="font-black text-base text-rose-700">{Math.round(calculatedTotalRemaining || customer.totalRemaining).toLocaleString()} د.ع</span>
           </div>
@@ -427,26 +437,26 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
 
       <div className="space-y-2">
         <h3 className="font-bold text-sm border-b pb-1 text-black">المواد والأقساط المسجلة:</h3>
-        <table className="w-full text-xs border-collapse border border-gray-300 text-center">
-          <thead className="bg-gray-100 font-bold text-black">
+        <table className="w-full text-xs border-collapse border border-slate-400 text-center">
+          <thead className="bg-slate-100 font-bold text-black">
             <tr>
-              <th className="border border-gray-300 p-2.5">#</th>
-              <th className="border border-gray-300 p-2.5">اسم المادة / المنتج</th>
-              <th className="border border-gray-300 p-2.5">السعر الكلي</th>
-              <th className="border border-gray-300 p-2.5">المقدمة</th>
-              <th className="border border-gray-300 p-2.5">نوع القسط</th>
-              <th className="border border-gray-300 p-2.5">مبلغ القسط</th>
+              <th className="border border-slate-400 p-2.5">#</th>
+              <th className="border border-slate-400 p-2.5">اسم المادة / المنتج</th>
+              <th className="border border-slate-400 p-2.5">السعر الكلي</th>
+              <th className="border border-slate-400 p-2.5">المقدمة</th>
+              <th className="border border-slate-400 p-2.5">نوع القسط</th>
+              <th className="border border-slate-400 p-2.5">مبلغ القسط</th>
             </tr>
           </thead>
           <tbody>
             {customer.installments.map((inst, idx) => (
               <tr key={idx} className="hover:bg-gray-50">
-                <td className="border border-gray-300 p-2">{idx + 1}</td>
-                <td className="border border-gray-300 p-2 font-bold text-black">{inst.productName}</td>
-                <td className="border border-gray-300 p-2">{Math.round(inst.productPrice).toLocaleString()} د.ع</td>
-                <td className="border border-gray-300 p-2">{Math.round(inst.downPayment).toLocaleString()} د.ع</td>
-                <td className="border border-gray-300 p-2">{inst.paymentPeriod === "daily" ? "يومي" : inst.paymentPeriod === "weekly" ? "أسبوعي" : "شهري"}</td>
-                <td className="border border-gray-300 p-2 font-bold text-black">{Math.round(inst.monthlyInstallment).toLocaleString()} د.ع</td>
+                <td className="border border-slate-400 p-2">{idx + 1}</td>
+                <td className="border border-slate-400 p-2 font-bold text-black">{inst.productName}</td>
+                <td className="border border-slate-400 p-2">{Math.round(inst.productPrice).toLocaleString()} د.ع</td>
+                <td className="border border-slate-400 p-2">{Math.round(inst.downPayment).toLocaleString()} د.ع</td>
+                <td className="border border-slate-400 p-2">{inst.paymentPeriod === "daily" ? "يومي" : inst.paymentPeriod === "weekly" ? "أسبوعي" : "شهري"}</td>
+                <td className="border border-slate-400 p-2 font-bold text-black">{Math.round(inst.monthlyInstallment).toLocaleString()} د.ع</td>
               </tr>
             ))}
           </tbody>
@@ -457,24 +467,24 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
         <div className="space-y-2 pt-2">
           <h3 className="font-bold text-sm border-b pb-1 text-black">سجل التسديدات والمقبوضات التفصيلي:</h3>
           {payments.length > 0 ? (
-            <table className="w-full text-xs border-collapse border border-gray-300 text-center">
-              <thead className="bg-gray-100 font-bold text-black">
+            <table className="w-full text-xs border-collapse border border-slate-400 text-center">
+              <thead className="bg-slate-100 font-bold text-black">
                 <tr>
-                  <th className="border border-gray-300 p-2.5">#</th>
-                  <th className="border border-gray-300 p-2.5">تاريخ التسديد</th>
-                  <th className="border border-gray-300 p-2.5">المادة</th>
-                  <th className="border border-gray-300 p-2.5">المبلغ المقبوض</th>
-                  <th className="border border-gray-300 p-2.5">ملاحظات</th>
+                  <th className="border border-slate-400 p-2.5">#</th>
+                  <th className="border border-slate-400 p-2.5">تاريخ التسديد</th>
+                  <th className="border border-slate-400 p-2.5">المادة</th>
+                  <th className="border border-slate-400 p-2.5">المبلغ المقبوض</th>
+                  <th className="border border-slate-400 p-2.5">ملاحظات</th>
                 </tr>
               </thead>
               <tbody>
                 {payments.map((p, idx) => (
                   <tr key={idx}>
-                    <td className="border border-gray-300 p-2">{idx + 1}</td>
-                    <td className="border border-gray-300 p-2 dir-ltr">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ") : "-"}</td>
-                    <td className="border border-gray-300 p-2">{p.productName || "قسط"}</td>
-                    <td className="border border-gray-300 p-2 font-bold text-emerald-700">{Math.round(p.amount).toLocaleString()} د.ع</td>
-                    <td className="border border-gray-300 p-2">{p.notes || "-"}</td>
+                    <td className="border border-slate-400 p-2">{idx + 1}</td>
+                    <td className="border border-slate-400 p-2" dir="ltr">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("ar-IQ") : "-"}</td>
+                    <td className="border border-slate-400 p-2">{p.productName || "قسط"}</td>
+                    <td className="border border-slate-400 p-2 font-bold text-emerald-700">{Math.round(p.amount).toLocaleString()} د.ع</td>
+                    <td className="border border-slate-400 p-2">{p.notes || "-"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -485,7 +495,7 @@ export const CustomerStatementPrintTemplate = React.forwardRef<
         </div>
       )}
 
-      <div className="flex justify-between items-center text-xs border-t border-gray-400 pt-6 mt-8 font-semibold">
+      <div className="flex justify-between items-center text-xs border-t border-slate-400 pt-6 mt-8 font-semibold">
         <p>تم استخراج هذا المستند تلقائياً من {storeInfo.name}.</p>
         <p>ختم / توقيع إدارة المكتب: ....................</p>
       </div>

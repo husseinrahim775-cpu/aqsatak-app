@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, Suspense } from "react";
 import { 
   ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, 
-  Search, Clock, Package, Camera, FileText, Image as ImageIcon, CheckCircle2, Sparkles 
+  Search, Clock, Package, Camera, FileText, Image as ImageIcon, Sparkles 
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -17,7 +17,7 @@ import {
   InstallmentData, 
   InventoryItem 
 } from "@/services/firestore";
-import { useAuth } from "../../../components/AuthProvider";
+import { useAuth } from "@/components/AuthProvider";
 import { toast } from "sonner";
 
 interface ExistingCustomer {
@@ -139,15 +139,13 @@ function NewInstallmentContent() {
       const formattedTitle = `${product.title} ${
         product.specs?.chassisNumber ? `(شاصي: ${product.specs.chassisNumber})` : ""
       }`;
-      const cost = product.price;
+      const cost = product.costPrice || product.price;
 
       setFormData((prev) => ({
         ...prev,
         productName: formattedTitle,
         purchasePrice: cost,
-        productPrice: prev.profitMargin !== "" && cost > 0 
-          ? cost + cost * (Number(prev.profitMargin) / 100) 
-          : cost,
+        productPrice: product.price || (cost + cost * (Number(prev.profitMargin) / 100)),
       }));
     }
   };
@@ -303,7 +301,10 @@ function NewInstallmentContent() {
         personalPhotoUrl = await compressAndConvertToBase64(personalPhotoFile);
       }
 
-      const payload: Omit<InstallmentData, "id" | "createdAt"> = {
+      const isDirectSale = !selectedProductId;
+      const costPriceNum = Number(formData.purchasePrice) || 0;
+
+      const payload: Omit<InstallmentData, "id" | "createdAt"> & { purchasePrice?: number; costPrice?: number; isDirectSale?: boolean } = {
         userId: user.uid,
         customerName: formData.customerName,
         phoneNumber: formData.phoneNumber,
@@ -312,6 +313,9 @@ function NewInstallmentContent() {
         guarantorPhone: formData.guarantorPhone,
         productName: formData.productName,
         productPrice: Number(formData.productPrice) || 0,
+        purchasePrice: costPriceNum,
+        costPrice: costPriceNum,
+        isDirectSale: isDirectSale,
         downPayment: Number(formData.downPayment) || 0,
         profitMargin: Number(formData.profitMargin) || 0,
         months: calculation.calculatedMonths || 1,
@@ -339,7 +343,7 @@ function NewInstallmentContent() {
           );
         }
 
-        toast.success("تم حفظ بيانات القسط والأوراق الثبوتية بنجاح!");
+        toast.success("تم حفظ العقد وتوثيقه وخصم تكلفة الشراء من الخزينة تلقائياً!");
         router.push("/customers");
       } else {
         toast.error("حدث خطأ أثناء الحفظ، يرجى المحاولة مرة أخرى.");
@@ -362,7 +366,6 @@ function NewInstallmentContent() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="max-w-4xl mx-auto space-y-6 pb-12 font-sans dir-rtl text-right"
     >
-      {/* 1. ترويسة الصفحة العصرية بأسلوب  Glass Style */}
       <div className="flex items-center justify-between bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div className="flex items-center gap-3.5">
           <Link
@@ -388,7 +391,6 @@ function NewInstallmentContent() {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           
-          {/* قسم بيانات العميل */}
           <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4 relative">
             <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <User className="w-5 h-5" />
@@ -413,7 +415,6 @@ function NewInstallmentContent() {
                 <Search className="w-4 h-4 text-muted-foreground absolute left-3.5 top-4" />
               </div>
 
-              {/* اقتراحات العميل  Dropdown */}
               <AnimatePresence>
                 {showSuggestions && filteredSuggestions.length > 0 && (
                   <motion.div 
@@ -464,7 +465,6 @@ function NewInstallmentContent() {
             </div>
           </div>
 
-          {/* قسم بيانات الكفيل */}
           <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-purple-500 border-b border-border/60 pb-3">
               <ShieldCheck className="w-5 h-5" />
@@ -494,7 +494,6 @@ function NewInstallmentContent() {
             </div>
           </div>
 
-          {/* 📸 قسم مرفقات الأوراق الثبوتية والعقد  Cards */}
           <div className="md:col-span-2 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <Camera className="w-5 h-5" />
@@ -502,8 +501,6 @@ function NewInstallmentContent() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              
-              {/* صورة الهوية */}
               <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
                 <ImageIcon className="w-8 h-8 text-orange-500 mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الهوية / البطاقة الموحدة</span>
@@ -523,7 +520,6 @@ function NewInstallmentContent() {
                 {idCardFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{idCardFile.name}</p>}
               </div>
 
-              {/* العقد الورقي */}
               <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
                 <FileText className="w-8 h-8 text-orange-500 mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة العقد الورقي الموقّع</span>
@@ -543,7 +539,6 @@ function NewInstallmentContent() {
                 {contractFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{contractFile.name}</p>}
               </div>
 
-              {/* صورة الزبون */}
               <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-orange-500/50 transition-colors bg-secondary/20">
                 <User className="w-8 h-8 text-orange-500 mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
@@ -562,18 +557,15 @@ function NewInstallmentContent() {
                 </label>
                 {personalPhotoFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{personalPhotoFile.name}</p>}
               </div>
-
             </div>
           </div>
 
-          {/* قسم تفاصيل المنتج والتقسيط */}
           <div className="md:col-span-2 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-3">
               <Box className="w-5 h-5" />
               <h2 className="font-extrabold text-base">تفاصيل السلعة وخطة التسديد</h2>
             </div>
 
-            {/* ربط مادة من المخزن  Select Box */}
             <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-2">
               <label className="text-xs font-bold text-orange-600 dark:text-orange-400 flex items-center gap-2">
                 <Package className="w-4 h-4" /> اختر مادة متوفرة بالمخزن المالي (تعبئة تلقائية للأسعار)
@@ -732,7 +724,6 @@ function NewInstallmentContent() {
           </div>
         </div>
 
-        {/* 5. كارت النتائج الحسابية البارز  Hero Calculation Box */}
         <div className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-3xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center text-center md:text-right gap-6 shadow-xl shadow-orange-500/20 relative overflow-hidden">
           <Calculator className="absolute opacity-10 w-52 h-52 left-[-20px] top-[-20px] pointer-events-none" />
 
@@ -771,7 +762,6 @@ function NewInstallmentContent() {
           </div>
         </div>
 
-        {/* 6. زر الحفظ الرئيسي */}
         <div className="flex justify-end pt-2">
           <motion.button
             whileHover={{ scale: 1.02 }}
