@@ -476,10 +476,13 @@ export default function SettingsPage() {
     }
   };
 
+  // ☁️ دالة الرفع الذكي إلى Google Drive (تحديث نفس ملف اليوم بدلاً من تكرار النسخ)
   const handleUploadToGoogleDrive = async (isSilent = false) => {
     const ownerUid = getOwnerUid();
     const googleAccessToken = localStorage.getItem("google_drive_access_token");
     if (!ownerUid || !googleAccessToken) return;
+
+    if (uploadingToDrive) return; // منع التزامن المتعدد بنفس اللحظة
 
     try {
       if (!isSilent) setUploadingToDrive(true);
@@ -500,25 +503,62 @@ export default function SettingsPage() {
         inventory,
       };
 
-      const fileName = `aqsatk_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const todayDateStr = `${year}-${month}-${day}`;
+
+      const fileName = `aqsatk_backup_${todayDateStr}.json`;
       const fileContent = JSON.stringify(backupData, null, 2);
 
-      const metadata = { name: fileName, mimeType: "application/json" };
-      const formData = new FormData();
-      formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-      formData.append("file", new Blob([fileContent], { type: "application/json" }));
+      // 1️⃣ البحث أولاً هل يوجد ملف بنفس اسم اليوم على Google Drive لمنع التكرار
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+trashed=false`,
+        { headers: { Authorization: `Bearer ${googleAccessToken}` } }
+      );
 
-      const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${googleAccessToken}` },
-        body: formData,
-      });
+      let existingFileId = null;
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          existingFileId = searchData.files[0].id;
+        }
+      }
+
+      let response;
+
+      // 2️⃣ إذا كان ملف اليوم موجوداً، نحدث محتواه (UPDATE) لمنع تكرار الملفات
+      if (existingFileId) {
+        response = await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${googleAccessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: fileContent,
+          }
+        );
+      } else {
+        // 3️⃣ إذا لم يكن موجوداً، ننشئ ملف جديد اليوم (CREATE)
+        const metadata = { name: fileName, mimeType: "application/json" };
+        const formData = new FormData();
+        formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+        formData.append("file", new Blob([fileContent], { type: "application/json" }));
+
+        response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${googleAccessToken}` },
+          body: formData,
+        });
+      }
 
       if (response.ok) {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        localStorage.setItem("last_auto_drive_backup_date", todayStr);
+        localStorage.setItem("last_auto_drive_backup_date", todayDateStr);
         localStorage.setItem("last_auto_drive_backup", new Date().toISOString());
-        if (!isSilent) toast.success("تم رفع النسخة الاحتياطية الشاملة بنجاح إلى حساب Google Drive!");
+        if (!isSilent) toast.success("تم تحديث النسخة الاحتياطية اليومية بنجاح على Google Drive!");
       } else if (response.status === 401) {
         localStorage.removeItem("google_drive_access_token");
         setIsDriveConnected(false);
@@ -532,28 +572,43 @@ export default function SettingsPage() {
     }
   };
 
-  // 🌙 المؤقت المجدول للتأكد من الرفع الساعة 12 ليلاً تلقائياً
+  // 🌙 المؤقت والرفع التلقائي المضمون فور فتح التطبيق/الموقع (من الهاتف والديسك توب)
   useEffect(() => {
-    const checkAndTriggerNightlyBackup = () => {
+    const checkAndTriggerNightlyBackup = async () => {
       const savedToken = localStorage.getItem("google_drive_access_token");
       if (!savedToken) return;
 
       const now = new Date();
-      const todayDateStr = now.toISOString().slice(0, 10);
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const todayDateStr = `${year}-${month}-${day}`;
+
       const lastBackupDate = localStorage.getItem("last_auto_drive_backup_date");
 
+      // فور دخول يوم جديد وعدم الرفع فيه مسبقاً (سواء فُتح الموقع بالليل أو ثاني يوم الصبح)
       if (lastBackupDate !== todayDateStr) {
-        handleUploadToGoogleDrive(true);
+        console.log("🚀 جاري الرفع الآلي للنسخة اليومية الجديدة إلى Google Drive...");
+        await handleUploadToGoogleDrive(true);
       }
     };
 
+    // 📱 1. فحص فوري فور فتح المتصفح/التطبيق
     checkAndTriggerNightlyBackup();
 
+    // 💻 2. في حال كان التطبيق يعمل ببيئة الديسك توب (Electron)
+    if (typeof window !== "undefined" && (window as any).require) {
+      try {
+        const { ipcRenderer } = (window as any).require("electron");
+        ipcRenderer.on("midnight_trigger", () => {
+          checkAndTriggerNightlyBackup();
+        });
+      } catch (e) {}
+    }
+
+    // ⏱️ 3. مؤقت يعمل كل دقيقة لو كان الموقع مفتوحاً أثناء حلول منتصف الليل
     const timerInterval = setInterval(() => {
-      const now = new Date();
-      if (now.getHours() === 0 && now.getMinutes() === 0) {
-        checkAndTriggerNightlyBackup();
-      }
+      checkAndTriggerNightlyBackup();
     }, 60000);
 
     return () => clearInterval(timerInterval);
@@ -752,7 +807,7 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("خطأ في حفظ رمز PIN المالك:", error);
       toast.error("حدث خطأ أثناء حفظ الرمز.");
-    } finally {
+    } finally{
       setSavingPin(false);
     }
   };

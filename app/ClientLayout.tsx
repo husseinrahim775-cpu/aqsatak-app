@@ -26,7 +26,8 @@ import {
   BookOpen,
   MoreHorizontal,
   X,
-  Calculator
+  Calculator,
+  FileText
 } from "lucide-react";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -176,7 +177,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     { name: "الحسابات", href: "/accounts", icon: Wallet },
   ];
 
+  // 📱 الأقسام الشاملة التي تظهر عند الضغط على "المزيد" بأسفل الهاتف
   const extraNavItems = [
+    { name: "التقارير المالية", href: "/reports", icon: FileText },
     { name: "الخزينة والصندوق", href: "/treasury", icon: Vault },
     { name: "المخزن والمبيعات", href: "/inventory", icon: Package },
     { name: "سجل الديون", href: "/debts", icon: BookOpen },
@@ -244,6 +247,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 { name: "الرئيسية", href: "/dashboard" },
                 { name: "العملاء", href: "/customers" },
                 { name: "الحسابات", href: "/accounts" },
+                { name: "التقارير", href: "/reports" },
                 { name: "الخزينة", href: "/treasury" },
                 { name: "المخزن", href: "/inventory" },
                 { name: "الديون", href: "/debts" },
@@ -295,7 +299,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
-      {/* 4. النافذة المنبثقة "المزيد" */}
+      {/* 4. النافذة المنبثقة "المزيد" للهاتف */}
       <AnimatePresence>
         {showMoreMenu && (
           <motion.div 
@@ -339,7 +343,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                       }`}
                     >
                       <Icon className="w-5 h-5 shrink-0" />
-                      <span className="text-xs">{item.name}</span>
+                      <span className="text-xs font-bold">{item.name}</span>
                     </Link>
                   );
                 })}
