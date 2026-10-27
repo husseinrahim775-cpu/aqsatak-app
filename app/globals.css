@@ -1,122 +1,156 @@
 @import "tailwindcss";
 
 /* ==============================================================================
-   🎨 لوحة التحكم بالألوان الرئيسية للسيستم (COLOR PALETTE CONTROLLER)
-   ------------------------------------------------------------------------------
-   💡 ملاحظة: تعديل القيم هنا يغير ألوان النظام بالكامل وفي كل الصفحات تلقائياً.
-   القيم مكتوبة بصيغة HSL (Hue, Saturation, Lightness).
+   🎨 لوحة التحكم بالألوان الرئيسية للسيستم
    ============================================================================== */
 
-/* ☀️ 1. الألوان الأساسية (الوضع النهاري - LIGHT MODE) */
 :root {
-  /* ✏️ لون خلفية الصفحة الرئيسية (رمادي نهاري ناعم) */
   --background: 240 20% 98%;
-
-  /* ✏️ لون النصوص والأنشطة الرئيسية (أسود داكن مريح للعين وحاد) */
   --foreground: 222.2 84% 4.9%;
-
-  /* ✏️ لون النصوص الفرعية والتوضيحية بالنهاري (تم تغميقه لإبراز النصوص بوضوح) */
   --muted-foreground: 215.4 25% 25%;
 
-  /* ✏️ لون خلفية الكروت والبطاقات (أبيض نقي) */
   --card: 0 0% 100%;
   --card-foreground: 222.2 84% 4.9%;
 
-  /* ✏️ اللون الرئيسي للأنظمة والإنشاءات (أزرق ذكي) */
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
+  /* اللون الافتراضي (البرتقالي الناري) */
+  --primary: 24.6 95% 53.1%;
+  --primary-foreground: 0 0% 100%;
 
-  /* ✏️ لون حدود البطاقات والكروت (تم تغميقه لإبراز الكروت بوضوح في الثيم الأبيض) */
   --border: 215 25% 78%; 
-
-  /* ✏️ التدرج البرتقالي التفاعلي الخاص بـ Dashboard  */
   --accent-gradient-from: #f97316;
   --accent-gradient-to: #ef4444;
+  --theme-gradient: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
 }
 
-/* 🌙 2. ألوان الوضع الليلي (DARK MODE) */
 .dark {
-  /* ✏️ خلفية الصفحة الرئيسية بالليل (أسود عميق داكن) */
   --background: 0 0% 0%;
-
-  /* ✏️ لون النصوص بالليل (أبيض ناصع) */
   --foreground: 0 0% 98%;
-
-  /* ✏️ لون النصوص الفرعية والتوضيحية بالليل */
   --muted-foreground: 240 5% 65%;
 
-  /* ✏️ خلفية الكروت بالليل (رمادي ليلي زجاجي) */
   --card: 0 0% 5%;
   --card-foreground: 0 0% 98%;
 
-  /* ✏️ اللون الرئيسي بالليل */
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
+  --primary: 24.6 95% 53.1%;
+  --primary-foreground: 0 0% 100%;
 
-  /* ✏️ لون حدود الكروت بالليل */
   --border: 0 0% 15%;
+}
+
+/* 🎨 الثيمات الديناميكية - إجبار تغيير اللون الرئيسي والتدرج الكومبو بالكامل */
+html[data-theme="orange"], body[data-theme="orange"], [data-theme="orange"] {
+  --primary: 24.6 95% 53.1% !important;             /* البرتقالي الأساسي #f97316 */
+  --primary-foreground: 0 0% 100% !important;
+  --accent-gradient-from: #f97316 !important;
+  --accent-gradient-to: #ef4444 !important;
+  --theme-gradient: linear-gradient(135deg, #f97316 0%, #ef4444 100%) !important; /* البرتقالي الناري إلى الأحمر */
+}
+
+html[data-theme="blue"], body[data-theme="blue"] {
+  --primary: 217.2 91.2% 59.8% !important;
+  --accent-gradient-from: #3b82f6 !important;
+  --accent-gradient-to: #1d4ed8 !important;
+  --theme-gradient: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+}
+
+html[data-theme="emerald"], body[data-theme="emerald"] {
+  --primary: 160 84% 39% !important;
+  --accent-gradient-from: #10b981 !important;
+  --accent-gradient-to: #047857 !important;
+  --theme-gradient: linear-gradient(135deg, #10b981, #047857) !important;
+}
+
+html[data-theme="purple"], body[data-theme="purple"] {
+  --primary: 271 91% 65% !important;
+  --accent-gradient-from: #a855f7 !important;
+  --accent-gradient-to: #6b21a8 !important;
+  --theme-gradient: linear-gradient(135deg, #a855f7, #6b21a8) !important;
+}
+
+html[data-theme="rose"], body[data-theme="rose"] {
+  --primary: 346.8 77.2% 49.8% !important;
+  --accent-gradient-from: #f43f5e !important;
+  --accent-gradient-to: #be123c !important;
+  --theme-gradient: linear-gradient(135deg, #f43f5e, #be123c) !important;
+}
+
+html[data-theme="amber"], body[data-theme="amber"] {
+  --primary: 37.7 92.1% 50.2% !important;
+  --accent-gradient-from: #f59e0b !important;
+  --accent-gradient-to: #b45309 !important;
+  --theme-gradient: linear-gradient(135deg, #f59e0b, #b45309) !important;
+}
+
+/* 🎨 كلاسات الكومبو التراكمية لتطبيق تدرج الثيم المختار على الكروت والأزرار */
+.bg-theme-gradient {
+  background: var(--theme-gradient) !important;
+}
+
+.text-theme-primary {
+  color: hsl(var(--primary)) !important;
+}
+
+.border-theme-primary {
+  border-color: hsl(var(--primary)) !important;
 }
 
 @theme {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
   --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--color-card-foreground));
+  --color-card-foreground: hsl(var(--card-foreground));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-border: hsl(var(--border));
 }
 
 /* ==============================================================================
-   ⚡ 3. تسريع التبديل وإلغاء الـ Transitions الثقيلة لتسريع النظام فوراً
-   ------------------------------------------------------------------------------
-   تمنع البطأ والثقل عند تحويل وضع الرؤية بين النهاري والليلي.
+   ⚡ إلغاء التأخير للتحويل الفوري
    ============================================================================== */
 html {
   overflow-y: scroll;
-  scrollbar-gutter: stable; /* تثبيت شريط التمرير لمنع القفز والاهتزاز الأفقي */
+  scrollbar-gutter: stable;
 }
 
-/* إلغاء أي تأخير حركي عام على عناصر الصفحة للتحويل الفوري */
 html, body, div, section, main, table, tr, td, article {
   transition: none !important;
 }
 
-/* تنعيم خفيف جداً وفوري لخلفية الصفحة والنص فقط */
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: Arial, Helvetica, sans-serif;
-  transition: background-color 0.12s ease-out, color 0.12s ease-out !important;
 }
 
 /* ==============================================================================
-   🔢 4. توحيد وإجبار ظهور جميع الأرقام والتواريخ بالصيغة الإنجليزية (1234567890)
+   🔤 تكبير وتصغير جميع أحجام النصوص المحددة بـ Tailwind بدون Zoom للشاشة
+   ============================================================================== */
+body.text-size-medium { font-size: 1.08rem; }
+body.text-size-large { font-size: 1.18rem; }
+body.text-size-xlarge { font-size: 1.28rem; }
+
+/* استهداف كلاسات الحجم التي تمنع التكبير */
+body.text-size-medium .text-xs, body.text-size-medium .text-\[10px\], body.text-size-medium .text-\[11px\] { font-size: 13px !important; }
+body.text-size-medium .text-sm { font-size: 15px !important; }
+body.text-size-medium .text-base { font-size: 17px !important; }
+
+body.text-size-large .text-xs, body.text-size-large .text-\[10px\], body.text-size-large .text-\[11px\] { font-size: 15px !important; }
+body.text-size-large .text-sm { font-size: 17px !important; }
+body.text-size-large .text-base { font-size: 19px !important; }
+
+body.text-size-xlarge .text-xs, body.text-size-xlarge .text-\[10px\], body.text-size-xlarge .text-\[11px\] { font-size: 17px !important; }
+body.text-size-xlarge .text-sm { font-size: 19px !important; }
+body.text-size-xlarge .text-base { font-size: 21px !important; }
+
+/* ==============================================================================
+   🔢 إجبار ظهور الأرقام إنجليزية
    ============================================================================== */
 @layer base {
   * {
     font-variant-numeric: lining-nums tabular-nums !important;
     font-feature-settings: "lnum" 1, "tnum" 1 !important;
   }
-
-  input,
-  textarea,
-  select,
-  span,
-  p,
-  td,
-  th,
-  div,
-  h1,
-  h2,
-  h3,
-  h4 {
-    font-variant-numeric: lining-nums tabular-nums !important;
-    font-feature-settings: "lnum" 1, "tnum" 1 !important;
-  }
 }
 
-/* ضمان أن حقول الإدخال والتواريخ تكتب وتظهر الأرقام الإنجليزية دائماً */
 input[type="number"],
 input[type="text"],
 input[type="date"],
@@ -126,9 +160,6 @@ input[type="month"] {
   text-align: right !important;
 }
 
-/* ========================================================
-   تأثيرات البطاقات والزجاجية (Dashboard  Visuals)
-   ======================================================== */
 .glass-card {
   background-color: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
@@ -146,16 +177,9 @@ input[type="month"] {
   box-shadow: none;
 }
 
-/* ========================================================
-   أنيميشن الهيكل العظمي للشحن (Skeleton Wave Animation)
-   ======================================================== */
 @keyframes skeletonWave {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 .v14-skeleton {
@@ -170,42 +194,18 @@ input[type="month"] {
   background-size: 200% 100%;
 }
 
-/* ========================================================
-   موجة التلوين عند تغيير الأقسام (Section Tab Wave Glow)
-   ======================================================== */
-@keyframes colorWaveGlow {
-  0% {
-    box-shadow: 0 0 0px rgba(249, 115, 22, 0);
-  }
-  50% {
-    box-shadow: 0 10px 30px -5px rgba(249, 115, 22, 0.35);
-  }
-  100% {
-    box-shadow: 0 0 0px rgba(249, 115, 22, 0);
-  }
-}
-
-.tab-wave-active {
-  animation: colorWaveGlow 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-/* 👈 كلاسات الشارات المعدلة لإظهار النص بشكل حاد وواضح جداً */
-
-/* شارة تم الدفع (أخضر غامق مع نص أبيض بارز) */
 .badge-paid {
   background-color: #15803d !important;
   color: #ffffff !important;
   font-weight: 800 !important;
 }
 
-/* شارة مستحق (أصفر دافئ مع نص أسود غامق) */
 .badge-due {
   background-color: #fef08a !important;
   color: #854d0e !important;
   font-weight: 800 !important;
 }
 
-/* للوضع الليلي */
 .dark .badge-paid {
   background-color: #16a34a !important;
   color: #ffffff !important;
@@ -216,18 +216,10 @@ input[type="month"] {
   color: #fef08a !important;
 }
 
-/* ========================================================
-   إعدادات الطباعة المخصصة
-   ======================================================== */
 @media print {
   header, nav, aside, footer, button, .no-print {
     display: none !important;
   }
-
-  .max-w-5xl > div:not(.print-container) {
-    display: none !important;
-  }
-
   .print-container {
     display: block !important;
     position: absolute !important;
@@ -239,33 +231,13 @@ input[type="month"] {
     background: #ffffff !important;
     color: #000000 !important;
   }
-
   html, body {
     height: auto !important;
     overflow: visible !important;
     background: #ffffff !important;
   }
-
   @page {
     size: A4 portrait;
     margin: 8mm;
   }
-}
-
-/* ========================================================
-   أنيميشن ظهور هادئ وخفيف جداً لـ Dashboard  (بدون قفزات)
-   ======================================================== */
-@keyframes pageSlideUp {
-  0% {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0px);
-  }
-}
-
-.animate-theme-reveal {
-  animation: pageSlideUp 0.2s ease-out forwards;
 }

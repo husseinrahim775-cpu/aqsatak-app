@@ -31,9 +31,14 @@ import {
   Package,
   ArrowUpRight,
   ArrowDownLeft,
-  Coins
+  Coins,
+  Filter,
+  CheckCircle2,
+  AlertCircle,
+  Users
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "next-themes";
 
 interface AggregatedCustomerReport {
   customerKey: string;
@@ -49,6 +54,7 @@ interface AggregatedCustomerReport {
 
 export default function ReportsPage() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   
   // 🔘 التبويب النشط حالياً
   const [activeTab, setActiveTab] = useState<"installments" | "treasury" | "inventory">("installments");
@@ -61,16 +67,29 @@ export default function ReportsPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // الفلاتر
+  // 🎯 الفلاتر الرئيسية للأقساط
+  const [customerStatusFilter, setCustomerStatusFilter] = useState<"all" | "debtors" | "settled">("all");
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
 
-  // التقويم المخصص
+  // 📅 التقويم التفاعلي المتقدم (سنة - شهر - يوم)
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+
   const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [startMonthObj, setStartMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [startStep, setStartStep] = useState<"months" | "days">("months");
+
   const [endYear, setEndYear] = useState(new Date().getFullYear());
+  const [endMonthObj, setEndMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [endStep, setEndStep] = useState<"months" | "days">("months");
 
   const monthsList = [
     { num: "01", name: "شهر 1" },
@@ -87,7 +106,20 @@ export default function ReportsPage() {
     { num: "12", name: "شهر 12" },
   ];
 
-  // جلب المعرف الأساسي للحساب
+  const getDaysInMonth = (year: number, monthNumStr?: string) => {
+    if (!monthNumStr) return [];
+    const monthIndex = parseInt(monthNumStr, 10) - 1;
+    const count = new Date(year, monthIndex + 1, 0).getDate();
+    const daysArr = [];
+    for (let i = 1; i <= count; i++) {
+      daysArr.push(String(i).padStart(2, "0"));
+    }
+    return daysArr;
+  };
+
+  const daysInStartMonth = useMemo(() => getDaysInMonth(startYear, startMonthObj?.num), [startYear, startMonthObj]);
+  const daysInEndMonth = useMemo(() => getDaysInMonth(endYear, endMonthObj?.num), [endYear, endMonthObj]);
+
   const getOwnerUid = () => {
     const activeSession = sessionStorage.getItem("active_session");
     if (activeSession) {
@@ -123,7 +155,6 @@ export default function ReportsPage() {
         setCompanyData(compSettings || null);
         setInventoryItems([...(availInv || []), ...(soldInv || [])]);
 
-        // 🏦 دمج وتجميع كافة حركات الخزينة المباشرة والتلقائية
         const autoInflows: TreasuryTransaction[] = [];
 
         (paymentsData || []).forEach((p) => {
@@ -169,8 +200,8 @@ export default function ReportsPage() {
     fetchAllSystemData();
   }, [user]);
 
-  // 1️⃣ تجميع بيانات الأقساط والعملاء
-  const groupedCustomers = useMemo(() => {
+  // 1️⃣ تجميع بيانات الأقساط والعملاء الكلية
+  const allGroupedCustomers = useMemo(() => {
     const map = new Map<string, AggregatedCustomerReport>();
 
     installments.forEach((inst) => {
@@ -207,9 +238,14 @@ export default function ReportsPage() {
       );
 
       const custInstIds = new Set(cust.installments.map((i) => i.id));
+      const custNamesLower = new Set(cust.installments.map((i) => i.customerName?.toLowerCase().trim()));
 
       cust.totalPaid = payments
-        .filter((p) => p.installmentId && custInstIds.has(p.installmentId))
+        .filter((p) => {
+          if (p.installmentId && custInstIds.has(p.installmentId)) return true;
+          if (p.customerName && custNamesLower.has(p.customerName.toLowerCase().trim())) return true;
+          return false;
+        })
         .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
       cust.originalContractValue = cust.currentRemaining + cust.totalPaid;
@@ -218,25 +254,62 @@ export default function ReportsPage() {
     return Array.from(map.values());
   }, [installments, payments]);
 
+  // 🎯 تصفية قائمة العملاء بحسب الفلتر
+  const filteredGroupedCustomers = useMemo(() => {
+    if (customerStatusFilter === "debtors") {
+      return allGroupedCustomers.filter((c) => c.currentRemaining > 0);
+    } else if (customerStatusFilter === "settled") {
+      return allGroupedCustomers.filter((c) => c.currentRemaining <= 0);
+    }
+    return allGroupedCustomers;
+  }, [allGroupedCustomers, customerStatusFilter]);
+
   const activeCustomer = useMemo(() => {
     if (selectedCustomerKey === "all") return null;
-    return groupedCustomers.find((c) => c.customerKey === selectedCustomerKey) || null;
-  }, [groupedCustomers, selectedCustomerKey]);
+    return filteredGroupedCustomers.find((c) => c.customerKey === selectedCustomerKey) || null;
+  }, [filteredGroupedCustomers, selectedCustomerKey]);
 
-  // 2️⃣ سجل كشف حركة الأقساط
+  // 2️⃣ سجل كشف حركة الأقساط (معدّل ومطابق بالكامل)
   const ledgerEntries = useMemo(() => {
     let filtered = payments;
 
+    const allowedCustomerNames = new Set(
+      filteredGroupedCustomers.map((c) => c.customerName.toLowerCase().trim())
+    );
+    const allowedInstIds = new Set(
+      filteredGroupedCustomers.flatMap((c) => c.installments.map((i) => i.id))
+    );
+
     if (selectedCustomerKey !== "all" && activeCustomer) {
       const validInstIds = new Set(activeCustomer.installments.map((i) => i.id));
-      filtered = filtered.filter((p) => p.installmentId && validInstIds.has(p.installmentId));
+      const validName = activeCustomer.customerName.toLowerCase().trim();
+      filtered = filtered.filter(
+        (p) =>
+          (p.installmentId && validInstIds.has(p.installmentId)) ||
+          (p.customerName && p.customerName.toLowerCase().trim() === validName)
+      );
+    } else {
+      filtered = filtered.filter((p) => {
+        if (p.installmentId && allowedInstIds.has(p.installmentId)) return true;
+        if (p.customerName && allowedCustomerNames.has(p.customerName.toLowerCase().trim())) return true;
+        return false;
+      });
     }
 
     if (dateFrom) {
-      filtered = filtered.filter((p) => p.paidAt && p.paidAt >= dateFrom);
+      filtered = filtered.filter((p) => {
+        if (!p.paidAt) return false;
+        const pStr = p.paidAt.split("T")[0];
+        return pStr >= dateFrom;
+      });
     }
+
     if (dateTo) {
-      filtered = filtered.filter((p) => p.paidAt && p.paidAt <= dateTo);
+      filtered = filtered.filter((p) => {
+        if (!p.paidAt) return false;
+        const pStr = p.paidAt.split("T")[0];
+        return pStr <= dateTo;
+      });
     }
 
     const sorted = [...filtered].sort((a, b) => {
@@ -260,7 +333,7 @@ export default function ReportsPage() {
       const newPaid = prevPaid + amountPaid;
       customerPaidTracker.set(custKey, newPaid);
 
-      const custInfo = groupedCustomers.find(c => c.customerKey === custKey);
+      const custInfo = allGroupedCustomers.find(c => c.customerKey === custKey || c.customerName === actualCustomerName);
       const originalVal = custInfo ? custInfo.originalContractValue : (Number(parentInst?.totalDue) || 0) + amountPaid;
 
       return {
@@ -272,7 +345,7 @@ export default function ReportsPage() {
         remainingBalance: Math.max(0, originalVal - newPaid),
       };
     });
-  }, [payments, installments, selectedCustomerKey, activeCustomer, groupedCustomers, dateFrom, dateTo]);
+  }, [payments, installments, selectedCustomerKey, activeCustomer, filteredGroupedCustomers, allGroupedCustomers, dateFrom, dateTo]);
 
   // 3️⃣ حسابات الخزينة والمخزن
   const treasurySummary = useMemo(() => {
@@ -312,22 +385,16 @@ export default function ReportsPage() {
 
   // 4️⃣ ملخص الأقساط
   const summary = useMemo(() => {
-    const totalContract = activeCustomer
-      ? activeCustomer.originalContractValue
-      : groupedCustomers.reduce((acc, c) => acc + c.originalContractValue, 0);
+    const targetCustomers = activeCustomer ? [activeCustomer] : filteredGroupedCustomers;
 
-    const totalPaid = activeCustomer
-      ? activeCustomer.totalPaid
-      : groupedCustomers.reduce((acc, c) => acc + c.totalPaid, 0);
-
-    const remaining = activeCustomer
-      ? activeCustomer.currentRemaining
-      : groupedCustomers.reduce((acc, c) => acc + c.currentRemaining, 0);
+    const totalContract = targetCustomers.reduce((acc, c) => acc + c.originalContractValue, 0);
+    const totalPaid = targetCustomers.reduce((acc, c) => acc + c.totalPaid, 0);
+    const remaining = targetCustomers.reduce((acc, c) => acc + c.currentRemaining, 0);
 
     const progressPercent = totalContract > 0 ? Math.min(100, Math.round((totalPaid / totalContract) * 100)) : 0;
 
     return { totalContract, totalPaid, remaining, progressPercent };
-  }, [activeCustomer, groupedCustomers]);
+  }, [activeCustomer, filteredGroupedCustomers]);
 
   const getCategoryLabel = (cat: TreasuryTransaction["category"]) => {
     switch (cat) {
@@ -341,7 +408,6 @@ export default function ReportsPage() {
     }
   };
 
-  // 🖨️ دالة الطباعة التكيفية
   const handlePrintReport = () => {
     const printWindow = window.open("", "_blank", "width=900,height=1000");
     if (!printWindow) return;
@@ -352,24 +418,33 @@ export default function ReportsPage() {
     const logoUrl = companyData?.logoUrl || companyData?.logo || "";
 
     if (activeTab === "installments") {
+      let reportScopeTitle = "كشف حساب مالي شامل لجميع العملاء";
+      if (activeCustomer) {
+        reportScopeTitle = `كشف حساب العميل: ${activeCustomer.customerName}`;
+      } else if (customerStatusFilter === "debtors") {
+        reportScopeTitle = "كشف حساب العملاء المتبقي عليهم ديون فقط";
+      } else if (customerStatusFilter === "settled") {
+        reportScopeTitle = "كشف حساب العملاء المسددين بالكامل (المستوفين)";
+      }
+
       const customerDisplayName = activeCustomer 
         ? `${activeCustomer.customerName} (<span dir="ltr">${activeCustomer.phoneNumber}</span>)` 
-        : "كشف حساب مالي شامل لكل العملاء";
+        : reportScopeTitle;
 
       const customerProducts = activeCustomer 
         ? activeCustomer.purchasedProductsList 
-        : "كافة المنتجات والعقود المسجلة بالنظام";
+        : `عقود (${filteredGroupedCustomers.length}) عميل ضمن التقرير`;
 
       printWindow.document.write(`
         <html dir="rtl" lang="ar">
           <head>
-            <title>كشف حساب - ${activeCustomer ? activeCustomer.customerName : "تقرير عام"}</title>
+            <title>${reportScopeTitle}</title>
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
               body { font-family: 'Cairo', sans-serif; padding: 25px; color: #1e293b; background: #fff; font-size: 12px; }
-              .header-table { width: 100%; border-bottom: 2px solid #ea580c; padding-bottom: 15px; margin-bottom: 20px; }
+              .header-table { width: 100%; border-bottom: 2px solid #6366f1; padding-bottom: 15px; margin-bottom: 20px; }
               .logo { max-height: 65px; object-fit: contain; }
-              .title { font-size: 18px; font-weight: 900; color: #ea580c; margin: 0; }
+              .title { font-size: 18px; font-weight: 900; color: #6366f1; margin: 0; }
               .subtitle { font-size: 11px; color: #64748b; font-weight: 700; }
               .info-box { background: #f8fafc; border: 1px solid #cbd5e1; padding: 12px 15px; border-radius: 10px; margin-bottom: 20px; }
               .summary-cards { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -388,15 +463,15 @@ export default function ReportsPage() {
           <body>
             <table class="header-table">
               <tr>
-                <td style="width: 20%;">${logoUrl ? `<img src="${logoUrl}" class="logo" />` : `<h2 style="color:#ea580c;margin:0;">أقساطك</h2>`}</td>
+                <td style="width: 20%;">${logoUrl ? `<img src="${logoUrl}" class="logo" />` : `<h2 style="color:#6366f1;margin:0;">أقساطك</h2>`}</td>
                 <td style="text-align: center;">
                   <h1 class="title">${storeName}</h1>
                   <p class="subtitle">العنوان: ${storeAddress} | الهاتف: <span dir="ltr">${storePhone}</span></p>
-                  <h3 style="margin: 5px 0 0 0; font-size: 14px;">كشف حساب مالـي معتمد (Ledger Statement)</h3>
+                  <h3 style="margin: 5px 0 0 0; font-size: 14px;">${reportScopeTitle}</h3>
                 </td>
                 <td style="width: 25%; text-align: left; font-size: 10px; font-weight: 700;">
                   <p style="margin:2px 0;">تاريخ التقرير: ${new Date().toLocaleDateString('ar-IQ')}</p>
-                  <p style="margin:2px 0;">الحالة: كشف معتمد</p>
+                  <p style="margin:2px 0;">حالة الفلترة: ${customerStatusFilter === 'all' ? 'كافة العملاء' : customerStatusFilter === 'debtors' ? 'ديون متبقية' : 'مسددين بالكامل'}</p>
                 </td>
               </tr>
             </table>
@@ -404,16 +479,16 @@ export default function ReportsPage() {
             <div class="info-box">
               <table style="width: 100%; border: none;">
                 <tr>
-                  <td style="border: none; padding: 0; text-align: right;"><span style="font-size: 12px; font-weight: 900;">اسم العميل:</span> ${customerDisplayName}</td>
-                  <td style="border: none; padding: 0; text-align: left;"><span style="font-size: 12px; font-weight: 900;">المنتجات/المواد المشتراة:</span> ${customerProducts}</td>
+                  <td style="border: none; padding: 0; text-align: right;"><span style="font-size: 12px; font-weight: 900;">البيان / النطاق:</span> ${customerDisplayName}</td>
+                  <td style="border: none; padding: 0; text-align: left;"><span style="font-size: 12px; font-weight: 900;">التفاصيل:</span> ${customerProducts}</td>
                 </tr>
               </table>
             </div>
 
             <div class="summary-cards">
-              <div class="card"><div class="card-title">إجمالي قيمة العقود الأصلي</div><div class="card-value">${summary.totalContract.toLocaleString()} د.ع</div></div>
+              <div class="card"><div class="card-title">إجمالي قيمة العقود الأصلية</div><div class="card-value">${summary.totalContract.toLocaleString()} د.ع</div></div>
               <div class="card"><div class="card-title">إجمالي المقبوضات المسددة</div><div class="card-value" style="color: #16a34a;">+${summary.totalPaid.toLocaleString()} د.ع</div></div>
-              <div class="card"><div class="card-title">المتبقي الحالي بذمة العميل</div><div class="card-value" style="color: #dc2626;">${summary.remaining.toLocaleString()} د.ع</div></div>
+              <div class="card"><div class="card-title">المتبقي الحالي بذمة العملاء</div><div class="card-value" style="color: #dc2626;">${summary.remaining.toLocaleString()} د.ع</div></div>
               <div class="card"><div class="card-title">نسبة الوفاء المالية</div><div class="card-value" style="color: #2563eb;">${summary.progressPercent}%</div></div>
             </div>
 
@@ -461,8 +536,8 @@ export default function ReportsPage() {
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
               body { font-family: 'Cairo', sans-serif; padding: 25px; color: #1e293b; background: #fff; font-size: 12px; }
-              .header-table { width: 100%; border-bottom: 2px solid #ea580c; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 18px; font-weight: 900; color: #ea580c; margin: 0; }
+              .header-table { width: 100%; border-bottom: 2px solid #6366f1; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 18px; font-weight: 900; color: #6366f1; margin: 0; }
               .summary-cards { display: flex; gap: 10px; margin-bottom: 20px; }
               .card { flex: 1; border: 1px solid #cbd5e1; padding: 10px; border-radius: 10px; text-align: center; background: #f8fafc; }
               .card-title { font-size: 10px; color: #64748b; font-weight: 700; }
@@ -528,8 +603,8 @@ export default function ReportsPage() {
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
               body { font-family: 'Cairo', sans-serif; padding: 25px; color: #1e293b; background: #fff; font-size: 12px; }
-              .header-table { width: 100%; border-bottom: 2px solid #ea580c; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 18px; font-weight: 900; color: #ea580c; margin: 0; }
+              .header-table { width: 100%; border-bottom: 2px solid #6366f1; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 18px; font-weight: 900; color: #6366f1; margin: 0; }
               .summary-cards { display: flex; gap: 10px; margin-bottom: 20px; }
               .card { flex: 1; border: 1px solid #cbd5e1; padding: 10px; border-radius: 10px; text-align: center; background: #f8fafc; }
               .card-title { font-size: 10px; color: #64748b; font-weight: 700; }
@@ -597,7 +672,7 @@ export default function ReportsPage() {
 
   if (loading) {
     return (
-      <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+      <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-primary">
         <Loader2 className="w-10 h-10 animate-spin" />
         <span className="text-xs font-bold text-muted-foreground animate-pulse">جاري مطابقة كافة بيانات النظام والتقارير...</span>
       </div>
@@ -611,7 +686,7 @@ export default function ReportsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card p-6 rounded-3xl border border-border shadow-sm">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <FileText className="w-6 h-6 text-orange-500" />
+            <FileText className="w-6 h-6 text-primary" />
             <span>التقارير المالية والتشغيلية الشاملة 📊</span>
           </h1>
           <p className="text-xs text-muted-foreground font-bold mt-1">كشوفات دقيقة تربط الأقساط، حركة الخزينة والصندوق، والمخزون.</p>
@@ -619,7 +694,7 @@ export default function ReportsPage() {
 
         <button
           onClick={handlePrintReport}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl py-3 px-5 hover:opacity-95 transition-all shadow-md shadow-orange-500/20"
+          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold text-xs rounded-2xl py-3 px-5 hover:opacity-95 transition-all shadow-md shadow-primary/20"
         >
           <Printer className="w-4 h-4" />
           <span>
@@ -628,13 +703,13 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      {/* 2. أزرار التنقل بين التبويبات */}
+      {/* 2. أزرار التنقل بين التبويبات المتناسقة مع الثيم */}
       <div className="flex items-center gap-2 bg-secondary/60 p-1.5 rounded-2xl border border-border overflow-x-auto">
         <button
           onClick={() => setActiveTab("installments")}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === "installments"
-              ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -646,7 +721,7 @@ export default function ReportsPage() {
           onClick={() => setActiveTab("treasury")}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === "treasury"
-              ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -658,7 +733,7 @@ export default function ReportsPage() {
           onClick={() => setActiveTab("inventory")}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === "inventory"
-              ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -671,10 +746,64 @@ export default function ReportsPage() {
       {activeTab === "installments" && (
         <>
           <div className="bg-card border border-border rounded-3xl p-5 shadow-sm space-y-4">
-            <h3 className="text-xs font-black text-foreground flex items-center gap-2">
-              <Search className="w-4 h-4 text-orange-500" />
-              <span>اختر العميل وفترة التقرير:</span>
-            </h3>
+            
+            {/* 🎯 شريط فلاتر تصفية نوع ديون العملاء المحدث */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-border/80 pb-4">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-primary" />
+                <h3 className="text-xs font-black text-foreground">فلترة وتصفية حالة العملاء والديون:</h3>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-secondary/60 p-1 rounded-2xl border border-border w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerStatusFilter("all");
+                    setSelectedCustomerKey("all");
+                  }}
+                  className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    customerStatusFilter === "all"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>جميع العملاء ({allGroupedCustomers.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerStatusFilter("debtors");
+                    setSelectedCustomerKey("all");
+                  }}
+                  className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    customerStatusFilter === "debtors"
+                      ? "bg-rose-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>عقود متبقي عليها ديون ({allGroupedCustomers.filter(c => c.currentRemaining > 0).length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerStatusFilter("settled");
+                    setSelectedCustomerKey("all");
+                  }}
+                  className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    customerStatusFilter === "settled"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>المسددين بالكامل ({allGroupedCustomers.filter(c => c.currentRemaining <= 0).length})</span>
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -682,33 +811,41 @@ export default function ReportsPage() {
                 <select
                   value={selectedCustomerKey}
                   onChange={(e) => setSelectedCustomerKey(e.target.value)}
-                  className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary"
                 >
-                  <option value="all">-- عرض كافة العملاء (تقرير شامل) --</option>
-                  {groupedCustomers.map((cust) => {
+                  <option value="all">
+                    {customerStatusFilter === "all" 
+                      ? "-- عرض كافة العملاء (تقرير شامل) --" 
+                      : customerStatusFilter === "debtors" 
+                      ? "-- كافة العملاء المتبقي عليهم ديون --" 
+                      : "-- كافة العملاء المسددين بالكامل --"}
+                  </option>
+                  {filteredGroupedCustomers.map((cust) => {
                     const formattedPhone = cust.phoneNumber ? `\u202D${cust.phoneNumber}\u202C` : "";
+                    const remainingTag = cust.currentRemaining > 0 ? ` (متبقي: ${cust.currentRemaining.toLocaleString()} د.ع)` : " (مسدد بالكامل ✓)";
                     return (
                       <option key={cust.customerKey} value={cust.customerKey}>
-                        {cust.customerName} ({formattedPhone})
+                        {cust.customerName} ({formattedPhone}) - {remainingTag}
                       </option>
                     );
                   })}
                 </select>
               </div>
 
-              {/* من تاريخ */}
+              {/* 📅 من تاريخ (سنة - شهر - يوم) */}
               <div className="relative">
                 <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-orange-500" />
-                  <span>من تاريخ / شهر:</span>
+                  <Calendar className="w-3.5 h-3.5 text-primary" />
+                  <span>من تاريخ (يوم/شهر/سنة):</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => {
                     setShowStartPicker(!showStartPicker);
+                    setStartStep("months");
                     setShowEndPicker(false);
                   }}
-                  className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm"
                 >
                   <span className={dateFrom ? "text-foreground font-mono" : "text-muted-foreground"}>
                     {dateFrom || "اختر بداية الفترة..."}
@@ -723,7 +860,7 @@ export default function ReportsPage() {
                         }} 
                       />
                     )}
-                    <Calendar className="w-4 h-4 text-orange-500" />
+                    <Calendar className="w-4 h-4 text-primary" />
                   </div>
                 </button>
 
@@ -733,69 +870,116 @@ export default function ReportsPage() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute z-[10002] mt-2 w-full bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                      className="absolute z-[10002] mt-2 w-72 right-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
                     >
-                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
-                        <button
-                          type="button"
-                          onClick={() => setStartYear((y) => y - 1)}
-                          className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs flex items-center gap-1"
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                          <span>السابقة</span>
-                        </button>
-                        <span className="font-mono font-bold text-sm text-orange-500">{startYear}</span>
-                        <button
-                          type="button"
-                          onClick={() => setStartYear((y) => y + 1)}
-                          className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs flex items-center gap-1"
-                        >
-                          <span>التالية</span>
-                          <ChevronLeft className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => setStartYear((y) => y - 1)}
+                            className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                            <span>{startYear}</span>
+                            {startMonthObj && startStep === "days" && (
+                              <span>- {startMonthObj.num}</span>
+                            )}
+                          </div>
 
-                      <div className="grid grid-cols-3 gap-2 pt-1">
-                        {monthsList.map((m) => {
-                          const mStr = `${startYear}-${m.num}`;
-                          const isSelected = dateFrom === mStr;
-                          return (
-                            <button
-                              key={m.num}
-                              type="button"
-                              onClick={() => {
-                                setDateFrom(mStr);
-                                setShowStartPicker(false);
-                              }}
-                              className={`p-2.5 rounded-2xl text-xs font-bold transition-all ${
-                                isSelected
-                                  ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20"
-                                  : "bg-secondary/50 hover:bg-orange-500/10 text-foreground hover:text-orange-500"
-                              }`}
-                            >
-                              {m.name}
-                            </button>
-                          );
-                        })}
+                          <button
+                            type="button"
+                            onClick={() => setStartYear((y) => y + 1)}
+                            className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {startStep === "days" ? (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center px-1 text-[11px]">
+                              <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                              <button
+                                type="button"
+                                onClick={() => setStartStep("months")}
+                                className="text-primary hover:underline font-bold text-[10px]"
+                              >
+                                تغيير الشهر ({startMonthObj?.name || "اختر"})
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                              {daysInStartMonth.map((dayNum) => {
+                                const dateString = `${startYear}-${startMonthObj?.num || "01"}-${dayNum}`;
+                                const isSelected = dateFrom === dateString;
+                                return (
+                                  <button
+                                    key={dayNum}
+                                    type="button"
+                                    onClick={() => {
+                                      setDateFrom(dateString);
+                                      setShowStartPicker(false);
+                                    }}
+                                    className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                                      isSelected
+                                        ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                        : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                    }`}
+                                  >
+                                    {dayNum}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-2 pt-1">
+                            {monthsList.map((m) => {
+                              const monthString = `${startYear}-${m.num}`;
+                              const isSelected = dateFrom === monthString;
+                              return (
+                                <button
+                                  key={m.num}
+                                  type="button"
+                                  onClick={() => {
+                                    setStartMonthObj(m);
+                                    setStartStep("days");
+                                    setDateFrom(monthString);
+                                  }}
+                                  className={`p-2 rounded-xl text-xs font-bold transition-all ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                      : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                  }`}
+                                >
+                                  {m.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
 
-              {/* إلى تاريخ */}
+              {/* 📅 إلى تاريخ (سنة - شهر - يوم) */}
               <div className="relative">
                 <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-orange-500" />
-                  <span>إلى تاريخ / شهر:</span>
+                  <Calendar className="w-3.5 h-3.5 text-primary" />
+                  <span>إلى تاريخ (يوم/شهر/سنة):</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => {
                     setShowEndPicker(!showEndPicker);
+                    setEndStep("months");
                     setShowStartPicker(false);
                   }}
-                  className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-orange-500/50 transition-all shadow-sm"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm"
                 >
                   <span className={dateTo ? "text-foreground font-mono" : "text-muted-foreground"}>
                     {dateTo || "اختر نهاية الفترة..."}
@@ -810,7 +994,7 @@ export default function ReportsPage() {
                         }} 
                       />
                     )}
-                    <Calendar className="w-4 h-4 text-orange-500" />
+                    <Calendar className="w-4 h-4 text-primary" />
                   </div>
                 </button>
 
@@ -820,50 +1004,96 @@ export default function ReportsPage() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute z-[10002] mt-2 w-full bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                      className="absolute z-[10002] mt-2 w-72 left-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
                     >
-                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
-                        <button
-                          type="button"
-                          onClick={() => setEndYear((y) => y - 1)}
-                          className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs flex items-center gap-1"
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                          <span>السابقة</span>
-                        </button>
-                        <span className="font-mono font-bold text-sm text-orange-500">{endYear}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEndYear((y) => y + 1)}
-                          className="p-1.5 rounded-xl bg-secondary text-foreground font-bold text-xs flex items-center gap-1"
-                        >
-                          <span>التالية</span>
-                          <ChevronLeft className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => setEndYear((y) => y - 1)}
+                            className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                            <span>{endYear}</span>
+                            {endMonthObj && endStep === "days" && (
+                              <span>- {endMonthObj.num}</span>
+                            )}
+                          </div>
 
-                      <div className="grid grid-cols-3 gap-2 pt-1">
-                        {monthsList.map((m) => {
-                          const mStr = `${endYear}-${m.num}`;
-                          const isSelected = dateTo === mStr;
-                          return (
-                            <button
-                              key={m.num}
-                              type="button"
-                              onClick={() => {
-                                setDateTo(mStr);
-                                setShowEndPicker(false);
-                              }}
-                              className={`p-2.5 rounded-2xl text-xs font-bold transition-all ${
-                                isSelected
-                                  ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20"
-                                  : "bg-secondary/50 hover:bg-orange-500/10 text-foreground hover:text-orange-500"
-                              }`}
-                            >
-                              {m.name}
-                            </button>
-                          );
-                        })}
+                          <button
+                            type="button"
+                            onClick={() => setEndYear((y) => y + 1)}
+                            className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {endStep === "days" ? (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center px-1 text-[11px]">
+                              <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                              <button
+                                type="button"
+                                onClick={() => setEndStep("months")}
+                                className="text-primary hover:underline font-bold text-[10px]"
+                              >
+                                تغيير الشهر ({endMonthObj?.name || "اختر"})
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                              {daysInEndMonth.map((dayNum) => {
+                                const dateString = `${endYear}-${endMonthObj?.num || "01"}-${dayNum}`;
+                                const isSelected = dateTo === dateString;
+                                return (
+                                  <button
+                                    key={dayNum}
+                                    type="button"
+                                    onClick={() => {
+                                      setDateTo(dateString);
+                                      setShowEndPicker(false);
+                                    }}
+                                    className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                                      isSelected
+                                        ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                        : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                    }`}
+                                  >
+                                    {dayNum}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-2 pt-1">
+                            {monthsList.map((m) => {
+                              const monthString = `${endYear}-${m.num}`;
+                              const isSelected = dateTo === monthString;
+                              return (
+                                <button
+                                  key={m.num}
+                                  type="button"
+                                  onClick={() => {
+                                    setEndMonthObj(m);
+                                    setEndStep("days");
+                                    setDateTo(monthString);
+                                  }}
+                                  className={`p-2 rounded-xl text-xs font-bold transition-all ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                      : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                  }`}
+                                >
+                                  {m.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -872,14 +1102,14 @@ export default function ReportsPage() {
             </div>
 
             {activeCustomer && (
-              <div className="p-3.5 bg-orange-500/10 border border-orange-500/20 rounded-2xl text-xs space-y-1 text-orange-600 dark:text-orange-400 font-bold">
+              <div className="p-3.5 bg-primary/10 border border-primary/20 rounded-2xl text-xs space-y-1 text-primary font-bold">
                 <div className="flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 shrink-0" />
                   <span>المنتجات المشتراة: <strong>{activeCustomer.purchasedProductsList || "لا يوجد منتجات"}</strong></span>
                 </div>
                 <div className="flex items-center gap-4 text-[11px] text-muted-foreground pt-1">
-                  <span className="flex items-center gap-1"><User className="w-3.5 h-3.5 text-orange-500" /> {activeCustomer.customerName}</span>
-                  <span className="flex items-center gap-1 font-mono dir-ltr"><Phone className="w-3.5 h-3.5 text-orange-500 shrink-0" /> {activeCustomer.phoneNumber}</span>
+                  <span className="flex items-center gap-1"><User className="w-3.5 h-3.5 text-primary" /> {activeCustomer.customerName}</span>
+                  <span className="flex items-center gap-1 font-mono dir-ltr"><Phone className="w-3.5 h-3.5 text-primary shrink-0" /> {activeCustomer.phoneNumber}</span>
                 </div>
               </div>
             )}
@@ -897,7 +1127,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="bg-card border border-border p-5 rounded-3xl shadow-sm space-y-1">
-              <span className="text-[11px] font-bold text-rose-500 block">المتبقي بذمة العميل حالياً</span>
+              <span className="text-[11px] font-bold text-rose-500 block">المتبقي بذمة العملاء حالياً</span>
               <h2 className="text-xl font-black text-rose-500 font-mono dir-ltr text-right">{summary.remaining.toLocaleString()} د.ع</h2>
             </div>
 
@@ -917,7 +1147,7 @@ export default function ReportsPage() {
             </div>
 
             {ledgerEntries.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground font-bold">لا توجد حركات تسديد لهذا العميل ضمن النطاق المحدد.</div>
+              <div className="text-center py-12 text-muted-foreground font-bold">لا توجد حركات تسديد ضمن النطاق أو الفلتر المحدد.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-right text-xs whitespace-nowrap border-collapse">
@@ -936,7 +1166,7 @@ export default function ReportsPage() {
                       <tr key={item.id || idx} className="hover:bg-secondary/40 transition-colors">
                         <td className="p-3 font-mono text-muted-foreground">{item.paidAt ? new Date(item.paidAt).toLocaleDateString("ar-IQ") : "-"}</td>
                         <td className="p-3 text-foreground">{item.customerName}</td>
-                        <td className="p-3 text-orange-500 font-extrabold">{item.productName}</td>
+                        <td className="p-3 text-primary font-extrabold">{item.productName}</td>
                         <td className="p-3 font-mono text-emerald-600 dark:text-emerald-400 font-bold">+{(item.amountPaid || 0).toLocaleString()} د.ع</td>
                         <td className="p-3 font-mono text-foreground">{(item.cumulativePaid || 0).toLocaleString()} د.ع</td>
                         <td className="p-3 font-mono text-rose-500 font-bold">{(item.remainingBalance || 0).toLocaleString()} د.ع</td>
@@ -976,7 +1206,7 @@ export default function ReportsPage() {
 
           <div className="bg-card border border-border rounded-3xl p-5 shadow-sm space-y-4">
             <h3 className="text-sm font-black text-foreground flex items-center gap-2">
-              <Vault className="w-5 h-5 text-orange-500" />
+              <Vault className="w-5 h-5 text-primary" />
               <span>كشف حركة الصندوق والتصرفات المالية</span>
             </h3>
 
@@ -1045,7 +1275,7 @@ export default function ReportsPage() {
 
           <div className="bg-card border border-border rounded-3xl p-5 shadow-sm space-y-4">
             <h3 className="text-sm font-black text-foreground flex items-center gap-2">
-              <Package className="w-5 h-5 text-orange-500" />
+              <Package className="w-5 h-5 text-primary" />
               <span>تقرير المخزون والسلع المتاحة والمباعة</span>
             </h3>
 
@@ -1067,7 +1297,7 @@ export default function ReportsPage() {
                   <tbody className="divide-y divide-border/40 font-bold">
                     {inventoryItems.map((item, idx) => (
                       <tr key={item.id || idx} className="hover:bg-secondary/40 transition-colors">
-                        <td className="p-3 text-orange-500 font-extrabold">{item.title}</td>
+                        <td className="p-3 text-primary font-extrabold">{item.title}</td>
                         <td className="p-3 text-foreground">{item.category || "-"}</td>
                         <td className="p-3 font-mono text-muted-foreground">{item.specs?.chassisNumber || "-"}</td>
                         <td className="p-3 font-mono text-amber-600 font-bold">{(item.costPrice || 0).toLocaleString()} د.ع</td>

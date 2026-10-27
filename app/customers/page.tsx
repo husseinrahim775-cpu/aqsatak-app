@@ -36,11 +36,15 @@ interface GroupedCustomer {
 }
 
 export default function CustomersPage() {
-  const { user } = useAuth();
+  const { user, userData } = useAuth() as any;
   const [installments, setInstallments] = useState<InstallmentData[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed" | "blacklist">("all");
+
+  // 🔒 فحص الصلاحيات الأمنية: هل المستخدم مالك أو لديه صلاحية التعديل والحذف؟
+  const isEmployee = userData?.role === "employee";
+  const canDeleteOrEdit = !isEmployee || !!userData?.permissions?.canDeleteOrEdit;
 
   const [editingCustomer, setEditingCustomer] = useState<GroupedCustomer | null>(null);
   const [editForm, setEditForm] = useState({ customerName: "", phoneNumber: "", address: "" });
@@ -143,6 +147,10 @@ export default function CustomersPage() {
   }, [installments, payments, search, statusFilter]);
 
   const openEditModal = (customer: GroupedCustomer) => {
+    if (!canDeleteOrEdit) {
+      toast.error("عذراً، لا تملك صلاحية تعديل بيانات العملاء. يرجى مراجعة المالك.");
+      return;
+    }
     setEditForm({
       customerName: customer.customerName,
       phoneNumber: customer.phoneNumber,
@@ -152,7 +160,7 @@ export default function CustomersPage() {
   };
 
   const handleSaveChanges = async () => {
-    if (!editingCustomer) return;
+    if (!editingCustomer || !canDeleteOrEdit) return;
     try {
       setIsSaving(true);
       const updatePromises = editingCustomer.installments.map((inst) => 
@@ -176,6 +184,10 @@ export default function CustomersPage() {
   };
 
   const openFineModal = (customer: GroupedCustomer) => {
+    if (!canDeleteOrEdit) {
+      toast.error("عذراً، لا تملك صلاحية إضافة غرامات مالية. يرجى مراجعة المالك.");
+      return;
+    }
     setFineCustomer(customer);
     setFineForm({ 
       installmentId: customer.installments.length === 1 ? customer.installments[0].id! : "", 
@@ -186,7 +198,7 @@ export default function CustomersPage() {
   };
 
   const handleSaveFine = async () => {
-    if (!fineCustomer || !fineForm.installmentId || !fineForm.amount || !user?.uid) return;
+    if (!fineCustomer || !fineForm.installmentId || !fineForm.amount || !user?.uid || !canDeleteOrEdit) return;
     
     const selectedInst = fineCustomer.installments.find(i => i.id === fineForm.installmentId);
     if (!selectedInst) return;
@@ -217,6 +229,10 @@ export default function CustomersPage() {
 
   const handleToggleBlacklistSubmit = async () => {
     if (!blacklistModalCust || !user?.uid) return;
+    if (!canDeleteOrEdit) {
+      toast.error("عذراً، لا تملك صلاحية تعديل حالة حظر العملاء.");
+      return;
+    }
     try {
       setIsSavingBlacklist(true);
       const willBlacklist = !blacklistModalCust.riskStatus.isBlacklisted;
@@ -241,6 +257,10 @@ export default function CustomersPage() {
   };
 
   const handleDeleteCustomer = async (customer: GroupedCustomer) => {
+    if (!canDeleteOrEdit) {
+      toast.error("عذراً، لا تملك صلاحية حذف العملاء. يرجى مراجعة المالك.");
+      return;
+    }
     if (!window.confirm(`هل أنت متأكد من حذف العميل (${customer.customerName}) وإرجاع المواد للمخزن؟`)) return;
     try {
       const deletePromises = customer.installments.map((inst) => 
@@ -340,7 +360,7 @@ export default function CustomersPage() {
       case "weekly":
         return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">أسبوعي</span>;
       default:
-        return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-500/20">شهري</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/15 text-primary border border-primary/20">شهري</span>;
     }
   };
 
@@ -349,23 +369,23 @@ export default function CustomersPage() {
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      className="space-y-5 md:space-y-6 pb-12 max-w-7xl mx-auto"
+      className="space-y-5 md:space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
     >
-      {/* 1. ترويسة الصفحة بأسلوب V14 Glass Style */}
+      {/* 1. ترويسة الصفحة */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm print:hidden">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <Users className="w-6 h-6 text-orange-500" />
+            <Users className="w-6 h-6 text-primary" />
             إدارة العملاء والأقساط
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">سجلات العملاء، التقييم الآلي لالتزام السداد، والقائمة السوداء V14.</p>
+          <p className="text-xs text-muted-foreground mt-1">سجلات العملاء، التقييم الآلي لالتزام السداد، والقائمة السوداء.</p>
         </div>
         
         <Link href="/customers/new">
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-5 py-3 rounded-2xl font-bold text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة قسط جديد</span>
@@ -373,7 +393,7 @@ export default function CustomersPage() {
         </Link>
       </div>
 
-      {/* 2. شريط البحث والفلترة V14 Pill Buttons */}
+      {/* 2. شريط البحث والفلترة */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between print:hidden">
         <div className="relative w-full sm:flex-1">
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -382,7 +402,7 @@ export default function CustomersPage() {
             placeholder="ابحث عن اسم العميل أو رقم الهاتف..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pr-11 pl-4 py-3 rounded-2xl border border-border bg-card/80 backdrop-blur-md text-foreground text-xs font-bold focus:ring-2 focus:ring-orange-500/50 outline-none transition-all shadow-sm"
+            className="w-full pr-11 pl-4 py-3 rounded-2xl border border-border bg-card/80 backdrop-blur-md text-foreground text-xs font-bold focus:ring-2 focus:ring-primary/50 outline-none transition-all shadow-sm"
           />
         </div>
 
@@ -400,7 +420,7 @@ export default function CustomersPage() {
                 statusFilter === tab.id
                   ? tab.id === "blacklist" 
                     ? "bg-rose-600 text-white shadow-sm" 
-                    : "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+                    : "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -410,7 +430,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* 3. شبكة بطاقات العملاء بأسلوب V14 Card Hover */}
+      {/* 3. شبكة بطاقات العملاء */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 print:hidden">
         {groupedCustomers.map((customer) => {
           const totalPeriodic = customer.installments.reduce((acc, curr) => acc + curr.monthlyInstallment, 0);
@@ -419,7 +439,7 @@ export default function CustomersPage() {
             <motion.div 
               key={customer.phoneNumber} 
               whileHover={{ y: -4, scale: 1.005 }}
-              className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 space-y-4 shadow-sm hover:border-orange-500/40 transition-all relative group"
+              className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 space-y-4 shadow-sm hover:border-primary/40 transition-all relative group"
             >
               {/* الترويسة وأدوات التحكم السريعة */}
               <div className="flex justify-between items-start border-b border-border/60 pb-3.5">
@@ -434,45 +454,53 @@ export default function CustomersPage() {
                       >
                         <Printer className="w-4 h-4" />
                       </button>
-                      <button 
-                        onClick={() => openFineModal(customer)} 
-                        className="p-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-500/10 rounded-xl transition-colors" 
-                        title="إضافة غرامة تأخير"
-                      >
-                        <AlertCircle className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setBlacklistModalCust(customer);
-                          setBlacklistReasonInput(customer.installments.find(i => i.blacklistReason)?.blacklistReason || "");
-                        }} 
-                        className={`p-1.5 rounded-xl transition-colors ${
-                          customer.riskStatus.isBlacklisted 
-                            ? "text-emerald-500 hover:bg-emerald-500/10" 
-                            : "text-rose-500 hover:bg-rose-500/10"
-                        }`} 
-                        title={customer.riskStatus.isBlacklisted ? "إلغاء الحظر" : "حظر العميل / القائمة السوداء"}
-                      >
-                        {customer.riskStatus.isBlacklisted ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
-                      </button>
-                      <button 
-                        onClick={() => openEditModal(customer)} 
-                        className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10 rounded-xl transition-colors" 
-                        title="تعديل بيانات العميل"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteCustomer(customer)} 
-                        className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 rounded-xl transition-colors" 
-                        title="حذف العميل بالكامل"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                      {canDeleteOrEdit && (
+                        <>
+                          <button 
+                            onClick={() => openFineModal(customer)} 
+                            className="p-1.5 text-primary hover:bg-primary/10 rounded-xl transition-colors" 
+                            title="إضافة غرامة تأخير"
+                          >
+                            <AlertCircle className="w-4 h-4" />
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              setBlacklistModalCust(customer);
+                              setBlacklistReasonInput(customer.installments.find(i => i.blacklistReason)?.blacklistReason || "");
+                            }} 
+                            className={`p-1.5 rounded-xl transition-colors ${
+                              customer.riskStatus.isBlacklisted 
+                                ? "text-emerald-500 hover:bg-emerald-500/10" 
+                                : "text-rose-500 hover:bg-rose-500/10"
+                            }`} 
+                            title={customer.riskStatus.isBlacklisted ? "إلغاء الحظر" : "حظر العميل / القائمة السوداء"}
+                          >
+                            {customer.riskStatus.isBlacklisted ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                          </button>
+
+                          <button 
+                            onClick={() => openEditModal(customer)} 
+                            className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10 rounded-xl transition-colors" 
+                            title="تعديل بيانات العميل"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+
+                          <button 
+                            onClick={() => handleDeleteCustomer(customer)} 
+                            className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 rounded-xl transition-colors" 
+                            title="حذف العميل بالكامل"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5 font-mono flex items-center gap-1" dir="ltr">
-                    <Phone className="w-3 h-3 text-orange-500" /> {customer.phoneNumber}
+                    <Phone className="w-3 h-3 text-primary" /> {customer.phoneNumber}
                   </p>
                 </div>
 
@@ -493,7 +521,7 @@ export default function CustomersPage() {
                 </div>
               </div>
 
-              {/* الأرقام المطبقة لـ V14 Metric Look */}
+              {/* الأرقام والمالية */}
               <div className="space-y-2 text-xs md:text-sm bg-secondary/30 p-3.5 rounded-2xl border border-border/40">
                 <div className="flex justify-between items-center text-muted-foreground">
                   <span>إجمالي المتبقي للتقسيط:</span>
@@ -505,7 +533,7 @@ export default function CustomersPage() {
                 </div>
                 <div className="flex justify-between items-center text-muted-foreground">
                   <span>مجموع القسط المستحق:</span>
-                  <span className="font-bold text-orange-500">{Math.round(totalPeriodic).toLocaleString("en-US")} د.ع</span>
+                  <span className="font-bold text-primary">{Math.round(totalPeriodic).toLocaleString("en-US")} د.ع</span>
                 </div>
               </div>
 
@@ -522,7 +550,7 @@ export default function CustomersPage() {
 
                 <Link
                   href={`/customers/details?id=${encodeURIComponent(customer.phoneNumber)}`}
-                  className="flex items-center justify-center gap-1.5 text-xs bg-secondary hover:bg-orange-500/10 text-foreground hover:text-orange-500 px-4 py-2 rounded-2xl font-bold border border-border/80 transition-all shrink-0"
+                  className="flex items-center justify-center gap-1.5 text-xs bg-secondary hover:bg-primary/10 text-foreground hover:text-primary px-4 py-2 rounded-2xl font-bold border border-border/80 transition-all shrink-0"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   <span>عرض الملف</span>
@@ -533,9 +561,9 @@ export default function CustomersPage() {
         })}
       </div>
 
-      {/* 🚨 Modal الحظر وتحديد القائمة السوداء V14 Animated Modal */}
+      {/* 🚨 Modal الحظر وتحديد القائمة السوداء */}
       <AnimatePresence>
-        {blacklistModalCust && (
+        {blacklistModalCust && canDeleteOrEdit && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -600,7 +628,7 @@ export default function CustomersPage() {
         )}
       </AnimatePresence>
 
-      {/* 🖨️ Modal اختيار نوع الطباعة V14 Modal */}
+      {/* 🖨️ Modal اختيار نوع الطباعة */}
       <AnimatePresence>
         {printModalCustomer && (
           <motion.div 
@@ -616,8 +644,8 @@ export default function CustomersPage() {
               className="bg-card rounded-3xl w-full max-w-md p-6 shadow-2xl border border-border space-y-4"
             >
               <div className="flex justify-between items-center border-b border-border pb-3">
-                <h3 className="font-extrabold text-base flex items-center gap-2">
-                  <Printer className="w-5 h-5 text-orange-500" />
+                <h3 className="font-extrabold text-base flex items-center gap-2 text-foreground">
+                  <Printer className="w-5 h-5 text-primary" />
                   طباعة كشف حساب العميل
                 </h3>
                 <button onClick={() => setPrintModalCustomer(null)} className="p-1 hover:bg-secondary rounded-xl transition-colors">
@@ -631,27 +659,27 @@ export default function CustomersPage() {
                 <label
                   onClick={() => setPrintType("summary")}
                   className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
-                    printType === "summary" ? "border-orange-500 bg-orange-500/10 font-bold" : "border-border hover:border-gray-400"
+                    printType === "summary" ? "border-primary bg-primary/10 font-bold" : "border-border hover:border-gray-400"
                   }`}
                 >
                   <div>
                     <p className="text-xs font-bold text-foreground">📄 ملخص موقف مالي فقط</p>
                     <p className="text-[10px] text-muted-foreground font-normal mt-0.5">المعلومات العامة، إجمالي الدين والأقساط (بدون سجل الدفعات)</p>
                   </div>
-                  <input type="radio" checked={printType === "summary"} readOnly className="accent-orange-500" />
+                  <input type="radio" checked={printType === "summary"} readOnly className="accent-primary" />
                 </label>
 
                 <label
                   onClick={() => setPrintType("full")}
                   className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
-                    printType === "full" ? "border-orange-500 bg-orange-500/10 font-bold" : "border-border hover:border-gray-400"
+                    printType === "full" ? "border-primary bg-primary/10 font-bold" : "border-border hover:border-gray-400"
                   }`}
                 >
                   <div>
                     <p className="text-xs font-bold text-foreground">📊 كشف حساب تفصيلي شامل</p>
                     <p className="text-[10px] text-muted-foreground font-normal mt-0.5">المعلومات العامة + جدول جميع الدفعات والمقبوضات</p>
                   </div>
-                  <input type="radio" checked={printType === "full"} readOnly className="accent-orange-500" />
+                  <input type="radio" checked={printType === "full"} readOnly className="accent-primary" />
                 </label>
               </div>
 
@@ -664,7 +692,7 @@ export default function CustomersPage() {
                 </button>
                 <button
                   onClick={handleExecutePrint}
-                  className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 shadow-md shadow-orange-500/20"
+                  className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 shadow-md shadow-primary/20"
                 >
                   <Printer className="w-4 h-4" />
                   بدء الطباعة
@@ -689,7 +717,7 @@ export default function CustomersPage() {
 
       {/* modal إضافة الغرامة */}
       <AnimatePresence>
-        {isFineModalOpen && fineCustomer && (
+        {isFineModalOpen && fineCustomer && canDeleteOrEdit && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -703,7 +731,7 @@ export default function CustomersPage() {
               className="bg-card rounded-3xl w-full max-w-md p-6 shadow-2xl border border-border space-y-4"
             >
               <div className="flex justify-between items-center border-b border-border pb-3">
-                <h2 className="text-base font-black flex items-center gap-2 text-orange-500">
+                <h2 className="text-base font-black flex items-center gap-2 text-primary">
                   <AlertCircle className="w-5 h-5" />
                   إضافة غرامة تأخير
                 </h2>
@@ -713,7 +741,7 @@ export default function CustomersPage() {
               </div>
               
               <div className="space-y-4">
-                <div className="p-3 bg-orange-500/10 text-orange-600 rounded-2xl text-xs border border-orange-500/20 font-medium">
+                <div className="p-3 bg-primary/10 text-primary rounded-2xl text-xs border border-primary/20 font-medium">
                   سيتم إضافة مبلغ الغرامة إلى <strong>إجمالي المتبقي</strong> للعميل ({fineCustomer.customerName}).
                 </div>
 
@@ -722,7 +750,7 @@ export default function CustomersPage() {
                   <select
                     value={fineForm.installmentId}
                     onChange={(e) => setFineForm({...fineForm, installmentId: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
                   >
                     <option value="" disabled>-- يرجى اختيار القسط --</option>
                     {fineCustomer.installments.map(inst => (
@@ -741,7 +769,7 @@ export default function CustomersPage() {
                     placeholder="مثال: 5000"
                     value={fineForm.amount}
                     onChange={(e) => setFineForm({...fineForm, amount: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none dir-ltr text-right"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-primary outline-none dir-ltr text-right"
                   />
                 </div>
 
@@ -752,7 +780,7 @@ export default function CustomersPage() {
                     placeholder="مثال: تأخير عن الدفع لشهر 5"
                     value={fineForm.reason}
                     onChange={(e) => setFineForm({...fineForm, reason: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
 
@@ -767,7 +795,7 @@ export default function CustomersPage() {
                   <button
                     onClick={handleSaveFine}
                     disabled={isSavingFine || !fineForm.installmentId || !fineForm.amount}
-                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
+                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-primary/20"
                   >
                     {isSavingFine ? <Loader2 className="w-4 h-4 animate-spin" /> : 'إضافة الغرامة'}
                   </button>
@@ -780,7 +808,7 @@ export default function CustomersPage() {
 
       {/* modal تعديل بيانات العميل */}
       <AnimatePresence>
-        {editingCustomer && (
+        {editingCustomer && canDeleteOrEdit && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -807,7 +835,7 @@ export default function CustomersPage() {
                     type="text"
                     value={editForm.customerName}
                     onChange={(e) => setEditForm({...editForm, customerName: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
                 <div>
@@ -816,7 +844,7 @@ export default function CustomersPage() {
                     type="text"
                     value={editForm.phoneNumber}
                     onChange={(e) => setEditForm({...editForm, phoneNumber: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none text-left"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none text-left"
                     dir="ltr"
                   />
                 </div>
@@ -826,7 +854,7 @@ export default function CustomersPage() {
                     type="text"
                     value={editForm.address}
                     onChange={(e) => setEditForm({...editForm, address: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
 
@@ -841,7 +869,7 @@ export default function CustomersPage() {
                   <button
                     onClick={handleSaveChanges}
                     disabled={isSaving || !editForm.customerName || !editForm.phoneNumber}
-                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
+                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-primary/20"
                   >
                     {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ التعديلات'}
                   </button>

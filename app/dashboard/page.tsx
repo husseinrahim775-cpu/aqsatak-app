@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   Wallet, Users, Percent, Coins, Banknote, 
   Loader2, MessageSquare, AlertTriangle, Activity, Landmark, 
-  CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, Plus, Calendar, Sun, Moon, Sparkles
+  CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, Plus, Calendar,
+  ChevronRight, ChevronLeft, X
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { auth } from "@/services/firebase";
@@ -27,41 +28,25 @@ interface UpcomingAlert {
 
 type TimeRange = "today" | "week" | "month" | "custom" | "all";
 
-// 🧠 دالة توليد الترحيب الذكي والعبارات الملهمة بحسب وقت اليوم
 const getSmartGreeting = () => {
   const hour = new Date().getHours();
 
   if (hour >= 5 && hour < 12) {
-    const morningPhrases = [
-      "تابع حركة أقساطك وأرباحك وبدء يومك المالي بكل ذكاء وسلاسة.",
-      "بداية يوم جديدة وموفقة! تفقّد تدفق المقبوضات وأحدث العقود.",
-      "صباح الهمة والنشاط، نتمنى لك يوماً مليئاً بالتحصيلات الناجحة."
-    ];
     return {
       title: "صباح الخير",
-      subtitle: morningPhrases[Math.floor(Math.random() * morningPhrases.length)],
+      subtitle: "تابع حركة أقساطك وأرباحك وبدء يومك المالي بكل ذكاء وسلاسة.",
       icon: "☀️"
     };
   } else if (hour >= 12 && hour < 17) {
-    const afternoonPhrases = [
-      "تابع حركة أقساطك وأرباحك وإدارة المقبوضات بذكاء وسلاسة.",
-      "استمر بالإنجاز! إليك نظرة سريعة على كفاءة التحصيل الحالية.",
-      "مساء الإنجاز، واصل متابعة الدفعات المستحقة لليوم."
-    ];
     return {
       title: "مساء الخير",
-      subtitle: afternoonPhrases[Math.floor(Math.random() * afternoonPhrases.length)],
+      subtitle: "تابع حركة أقساطك وأرباحك وإدارة المقبوضات بذكاء وسلاسة.",
       icon: "🌤️"
     };
   } else {
-    const eveningPhrases = [
-      "طاب مساؤك! ملخص نشاطك المالي والأرباح المحققة لهذا اليوم.",
-      "مساء النور، تفقّد التقارير المالية والتحصيلات قبل ختام اليوم.",
-      "ختام يوم موفق! نظرة شاملة على إجمالي الديون والأقساط المستردة."
-    ];
     return {
       title: "مساء الخير",
-      subtitle: eveningPhrases[Math.floor(Math.random() * eveningPhrases.length)],
+      subtitle: "طاب مساؤك! ملخص نشاطك المالي والأرباح المحققة لهذا اليوم.",
       icon: "🌙"
     };
   }
@@ -71,48 +56,58 @@ export default function DashboardPage() {
   const { user, userData, loading: authLoading } = useAuth() as any;
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
-
-  // 🌟 حالة الترحيب الذكي
   const [greeting, setGreeting] = useState({ title: "صباح الخير", subtitle: "", icon: "👋" });
 
   useEffect(() => {
-    // حساب الترحيب الذكي عند فتح الصفحة
     setGreeting(getSmartGreeting());
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const localSessionStr = localStorage.getItem("active_session") || sessionStorage.getItem("active_session");
-    const activeUser = userData || (localSessionStr ? JSON.parse(localSessionStr) : null);
-
-    if (!authLoading && activeUser) {
-      const isEmployee = activeUser.role === "employee";
-      const canViewDashboard = activeUser.permissions?.canViewDashboard;
-
-      if (isEmployee && !canViewDashboard) {
-        const perms = activeUser.permissions || {};
-        let target = "/customers";
-
-        if (perms.canManageStore) target = "/inventory";
-        else if (perms.canManageCustomers) target = "/customers";
-        else if (perms.canViewTreasury) target = "/treasury";
-
-        window.location.href = target;
-      }
-    }
-  }, [userData, authLoading]);
-
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
-  
-  // 📅 حالات التاريخ المخصص (من - إلى)
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
 
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [startMonthObj, setStartMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [startStep, setStartStep] = useState<"months" | "days">("months");
+
+  const [endYear, setEndYear] = useState(new Date().getFullYear());
+  const [endMonthObj, setEndMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [endStep, setEndStep] = useState<"months" | "days">("months");
+
+  const monthsList = [
+    { num: "01", name: "شهر 1" }, { num: "02", name: "شهر 2" },
+    { num: "03", name: "شهر 3" }, { num: "04", name: "شهر 4" },
+    { num: "05", name: "شهر 5" }, { num: "06", name: "شهر 6" },
+    { num: "07", name: "شهر 7" }, { num: "08", name: "شهر 8" },
+    { num: "09", name: "شهر 9" }, { num: "10", name: "شهر 10" },
+    { num: "11", name: "شهر 11" }, { num: "12", name: "شهر 12" },
+  ];
+
+  const getDaysInMonth = (year: number, monthNumStr?: string) => {
+    if (!monthNumStr) return [];
+    const monthIndex = parseInt(monthNumStr, 10) - 1;
+    const count = new Date(year, monthIndex + 1, 0).getDate();
+    const daysArr = [];
+    for (let i = 1; i <= count; i++) {
+      daysArr.push(String(i).padStart(2, "0"));
+    }
+    return daysArr;
+  };
+
+  const daysInStartMonth = useMemo(() => getDaysInMonth(startYear, startMonthObj?.num), [startYear, startMonthObj]);
+  const daysInEndMonth = useMemo(() => getDaysInMonth(endYear, endMonthObj?.num), [endYear, endMonthObj]);
+
   const [rawPayments, setRawPayments] = useState<PaymentRecord[]>([]);
   const [rawInstallments, setRawInstallments] = useState<InstallmentData[]>([]);
-
-  // حالة اليوم المحدد بالنقر داخل المخطط البياني
   const [selectedBarIndex, setSelectedBarIndex] = useState<number | null>(null);
 
   const [stats, setStats] = useState({
@@ -130,7 +125,6 @@ export default function DashboardPage() {
     monthly: 0,
   });
 
-  const [upcomingAlerts, setUpcomingAlerts] = useState<UpcomingAlert[]>([]);
   const [overdueAlerts, setOverdueAlerts] = useState<UpcomingAlert[]>([]);
 
   useEffect(() => {
@@ -170,9 +164,7 @@ export default function DashboardPage() {
         let totalCollectedAllTime = 0;
 
         const uniquePhones = new Set<string>();
-        const alertsList: UpcomingAlert[] = [];
         const overdueList: UpcomingAlert[] = [];
-
         const now = new Date();
 
         installments.forEach((inst) => {
@@ -234,30 +226,19 @@ export default function DashboardPage() {
               totalExpectedToDate += installmentAmount;
             }
 
-            if (!isPaid && calculatedRemainingDebt > 0) {
+            if (!isPaid && calculatedRemainingDebt > 0 && !hasFoundNextUnpaid) {
               const diffTime = dueDate.getTime() - now.getTime();
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-              if (!hasFoundNextUnpaid) {
-                if (diffDays < 0) {
-                  overdueList.push({
-                    customerName: inst.customerName,
-                    phoneNumber: inst.phoneNumber,
-                    productName: inst.productName,
-                    amount: Math.min(installmentAmount, calculatedRemainingDebt), 
-                    dueDate: dueDate,
-                    daysLeft: Math.abs(diffDays), 
-                  });
-                } else if (diffDays <= 30) {
-                  alertsList.push({
-                    customerName: inst.customerName,
-                    phoneNumber: inst.phoneNumber,
-                    productName: inst.productName,
-                    amount: Math.min(installmentAmount, calculatedRemainingDebt), 
-                    dueDate: dueDate,
-                    daysLeft: diffDays,
-                  });
-                }
+              if (diffDays < 0) {
+                overdueList.push({
+                  customerName: inst.customerName,
+                  phoneNumber: inst.phoneNumber,
+                  productName: inst.productName,
+                  amount: Math.min(installmentAmount, calculatedRemainingDebt), 
+                  dueDate: dueDate,
+                  daysLeft: Math.abs(diffDays), 
+                });
                 hasFoundNextUnpaid = true;
               }
             }
@@ -285,10 +266,7 @@ export default function DashboardPage() {
           monthly: expectedMonthlySum,
         });
 
-        alertsList.sort((a, b) => a.daysLeft - b.daysLeft);
         overdueList.sort((a, b) => b.daysLeft - a.daysLeft);
-
-        setUpcomingAlerts(alertsList.slice(0, 5));
         setOverdueAlerts(overdueList.slice(0, 5));
 
       } catch (error) {
@@ -301,7 +279,7 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [user]);
 
-  // 1. 🔍 تصفية المقبوضات بحسب التبويب المختار (شاملاً النطاق المخصص)
+  // تصفية المقبوضات
   const filteredCollectedAmount = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -346,7 +324,7 @@ export default function DashboardPage() {
     }, 0);
   }, [rawPayments, timeRange, customStartDate, customEndDate]);
 
-  // 2. 📊 معادلة حساب المقبوضات الحقيقية لكل يوم من أيام الأسبوع الحالي
+  // رسم الأسبوع الحقيقي
   const weeklyDailyBreakdown = useMemo(() => {
     const daysName = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
     const now = new Date();
@@ -386,16 +364,13 @@ export default function DashboardPage() {
     let cleanPhone = alert.phoneNumber.replace(/[^0-9]/g, "");
     if (cleanPhone.startsWith("0")) cleanPhone = "964" + cleanPhone.slice(1);
 
-    const message = isOverdue 
-      ? `مرحباً ${alert.customerName}، نود تذكيرك بأن قسطك البالغ ${Math.round(alert.amount).toLocaleString()} د.ع لمنتج (${alert.productName}) قد تجاوز موعد استحقاقه بـ ${alert.daysLeft} يوم.`
-      : `مرحباً ${alert.customerName}، نود تذكيرك بحلول موعد قسط مبلغ ${Math.round(alert.amount).toLocaleString()} د.ع الخاص بمنتج (${alert.productName}).`;
-
+    const message = `مرحباً ${alert.customerName}، نود تذكيرك بأن قسطك البالغ ${Math.round(alert.amount).toLocaleString()} د.ع لمنتج (${alert.productName}) قد تجاوز موعد استحقاقه.`;
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
   if (loading) {
     return (
-      <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+      <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-primary">
         <Loader2 className="w-10 h-10 animate-spin" />
         <span className="text-xs font-bold text-muted-foreground animate-pulse">جاري تحضير Dashboard ...</span>
       </div>
@@ -413,7 +388,7 @@ export default function DashboardPage() {
         className="space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
       >
         
-        {/* 🌟 1. الترويسة الرئيسية لـ Dashboard مع الترحيب التفاعلي الذكي */}
+        {/* 1. الترويسة الرئيسية */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
@@ -436,10 +411,10 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 💳 2. بطاقة الرصيد الإجمالي ومخطط الأشرطة الملونة */}
+        {/* 💳 2. بطاقات الأرصدة الرئيسية */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           
-          {/* البطاقة الرئيسية الكبيرة */}
+          {/* البطاقة الرئيسية الكبيرة (إجمالي الديون بالسوق) */}
           <motion.div 
             whileHover={{ y: -3 }}
             className="lg:col-span-5 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-6 shadow-sm flex flex-col justify-between relative overflow-hidden"
@@ -447,13 +422,13 @@ export default function DashboardPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-bold text-muted-foreground">إجمالي الديون بالسوق (الرصيد النشط)</span>
-                <span className="text-xs font-extrabold px-3 py-1 bg-orange-500/10 text-orange-600 rounded-full">
+                <span className="text-xs font-black px-3 py-1 bg-primary/10 text-primary rounded-full border border-primary/20">
                   د.ع (IQD)
                 </span>
               </div>
 
               <div className="space-y-1">
-                <h2 className="text-3xl md:text-4xl font-black text-foreground tracking-tight">
+                <h2 className="text-3xl md:text-4xl font-black text-foreground tracking-tight font-mono">
                   <AnimatedNumber value={stats.totalRemainingDebt} suffix="د.ع" />
                 </h2>
                 <p className="text-[11px] text-emerald-500 font-bold flex items-center gap-1 pt-1">
@@ -461,85 +436,135 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              {/* أزرار الإجراءات السريعة Actions */}
+              {/* أزرار الإجراءات السريعة - زر استلام دفعة يوجه إلى /accounts */}
               <div className="flex items-center gap-3 pt-2">
                 <Link 
                   href="/customers/new" 
-                  className="flex-1 py-3 px-4 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
-                >
+className="flex-1 py-3 px-4 bg-theme-gradient text-white font-black text-xs rounded-2xl flex items-center justify-center gap-2 border border-transparent shadow-md hover:opacity-90 transition-all cursor-pointer"                >
                   <Plus className="w-4 h-4" /> إضافة عقد جديد
                 </Link>
                 <Link 
-                  href="/customers" 
-                  className="flex-1 py-3 px-4 bg-secondary text-foreground font-bold text-xs rounded-2xl flex items-center justify-center gap-2 border border-border hover:bg-secondary/80 transition-colors"
-                >
-                  <Coins className="w-4 h-4 text-orange-500" /> استلام دفعة
+                  href="/accounts" 
+className="flex-1 py-3 px-4 bg-primary/10 text-theme-primary border border-theme-primary font-black text-xs rounded-2xl flex items-center justify-center gap-2 hover:bg-primary/20 transition-all cursor-pointer"                >
+                  <Coins className="w-4 h-4 text-primary" /> استلام دفعة
                 </Link>
               </div>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-border/60 grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <span className="text-muted-foreground block text-[10px]">رأس المال المسترد</span>
-                <span className="font-bold text-foreground text-sm"><AnimatedNumber value={stats.totalRemainingCapital} suffix="د.ع" /></span>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[10px]">الأرباح المتوقعة</span>
-                <span className="font-bold text-orange-500 text-sm"><AnimatedNumber value={stats.totalRemainingProfits} suffix="د.ع" /></span>
-              </div>
+            {/* 🌟 كارتان متراصان (واحد فوق الآخر) بنفس تصميم الكروت البارزة */}
+            <div className="mt-6 pt-4 border-t border-border/60 flex flex-col gap-3">
+              
+              {/* 1. كارت رأس المال المتبقي بالسوق */}
+              <motion.div 
+                whileHover={{ scale: 1.01 }}
+                className="bg-secondary/40 border border-border/60 p-4 rounded-2xl shadow-sm flex flex-col justify-between"
+              >
+                <div className="flex justify-between items-center text-muted-foreground">
+                  <span className="text-xs font-black">رأس المال المتبقي بالسوق</span>
+                  <Wallet className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div className="my-1.5">
+                  <h3 className="text-xl font-black text-foreground tracking-tight font-mono">
+                    <AnimatedNumber value={stats.totalRemainingCapital} suffix="د.ع" />
+                  </h3>
+                </div>
+                <div className="bg-background/50 border border-border/40 px-2.5 py-1 rounded-xl text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                  <span>أصل التكلفة</span>
+                  <span className="text-emerald-500 font-mono font-black">نشط</span>
+                </div>
+              </motion.div>
+
+              {/* 2. كارت الأرباح المتوقعة */}
+              <motion.div 
+                whileHover={{ scale: 1.01 }}
+                className="bg-secondary/40 border border-border/60 p-4 rounded-2xl shadow-sm flex flex-col justify-between"
+              >
+                <div className="flex justify-between items-center text-muted-foreground">
+                  <span className="text-xs font-black">الأرباح المتوقعة</span>
+                  <Banknote className="w-4 h-4 text-primary" />
+                </div>
+                <div className="my-1.5">
+                  <h3 className="text-xl font-black text-primary tracking-tight font-mono">
+                    <AnimatedNumber value={stats.totalRemainingProfits} suffix="د.ع" />
+                  </h3>
+                </div>
+                <div className="bg-background/50 border border-border/40 px-2.5 py-1 rounded-xl text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                  <span>صافي أرباح العقود القائمة</span>
+                  <span className="text-primary font-mono font-black">مستقبلي</span>
+                </div>
+              </motion.div>
+
             </div>
           </motion.div>
 
-          {/* الكروت البرتقالية والرسم البياني المزدوج */}
+          {/* الكروت البارزة للمجموعات والرسم البياني */}
           <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
             
+            {/* 1. الوارد اليومي المتوقع */}
             <motion.div 
               whileHover={{ y: -3 }}
-              className="bg-gradient-to-br from-orange-500 to-red-500 text-white p-5 rounded-3xl shadow-lg shadow-orange-500/20 flex flex-col justify-between"
-            >
+className="bg-theme-gradient text-white p-5 rounded-3xl shadow-lg shadow-primary/20 flex flex-col justify-between"            >
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold opacity-90">الوارد اليومي المتوقع</span>
+                <span className="text-xs font-black opacity-90">الوارد اليومي المتوقع</span>
                 <CalendarDays className="w-5 h-5 opacity-80" />
               </div>
               <div className="my-3">
-                <h3 className="text-3xl font-black tracking-tight"><AnimatedNumber value={expectedIncome.daily} suffix="د.ع" /></h3>
+                <h3 className="text-3xl font-black tracking-tight font-mono"><AnimatedNumber value={expectedIncome.daily} suffix="د.ع" /></h3>
               </div>
-              <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] font-bold flex items-center justify-between">
+              <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] font-black flex items-center justify-between">
                 <span>أقساط يومية نشطة</span>
                 <span>100%</span>
               </div>
             </motion.div>
 
+            {/* 2. الوارد الأسبوعي المتوقع */}
             <motion.div 
               whileHover={{ y: -3 }}
-              className="bg-card/90 backdrop-blur-md border border-border p-5 rounded-3xl shadow-sm flex flex-col justify-between"
+              className="bg-gradient-to-br from-amber-500 to-amber-600 text-white p-5 rounded-3xl shadow-lg shadow-amber-500/20 flex flex-col justify-between"
             >
-              <div className="flex justify-between items-center text-muted-foreground">
-                <span className="text-xs font-bold">الوارد الشهري المتوقع</span>
-                <CalendarRange className="w-5 h-5 text-purple-500" />
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-black opacity-90">الوارد الأسبوعي المتوقع</span>
+                <Calendar className="w-5 h-5 opacity-80" />
               </div>
               <div className="my-3">
-                <h3 className="text-3xl font-black text-foreground tracking-tight"><AnimatedNumber value={expectedIncome.monthly} suffix="د.ع" /></h3>
+                <h3 className="text-3xl font-black tracking-tight font-mono"><AnimatedNumber value={expectedIncome.weekly} suffix="د.ع" /></h3>
               </div>
-              <div className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl text-[10px] font-bold text-muted-foreground flex items-center justify-between">
-                <span>أقساط شهرية</span>
-                <span className="text-emerald-500">+8% هذا الشهر</span>
+              <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] font-black flex items-center justify-between">
+                <span>أقساط أسبوعية نشطة</span>
+                <span>أسبوعي</span>
               </div>
             </motion.div>
 
-            {/* 📊 رسم الأعمدة البيانية التفاعلي بالأرقام الفعلية للأسبوع */}
+            {/* 3. الوارد الشهري المتوقع */}
+            <motion.div 
+              whileHover={{ y: -3 }}
+              className="sm:col-span-2 bg-card/90 backdrop-blur-md border border-border p-5 rounded-3xl shadow-sm flex flex-col justify-between"
+            >
+              <div className="flex justify-between items-center text-muted-foreground">
+                <span className="text-xs font-black">الوارد الشهري المتوقع</span>
+                <CalendarRange className="w-5 h-5 text-purple-500" />
+              </div>
+              <div className="my-3">
+                <h3 className="text-3xl font-black text-foreground tracking-tight font-mono"><AnimatedNumber value={expectedIncome.monthly} suffix="د.ع" /></h3>
+              </div>
+              <div className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl text-[10px] font-black text-muted-foreground flex items-center justify-between">
+                <span>أقساط شهرية</span>
+                <span className="text-emerald-500 font-bold">+8% هذا الشهر</span>
+              </div>
+            </motion.div>
+
+            {/* 📊 رسم الأعمدة البيانية */}
             <div className="sm:col-span-2 bg-card/90 backdrop-blur-md border border-border p-5 rounded-3xl shadow-sm space-y-3 relative">
               <div className="flex justify-between items-center">
                 <div>
                   <h4 className="text-xs font-black text-foreground">تدفق المقبوضات الأسبوعية الحقيقي</h4>
-                  <p className="text-[10px] text-muted-foreground">اضغط على أي يوم لعرض مقبوضاته الفعليّة</p>
+                  <p className="text-[10px] text-muted-foreground font-bold">اضغط على أي يوم لعرض مقبوضاته الفعليّة</p>
                 </div>
-                <span className="text-[10px] font-bold px-3 py-1 bg-secondary rounded-xl text-foreground border border-border">
+                <span className="text-[10px] font-black px-3 py-1 bg-secondary rounded-xl text-foreground border border-border font-mono">
                   المحصل الأسبوعي: <AnimatedNumber value={weeklyDailyBreakdown.reduce((a, b) => a + b.amount, 0)} suffix="د.ع" />
                 </span>
               </div>
 
-              {/* رسم الأعمدة المزود بالتلميح والتفاعل بالحركات */}
               <div className="h-32 flex items-end justify-between gap-2 pt-6 px-2 border-b border-border/40 pb-2 relative">
                 {weeklyDailyBreakdown.map((item, idx) => (
                   <div 
@@ -553,7 +578,7 @@ export default function DashboardPage() {
                           initial={{ opacity: 0, y: 5, scale: 0.9 }}
                           animate={{ opacity: 1, y: -30, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.9 }}
-                          className="absolute -top-2 bg-foreground text-background text-[10px] font-black px-2.5 py-1 rounded-xl shadow-xl z-20 whitespace-nowrap pointer-events-none"
+                          className="absolute -top-2 bg-foreground text-background text-[10px] font-black px-2.5 py-1 rounded-xl shadow-xl z-20 whitespace-nowrap pointer-events-none font-mono"
                         >
                           {item.amount.toLocaleString()} د.ع
                         </motion.div>
@@ -566,14 +591,14 @@ export default function DashboardPage() {
                       transition={{ duration: 0.7, delay: idx * 0.07, ease: "easeOut" }}
                       className={`w-full max-w-[28px] rounded-t-xl transition-all ${
                         item.isToday
-                          ? "bg-gradient-to-t from-orange-500 to-red-500 shadow-md shadow-orange-500/30 ring-2 ring-orange-500/50"
+                          ? "bg-gradient-to-t from-primary to-primary/80 shadow-md shadow-primary/30 ring-2 ring-primary/50"
                           : item.amount > 0
                           ? "bg-emerald-500/80 hover:bg-emerald-500 shadow-sm"
-                          : "bg-secondary/60 hover:bg-orange-500/30 border border-border/50"
+                          : "bg-secondary/60 hover:bg-primary/30 border border-border/50"
                       }`}
                     />
                     
-                    <span className={`text-[10px] font-bold ${item.isToday ? "text-orange-500 font-black underline" : "text-muted-foreground"}`}>
+                    <span className={`text-[10px] font-bold ${item.isToday ? "text-primary font-black underline" : "text-muted-foreground"}`}>
                       {item.dayName}
                     </span>
                   </div>
@@ -585,11 +610,11 @@ export default function DashboardPage() {
 
         </div>
 
-        {/* 📊 3. شريط تصفية المقبوضات مع تحديد الفترات والتواريخ المخصصة */}
+        {/* 📊 3. شريط تصفية المقبوضات والتقويم */}
         <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2 text-xs font-extrabold text-foreground">
-              <CalendarCheck className="w-4 h-4 text-orange-500" />
+            <div className="flex items-center gap-2 text-xs font-black text-foreground">
+              <CalendarCheck className="w-4 h-4 text-primary" />
               <span>تصفية مبالغ المقبوضات حسب الفترة:</span>
             </div>
 
@@ -604,9 +629,9 @@ export default function DashboardPage() {
                 <button
                   key={tab.id}
                   onClick={() => setTimeRange(tab.id as TimeRange)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
                     timeRange === tab.id
-                      ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm"
+                      ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -616,51 +641,275 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* 📅 حقول إدخال التاريخ المخصص في حال اختيار "نطاق مخصص" */}
           <AnimatePresence>
             {timeRange === "custom" && (
               <motion.div 
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="pt-2 border-t border-border/50 flex flex-wrap items-center gap-3 text-xs"
+                className="pt-3 border-t border-border/50 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs"
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-muted-foreground flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-orange-500" /> من تاريخ:
-                  </span>
-                  <input
-                    type="date"
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="bg-background border border-border rounded-xl px-3 py-1.5 text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-orange-500"
-                  />
+                {/* من تاريخ */}
+                <div className="relative">
+                  <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-primary" />
+                    <span>من تاريخ (يوم/شهر/سنة):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowStartPicker(!showStartPicker);
+                      setStartStep("months");
+                      setShowEndPicker(false);
+                    }}
+                    className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm cursor-pointer"
+                  >
+                    <span className={customStartDate ? "text-foreground font-mono font-bold" : "text-muted-foreground"}>
+                      {customStartDate || "اختر بداية الفترة..."}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {customStartDate && (
+                        <X 
+                          className="w-3.5 h-3.5 text-muted-foreground hover:text-rose-500 cursor-pointer" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCustomStartDate("");
+                          }} 
+                        />
+                      )}
+                      <Calendar className="w-4 h-4 text-primary" />
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showStartPicker && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                        className="absolute bottom-full mb-2 right-0 z-[99999] w-72 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                            <button
+                              type="button"
+                              onClick={() => setStartYear((y) => y - 1)}
+                              className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                            
+                            <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                              <span>{startYear}</span>
+                              {startMonthObj && startStep === "days" && (
+                                <span>- {startMonthObj.num}</span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setStartYear((y) => y + 1)}
+                              className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {startStep === "days" ? (
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center px-1 text-[11px]">
+                                <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setStartStep("months")}
+                                  className="text-primary hover:underline font-bold text-[10px]"
+                                >
+                                  تغيير الشهر ({startMonthObj?.name || "اختر"})
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                                {daysInStartMonth.map((dayNum) => {
+                                  const dateString = `${startYear}-${startMonthObj?.num || "01"}-${dayNum}`;
+                                  const isSelected = customStartDate === dateString;
+                                  return (
+                                    <button
+                                      key={dayNum}
+                                      type="button"
+                                      onClick={() => {
+                                        setCustomStartDate(dateString);
+                                        setShowStartPicker(false);
+                                      }}
+                                      className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                                        isSelected
+                                          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                          : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                      }`}
+                                    >
+                                      {dayNum}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-2 pt-1">
+                              {monthsList.map((m) => (
+                                <button
+                                  key={m.num}
+                                  type="button"
+                                  onClick={() => {
+                                    setStartMonthObj(m);
+                                    setStartStep("days");
+                                    setCustomStartDate(`${startYear}-${m.num}`);
+                                  }}
+                                  className="p-2 rounded-xl text-xs font-bold transition-all bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                >
+                                  {m.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-muted-foreground flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-orange-500" /> إلى تاريخ:
-                  </span>
-                  <input
-                    type="date"
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="bg-background border border-border rounded-xl px-3 py-1.5 text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-orange-500"
-                  />
+                {/* إلى تاريخ */}
+                <div className="relative">
+                  <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-primary" />
+                    <span>إلى تاريخ (يوم/شهر/سنة):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEndPicker(!showEndPicker);
+                      setEndStep("months");
+                      setShowStartPicker(false);
+                    }}
+                    className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm cursor-pointer"
+                  >
+                    <span className={customEndDate ? "text-foreground font-mono font-bold" : "text-muted-foreground"}>
+                      {customEndDate || "اختر نهاية الفترة..."}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {customEndDate && (
+                        <X 
+                          className="w-3.5 h-3.5 text-muted-foreground hover:text-rose-500 cursor-pointer" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCustomEndDate("");
+                          }} 
+                        />
+                      )}
+                      <Calendar className="w-4 h-4 text-primary" />
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showEndPicker && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                        className="absolute bottom-full mb-2 left-0 z-[99999] w-72 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                            <button
+                              type="button"
+                              onClick={() => setEndYear((y) => y - 1)}
+                              className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                            
+                            <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                              <span>{endYear}</span>
+                              {endMonthObj && endStep === "days" && (
+                                <span>- {endMonthObj.num}</span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setEndYear((y) => y + 1)}
+                              className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {endStep === "days" ? (
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center px-1 text-[11px]">
+                                <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEndStep("months")}
+                                  className="text-primary hover:underline font-bold text-[10px]"
+                                >
+                                  تغيير الشهر ({endMonthObj?.name || "اختر"})
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                                {daysInEndMonth.map((dayNum) => {
+                                  const dateString = `${endYear}-${endMonthObj?.num || "01"}-${dayNum}`;
+                                  const isSelected = customEndDate === dateString;
+                                  return (
+                                    <button
+                                      key={dayNum}
+                                      type="button"
+                                      onClick={() => {
+                                        setCustomEndDate(dateString);
+                                        setShowEndPicker(false);
+                                      }}
+                                      className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                                        isSelected
+                                          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                          : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                      }`}
+                                    >
+                                      {dayNum}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-2 pt-1">
+                              {monthsList.map((m) => (
+                                <button
+                                  key={m.num}
+                                  type="button"
+                                  onClick={() => {
+                                    setEndMonthObj(m);
+                                    setEndStep("days");
+                                    setCustomEndDate(`${endYear}-${m.num}`);
+                                  }}
+                                  className="p-2 rounded-xl text-xs font-bold transition-all bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                >
+                                  {m.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* 🎯 4. شبكة البطاقات المترية المتبقية */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* 🎯 4. شبكة البطاقات المترية المتبقية (3 كروت سفلية) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MetricCard title="العملاء النشطين" value={stats.activeCustomers.toString()} icon={Users} />
-          <MetricCard title="رأس المال المتبقي" value={`${stats.totalRemainingCapital.toLocaleString()} د.ع`} icon={Wallet} />
-          <MetricCard title="الأرباح المتبقية" value={`${stats.totalRemainingProfits.toLocaleString()} د.ع`} icon={Banknote} />
           <MetricCard title="المحصل بالفترة" value={`${filteredCollectedAmount.toLocaleString()} د.ع`} icon={Coins} />
           <MetricCard title="متوسط الفائدة" value={`${stats.avgInterest}%`} icon={Percent} />
-          <MetricCard title="إجمالي الديون" value={`${stats.totalRemainingDebt.toLocaleString()} د.ع`} icon={Landmark} />
         </div>
 
         {/* 📈 5. محاكي الأرباح + كارت المتأخرات */}
@@ -674,7 +923,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* كارت المتأخرات والتنبيهات Look */}
+          {/* كارت المتأخرات والتنبيهات */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -687,8 +936,8 @@ export default function DashboardPage() {
                     <AlertTriangle className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-extrabold text-foreground">دفعات متأخرة (تعثر مالي)</h3>
-                    <p className="text-[10px] text-muted-foreground">قائمة العملاء المتأخرين عن التسديد</p>
+                    <h3 className="text-base font-black text-foreground">دفعات متأخرة (تعثر مالي)</h3>
+                    <p className="text-[10px] text-muted-foreground font-bold">قائمة العملاء المتأخرين عن التسديد</p>
                   </div>
                 </div>
 
@@ -699,7 +948,7 @@ export default function DashboardPage() {
               
               {overdueAlerts.length === 0 ? (
                 <div className="text-center py-8 bg-secondary/30 rounded-2xl border border-dashed border-border/50">
-                  <p className="text-xs text-emerald-600 font-bold">ممتاز! لا توجد متأخرات مالية 👏</p>
+                  <p className="text-xs text-emerald-600 font-black">ممتاز! لا توجد متأخرات مالية 👏</p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -711,10 +960,10 @@ export default function DashboardPage() {
                       className="flex justify-between items-center p-3.5 rounded-2xl bg-secondary/40 hover:bg-secondary/80 border border-border/50 transition-all shadow-sm group"
                     >
                       <div className="space-y-0.5 min-w-0 pr-1">
-                        <p className="font-bold text-xs truncate text-foreground group-hover:text-orange-500 transition-colors">
+                        <p className="font-black text-xs truncate text-foreground group-hover:text-primary transition-colors">
                           {alert.customerName}
                         </p>
-                        <p className="text-[10px] text-muted-foreground font-mono font-bold" dir="ltr">
+                        <p className="text-[10px] text-muted-foreground font-mono font-black" dir="ltr">
                           {Math.round(alert.amount).toLocaleString()} د.ع
                         </p>
                       </div>

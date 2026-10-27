@@ -58,7 +58,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 1. الاستماع الحي للشعار المرفوع وتحديث الشعار والـ Favicon
+  // 🔄 1. الاستماع الحي للشعار المرفوع وتحديث الشعار، Favicon، وأيقونة الآيفون للشاشة الرئيسية
   useEffect(() => {
     const unsubLogo = onSnapshot(
       doc(db, "settings", "global"), 
@@ -67,6 +67,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           const newLogoUrl = docSnap.data().systemLogoUrl;
           setMobileLogo(newLogoUrl);
 
+          // 1. تحديث favicon المتصفحات العادية
           let faviconLink: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
           if (!faviconLink) {
             faviconLink = document.createElement("link");
@@ -74,6 +75,15 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             document.getElementsByTagName("head")[0].appendChild(faviconLink);
           }
           faviconLink.href = newLogoUrl;
+
+          // 2. 📱 تحديث أيقونة الشاشة الرئيسية لأجهزة الآيفون (apple-touch-icon)
+          let appleIconLink: HTMLLinkElement | null = document.querySelector("link[rel='apple-touch-icon']");
+          if (!appleIconLink) {
+            appleIconLink = document.createElement("link");
+            appleIconLink.rel = "apple-touch-icon";
+            document.getElementsByTagName("head")[0].appendChild(appleIconLink);
+          }
+          appleIconLink.href = newLogoUrl;
         }
       },
       (error) => {
@@ -201,18 +211,18 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* 1. الشريط العلوي للموبايل */}
       <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-xl border-b border-border p-4 shadow-sm sticky top-0 z-40">
-        <div className="flex items-center gap-2 font-extrabold text-xl text-primary tracking-tight">
-          <img src={mobileLogo} alt="أقساطك" className="w-8 h-8 rounded-2xl object-cover shadow-sm border border-primary/20 bg-white p-0.5" />
-          <span className="bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent font-black">أقساطك</span>
+        <div className="flex items-center gap-2 font-extrabold text-xl text-theme-primary tracking-tight">
+          <img src={mobileLogo} alt="أقساطك" className="w-8 h-8 rounded-2xl object-cover shadow-sm border border-theme-primary/20 bg-white p-0.5" />
+          <span className="bg-theme-gradient bg-clip-text text-transparent font-black">أقساطك</span>
         </div>
         
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsCalcOpen(true)}
-            className="p-2.5 bg-orange-500/10 border border-orange-500/20 rounded-2xl text-orange-600 hover:bg-orange-500/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
+            className="p-2.5 bg-theme-primary/10 border border-theme-primary/20 rounded-2xl text-theme-primary hover:bg-theme-primary/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
             title="حاسبة الأقساط"
           >
-            <Calculator className="w-5 h-5 text-orange-500" />
+            <Calculator className="w-5 h-5 text-theme-primary" />
           </button>
 
           <button 
@@ -259,8 +269,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                     href={tab.href}
                     className={`px-4 py-1.5 text-xs font-bold rounded-full transition-all ${
                       isActive 
-                        ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm" 
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "bg-theme-gradient text-white shadow-sm shadow-primary/20" 
+                        : "text-muted-foreground hover:text-foreground hover:text-theme-primary"
                     }`}
                   >
                     {tab.name}
@@ -273,10 +283,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => setIsCalcOpen(true)}
-              className="flex items-center gap-2.5 px-4 py-2 bg-card/90 backdrop-blur-md border border-orange-500/30 hover:border-orange-500 text-orange-600 dark:text-orange-400 rounded-2xl font-bold text-xs shadow-sm hover:shadow-orange-500/10 transition-all group"
+              className="flex items-center gap-2.5 px-4 py-2 bg-card/90 backdrop-blur-md border border-theme-primary/30 hover:border-theme-primary text-theme-primary rounded-2xl font-bold text-xs shadow-sm hover:shadow-primary/10 transition-all group"
             >
-              <div className="p-1 bg-orange-500/10 rounded-lg group-hover:bg-orange-500/20 transition-colors">
-                <Calculator className="w-3.5 h-3.5 text-orange-500" />
+              <div className="p-1 bg-theme-primary/10 rounded-lg group-hover:bg-theme-primary/20 transition-colors">
+                <Calculator className="w-3.5 h-3.5 text-theme-primary" />
               </div>
               <span>حاسبة الأقساط</span>
             </motion.button>
@@ -338,7 +348,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                       onClick={() => setShowMoreMenu(false)}
                       className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${
                         isActive 
-                          ? "bg-orange-500/10 border-orange-500 text-orange-600 font-bold dark:text-orange-400" 
+                          ? "bg-theme-primary/10 border-theme-primary text-theme-primary font-bold" 
                           : "bg-secondary/40 border-border text-foreground hover:bg-secondary"
                       }`}
                     >
@@ -369,20 +379,20 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 <div 
                   className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
                     isActive 
-                      ? 'bg-orange-500/15 backdrop-blur-sm border border-orange-500/30 scale-100 opacity-100 shadow-sm' 
+                      ? 'bg-theme-primary/15 backdrop-blur-sm border border-theme-primary/30 scale-100 opacity-100 shadow-sm' 
                       : 'scale-50 opacity-0'
                   }`} 
                 />
                 
                 <Icon 
                   className={`w-5 h-5 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-orange-500 translate-y-[2px]" : "text-gray-400"
+                    isActive ? "text-theme-primary translate-y-[2px]" : "text-gray-400"
                   }`} 
                 />
                 
                 <span 
                   className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-orange-600 dark:text-orange-400 font-bold" : "text-gray-400 opacity-70"
+                    isActive ? "text-theme-primary font-bold" : "text-gray-400 opacity-70"
                   }`}
                 >
                   {item.name}
@@ -399,7 +409,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <div 
               className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? 'bg-orange-500/15 backdrop-blur-sm border border-orange-500/30 scale-100 opacity-100 shadow-sm' 
+                  ? 'bg-theme-primary/15 backdrop-blur-sm border border-theme-primary/30 scale-100 opacity-100 shadow-sm' 
                   : 'scale-50 opacity-0'
               }`} 
             />
@@ -407,7 +417,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <MoreHorizontal 
               className={`w-5 h-5 relative z-10 transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-orange-500 translate-y-[2px]" 
+                  ? "text-theme-primary translate-y-[2px]" 
                   : "text-gray-400"
               }`} 
             />
@@ -415,7 +425,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <span 
               className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-orange-600 dark:text-orange-400 font-bold" 
+                  ? "text-theme-primary font-bold" 
                   : "text-gray-400 opacity-70"
               }`}
             >

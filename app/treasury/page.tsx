@@ -8,7 +8,6 @@ import {
   deleteTreasuryTransaction,
   getUserPayments,
   getUserInstallments,
-  clearUserTreasuryData,
   TreasuryTransaction 
 } from "@/services/firestore";
 import { 
@@ -24,31 +23,67 @@ import {
   X,
   Receipt,
   RotateCcw,
-  History
+  History,
+  ChevronRight,
+  ChevronLeft
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
+import { motion, AnimatePresence } from "framer-motion";
 
-// 🛠️ دالة مساعدة محسّنة جداً لمعالجة وتنسيق كافة أنواع التواريخ الممكنة
+// 🗣️ دالة تفقيط وتسهيل قراءة المبالغ المالية بالعربية
+const formatArabicCurrency = (val: number | ""): string => {
+  if (val === "" || isNaN(Number(val)) || Number(val) === 0) return "";
+  const num = Number(val);
+
+  if (num >= 1000000000) {
+    const bil = Math.floor(num / 1000000000);
+    const rem = num % 1000000000;
+    return `${bil} مليار ${rem > 0 ? "و " + formatArabicCurrency(rem) : "د.ع"}`;
+  }
+  if (num >= 1000000) {
+    const mil = Math.floor(num / 1000000);
+    const rem = num % 1000000;
+    return `${mil} مليون ${rem > 0 ? "و " + formatArabicCurrency(rem) : "د.ع"}`;
+  }
+  if (num >= 1000) {
+    const th = Math.floor(num / 1000);
+    const rem = num % 1000;
+    return `${th} ألف ${rem > 0 ? "و " + rem + " د.ع" : "د.ع"}`;
+  }
+  return `${num.toLocaleString("en-US")} د.ع`;
+};
+
+// 🔢 تحويل النص المنسق بالفواصل إلى رقم صافي
+const parseFormattedNumber = (val: string): number | "" => {
+  const clean = val.replace(/,/g, "").trim();
+  if (clean === "" || isNaN(Number(clean))) return "";
+  return Number(clean);
+};
+
+// 🏷️ تنسيق العرض للمستخدم بالفواصل
+const formatInputDisplay = (val: number | ""): string => {
+  if (val === "" || isNaN(Number(val))) return "";
+  return val.toLocaleString("en-US");
+};
+
+// 🛠️ دالة مساعدة معالجة وتنسيق كافة أنواع التواريخ
 const parseDateObj = (dateVal: any): Date | null => {
   if (!dateVal) return null;
   try {
-    // 1. إذا كان التاريخ كائن Firebase Timestamp
     if (typeof dateVal === "object" && typeof dateVal.toDate === "function") {
       return dateVal.toDate();
     }
     if (typeof dateVal === "object" && dateVal.seconds) {
       return new Date(dateVal.seconds * 1000);
     }
-    // 2. إذا كان كائن Date مباشر
     if (dateVal instanceof Date && !isNaN(dateVal.getTime())) {
       return dateVal;
     }
-    // 3. إذا كان الملي ثانية (Number)
     if (typeof dateVal === "number") {
       const d = new Date(dateVal);
       return !isNaN(d.getTime()) ? d : null;
     }
-    // 4. إذا كان النص ISO String
     const parsedDate = new Date(dateVal);
     if (!isNaN(parsedDate.getTime())) {
       return parsedDate;
@@ -73,6 +108,8 @@ const formatDateForDisplay = (dateVal: any): string => {
 
 export default function TreasuryPage() {
   const { user } = useAuth();
+  const { theme } = useTheme();
+  
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TreasuryTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -84,15 +121,77 @@ export default function TreasuryPage() {
   const [lastResetDate, setLastResetDate] = useState<string | null>(null);
   const [showArchivedBeforeReset, setShowArchivedBeforeReset] = useState(false);
 
+  // 📅 حالات التقويم التفاعلي للتاريخ المخصص (سنة - شهر - يوم)
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [startMonthObj, setStartMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [startStep, setStartStep] = useState<"months" | "days">("months");
+
+  const [endYear, setEndYear] = useState(new Date().getFullYear());
+  const [endMonthObj, setEndMonthObj] = useState<{ num: string; name: string } | null>({
+    num: String(new Date().getMonth() + 1).padStart(2, "0"),
+    name: `شهر ${new Date().getMonth() + 1}`
+  });
+  const [endStep, setEndStep] = useState<"months" | "days">("months");
+
+  const monthsList = [
+    { num: "01", name: "شهر 1" },
+    { num: "02", name: "شهر 2" },
+    { num: "03", name: "شهر 3" },
+    { num: "04", name: "شهر 4" },
+    { num: "05", name: "شهر 5" },
+    { num: "06", name: "شهر 6" },
+    { num: "07", name: "شهر 7" },
+    { num: "08", name: "شهر 8" },
+    { num: "09", name: "شهر 9" },
+    { num: "10", name: "شهر 10" },
+    { num: "11", name: "شهر 11" },
+    { num: "12", name: "شهر 12" },
+  ];
+
+  const getDaysInMonth = (year: number, monthNumStr?: string) => {
+    if (!monthNumStr) return [];
+    const monthIndex = parseInt(monthNumStr, 10) - 1;
+    const count = new Date(year, monthIndex + 1, 0).getDate();
+    const daysArr = [];
+    for (let i = 1; i <= count; i++) {
+      daysArr.push(String(i).padStart(2, "0"));
+    }
+    return daysArr;
+  };
+
+  const daysInStartMonth = useMemo(() => getDaysInMonth(startYear, startMonthObj?.num), [startYear, startMonthObj]);
+  const daysInEndMonth = useMemo(() => getDaysInMonth(endYear, endMonthObj?.num), [endYear, endMonthObj]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"inflow" | "outflow">("inflow");
   const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState({
-    amount: "",
+    amount: "" as number | "",
     category: "capital_deposit" as TreasuryTransaction["category"],
     description: "",
   });
+
+  // ➕ إضافة أصفار أو مبالغ سريعة للمدخلات
+  const addAmount = (
+    currentVal: number | "", 
+    setterFunc: (v: number | "") => void, 
+    multiplierOrAdd: number, 
+    isMultiplier = false
+  ) => {
+    const base = Number(currentVal) || 0;
+    if (isMultiplier) {
+      setterFunc(base === 0 ? multiplierOrAdd : base * multiplierOrAdd);
+    } else {
+      setterFunc(base + multiplierOrAdd);
+    }
+  };
 
   const getOwnerUid = useCallback(() => {
     const activeSession = sessionStorage.getItem("active_session");
@@ -164,7 +263,9 @@ export default function TreasuryPage() {
         }
 
         const cost = Number(inst.costPrice || inst.purchasePrice || inst.originalCost || 0);
-        if (cost > 0 && (inst.isDirectSale || !inst.fromInventory)) {
+        const isFromInventory = inst.fromInventory === true || inst.fromInventory === "true";
+        
+        if (cost > 0 && !isFromInventory) {
           autoTx.push({
             id: `cost_${inst.id}`,
             userId: ownerUid,
@@ -198,7 +299,6 @@ export default function TreasuryPage() {
   
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
-      // إذا كان التصفير مفعلاً والنمط ليس عرض الأرشيف القديم، نتجاهل الحركات الأقدم من تاريخ التصفير
       if (lastResetDate && !showArchivedBeforeReset) {
         const txDate = parseDateObj(tx.date);
         const resetDate = parseDateObj(lastResetDate);
@@ -298,10 +398,10 @@ export default function TreasuryPage() {
     }
   };
 
-  // 🛡️ تصفير الصندوق بأمان تام دون مسح بيانات الزبائن أو الأقساط
+  // 🎯 التعديل الرئيسي لحماية حركة شراء المخزن: التصفير الزمني دون مسح سجلات قاعدة البيانات
   const handleClearTreasuryBalance = async () => {
     const confirmClear = window.confirm(
-      "تنبيه: هل أنت متأكد من تصفير رصيد الخزينة والصندوق والبدء بصندوق جديد من الآن؟\n\n(ملاحظة هامة جداً: لن يتم مسح أي عقد أو دفعات للعملاء مطلقاً، فقط سيبدأ حساب الصندوق من صفر ابتداءً من هذه اللحظة)."
+      "تنبيه: هل أنت متأكد من تصفير رصيد الخزينة والصندوق والبدء بصندوق جديد من الآن؟\n\n(ملاحظة هامة: لن يتم مسح أي حركة أو بضاعة بالمخزن مطلقاً، فقط سيبدأ حساب الصندوق من صفر ابتداءً من هذه اللحظة)."
     );
     if (!confirmClear) return;
 
@@ -309,23 +409,14 @@ export default function TreasuryPage() {
     if (!ownerUid) return;
 
     try {
-      setLoading(true);
       const nowIso = new Date().toISOString();
-      
-      // 1. مسح الحركات اليدوية السابقة فقط
-      await clearUserTreasuryData(ownerUid).catch(() => {});
-
-      // 2. تعيين نقطة التصفير الحالية
       localStorage.setItem(`treasury_last_reset_${ownerUid}`, nowIso);
       setLastResetDate(nowIso);
       setShowArchivedBeforeReset(false);
 
       toast.success("تم تصفير الصندوق والبدء بحساب سيولة جديد من الآن بنجاح!");
-      await fetchData();
     } catch (err) {
       toast.error("حدث خطأ أثناء تصفير الصندوق.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -335,7 +426,7 @@ export default function TreasuryPage() {
       localStorage.removeItem(`treasury_last_reset_${ownerUid}`);
       setLastResetDate(null);
       setShowArchivedBeforeReset(false);
-      toast.info("تم إلغاء تصفير الصندوق واسترجاع المجموع التاريخي الكامل.");
+      toast.info("تم إلغاء تصفير الصندوق واسترجاع حركات شراء المخزن والسجل التاريخي الكامل.");
     }
   };
 
@@ -369,7 +460,7 @@ export default function TreasuryPage() {
 
   if (loading) {
     return (
-      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-primary">
         <Loader2 className="w-10 h-10 animate-spin" />
         <span className="text-xs font-black text-muted-foreground animate-pulse">جاري جلب بيانات الخزينة ...</span>
       </div>
@@ -381,11 +472,11 @@ export default function TreasuryPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12 font-sans dir-rtl text-right">
       
-      {/* 1. الترويسة الرئيسية */}
+      {/* 1. الترويسة الرئيسية المربوطة بالثيم */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm transition-all duration-300 hover:shadow-md">
         <div>
           <h1 className="text-xl md:text-3xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <Vault className="w-7 h-7 text-orange-500 animate-pulse" />
+            <Vault className="w-7 h-7 text-primary animate-pulse" />
             <span>خزينة الأموال والصندوق</span>
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">
@@ -396,7 +487,7 @@ export default function TreasuryPage() {
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           <button
             onClick={handleClearTreasuryBalance}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-700 hover:bg-red-800 text-white border border-red-600 px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-700 hover:bg-red-800 text-white border border-red-600 px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95 cursor-pointer"
             title="تصفير رصيد الصندوق والبدء بحساب جديد دون مسح الزبائن"
           >
             <RotateCcw className="w-4 h-4 text-white" />
@@ -405,7 +496,7 @@ export default function TreasuryPage() {
 
           <button
             onClick={() => handleOpenModal("inflow")}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />
             <span>إيداع سيولة (+)</span>
@@ -413,7 +504,7 @@ export default function TreasuryPage() {
           
           <button
             onClick={() => handleOpenModal("outflow")}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95 cursor-pointer"
           >
             <MinusCircle className="w-4 h-4" />
             <span>تسجيل مصاريف (-)</span>
@@ -432,14 +523,14 @@ export default function TreasuryPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowArchivedBeforeReset(!showArchivedBeforeReset)}
-              className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 rounded-xl font-black transition text-xs"
+              className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 rounded-xl font-black transition text-xs cursor-pointer"
             >
               {showArchivedBeforeReset ? "إخفاء الحركات القديمة" : "عرض الحركات السابقة للتصفير"}
             </button>
 
             <button
               onClick={handleUndoReset}
-              className="px-3 py-1.5 bg-card hover:bg-secondary border border-border text-foreground rounded-xl font-black transition text-xs"
+              className="px-3 py-1.5 bg-card hover:bg-secondary border border-border text-foreground rounded-xl font-black transition text-xs cursor-pointer"
             >
               إلغاء التصفير
             </button>
@@ -459,7 +550,7 @@ export default function TreasuryPage() {
               صافي السيولة النقدية بالصندوق
             </p>
             <p className={`text-2xl md:text-3xl font-black font-mono ${
-              isNegative ? "text-white" : "text-orange-500"
+              isNegative ? "text-white" : "text-primary"
             }`}>
               {summary.netBalance.toLocaleString("en-US")} د.ع
             </p>
@@ -470,7 +561,7 @@ export default function TreasuryPage() {
           <div className={`p-4 rounded-2xl border ${
             isNegative 
               ? "bg-white/20 text-white border-white/30" 
-              : "bg-orange-500/10 text-orange-500 border-orange-500/20"
+              : "bg-primary/10 text-primary border-primary/20"
           }`}>
             <Vault className="w-7 h-7" />
           </div>
@@ -503,7 +594,7 @@ export default function TreasuryPage() {
         </div>
       </div>
 
-      {/* 3. التصفية والجدول */}
+      {/* 3. التصفية والجدول والتقويم التفاعلي المتقدم */}
       <div className="bg-card/90 backdrop-blur-md border border-border p-4 md:p-5 rounded-3xl shadow-sm space-y-3">
         <div className="flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="relative w-full md:w-80">
@@ -513,47 +604,47 @@ export default function TreasuryPage() {
               placeholder="ابحث في سجل كشف الخزينة والمصاريف..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pr-10 pl-4 py-2.5 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+              className="w-full pr-10 pl-4 py-2.5 rounded-2xl border border-border bg-background text-foreground text-xs md:text-sm font-bold focus:ring-2 focus:ring-primary outline-none transition-all"
             />
           </div>
 
           <div className="flex items-center gap-1.5 bg-secondary/40 p-1.5 rounded-2xl border border-border w-full md:w-auto overflow-x-auto">
             <button
               onClick={() => setDateFilterType("all")}
-              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
-                dateFilterType === "all" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 cursor-pointer ${
+                dateFilterType === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               الكل ({filteredTransactions.length})
             </button>
             <button
               onClick={() => setDateFilterType("today")}
-              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
-                dateFilterType === "today" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 cursor-pointer ${
+                dateFilterType === "today" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               اليوم
             </button>
             <button
               onClick={() => setDateFilterType("month")}
-              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
-                dateFilterType === "month" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 cursor-pointer ${
+                dateFilterType === "month" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               هذا الشهر
             </button>
             <button
               onClick={() => setDateFilterType("year")}
-              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 ${
-                dateFilterType === "year" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 cursor-pointer ${
+                dateFilterType === "year" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               هذه السنة
             </button>
             <button
               onClick={() => setDateFilterType("custom")}
-              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 flex items-center gap-1.5 ${
-                dateFilterType === "custom" ? "bg-orange-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              className={`px-3.5 py-1.5 text-xs font-black rounded-xl transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                dateFilterType === "custom" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
@@ -562,34 +653,276 @@ export default function TreasuryPage() {
           </div>
         </div>
 
+        {/* 📅 التاريخ المخصص مع التقويم التفاعلي المنبثق (سنة - شهر - يوم) */}
         {dateFilterType === "custom" && (
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-border text-xs animate-in fade-in duration-200">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground font-bold">من تاريخ:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-background border border-border rounded-xl px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-orange-500 font-mono font-bold"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground font-bold">إلى تاريخ:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-background border border-border rounded-xl px-3 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-orange-500 font-mono font-bold"
-              />
-            </div>
-            {(startDate || endDate) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-border text-xs animate-in fade-in duration-200">
+            {/* من تاريخ */}
+            <div className="relative">
+              <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-primary" />
+                <span>من تاريخ (يوم/شهر/سنة):</span>
+              </label>
               <button
-                onClick={() => { setStartDate(""); setEndDate(""); }}
-                className="text-red-500 hover:underline text-xs font-black mr-auto"
+                type="button"
+                onClick={() => {
+                  setShowStartPicker(!showStartPicker);
+                  setStartStep("months");
+                  setShowEndPicker(false);
+                }}
+                className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm cursor-pointer"
               >
-                مسح التواريخ
+                <span className={startDate ? "text-foreground font-mono" : "text-muted-foreground"}>
+                  {startDate || "اختر بداية الفترة..."}
+                </span>
+                <div className="flex items-center gap-1">
+                  {startDate && (
+                    <X 
+                      className="w-3.5 h-3.5 text-muted-foreground hover:text-rose-500 cursor-pointer" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStartDate("");
+                      }} 
+                    />
+                  )}
+                  <Calendar className="w-4 h-4 text-primary" />
+                </div>
               </button>
-            )}
+
+              <AnimatePresence>
+                {showStartPicker && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute z-[10002] bottom-full mt-2 w-72 right-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => setStartYear((y) => y - 1)}
+                          className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                        
+                        <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                          <span>{startYear}</span>
+                          {startMonthObj && startStep === "days" && (
+                            <span>- {startMonthObj.num}</span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setStartYear((y) => y + 1)}
+                          className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {startStep === "days" ? (
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1 text-[11px]">
+                            <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                            <button
+                              type="button"
+                              onClick={() => setStartStep("months")}
+                              className="text-primary hover:underline font-bold text-[10px] cursor-pointer"
+                            >
+                              تغيير الشهر ({startMonthObj?.name || "اختر"})
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                            {daysInStartMonth.map((dayNum) => {
+                              const dateString = `${startYear}-${startMonthObj?.num || "01"}-${dayNum}`;
+                              const isSelected = startDate === dateString;
+                              return (
+                                <button
+                                  key={dayNum}
+                                  type="button"
+                                  onClick={() => {
+                                    setStartDate(dateString);
+                                    setShowStartPicker(false);
+                                  }}
+                                  className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                      : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                  }`}
+                                >
+                                  {dayNum}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          {monthsList.map((m) => {
+                            const monthString = `${startYear}-${m.num}`;
+                            const isSelected = startDate === monthString;
+                            return (
+                              <button
+                                key={m.num}
+                                type="button"
+                                onClick={() => {
+                                  setStartMonthObj(m);
+                                  setStartStep("days");
+                                  setStartDate(monthString);
+                                }}
+                                className={`p-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                  isSelected
+                                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                    : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                }`}
+                              >
+                                {m.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* إلى تاريخ */}
+            <div className="relative">
+              <label className="block text-xs font-bold text-muted-foreground mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-primary" />
+                <span>إلى تاريخ (يوم/شهر/سنة):</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEndPicker(!showEndPicker);
+                  setEndStep("months");
+                  setShowStartPicker(false);
+                }}
+                className="w-full p-3 rounded-2xl border border-border bg-background text-foreground text-xs font-bold flex items-center justify-between hover:border-primary/50 transition-all shadow-sm cursor-pointer"
+              >
+                <span className={endDate ? "text-foreground font-mono" : "text-muted-foreground"}>
+                  {endDate || "اختر نهاية الفترة..."}
+                </span>
+                <div className="flex items-center gap-1">
+                  {endDate && (
+                    <X 
+                      className="w-3.5 h-3.5 text-muted-foreground hover:text-rose-500 cursor-pointer" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEndDate("");
+                      }} 
+                    />
+                  )}
+                  <Calendar className="w-4 h-4 text-primary" />
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {showEndPicker && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute z-[10002] bottom-full mt-2 w-72 left-0 bg-card border border-border rounded-3xl p-4 shadow-2xl backdrop-blur-xl space-y-3"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => setEndYear((y) => y - 1)}
+                          className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                        
+                        <div className="flex items-center gap-1 font-mono font-bold text-xs text-primary">
+                          <span>{endYear}</span>
+                          {endMonthObj && endStep === "days" && (
+                            <span>- {endMonthObj.num}</span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setEndYear((y) => y + 1)}
+                          className="p-1.5 rounded-xl bg-secondary hover:bg-primary/10 text-foreground hover:text-primary font-bold text-xs cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {endStep === "days" ? (
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1 text-[11px]">
+                            <span className="font-bold text-muted-foreground">اختر اليوم:</span>
+                            <button
+                              type="button"
+                              onClick={() => setEndStep("months")}
+                              className="text-primary hover:underline font-bold text-[10px] cursor-pointer"
+                            >
+                              تغيير الشهر ({endMonthObj?.name || "اختر"})
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto pt-1">
+                            {daysInEndMonth.map((dayNum) => {
+                              const dateString = `${endYear}-${endMonthObj?.num || "01"}-${dayNum}`;
+                              const isSelected = endDate === dateString;
+                              return (
+                                <button
+                                  key={dayNum}
+                                  type="button"
+                                  onClick={() => {
+                                    setEndDate(dateString);
+                                    setShowEndPicker(false);
+                                  }}
+                                  className={`p-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                      : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                  }`}
+                                >
+                                  {dayNum}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          {monthsList.map((m) => {
+                            const monthString = `${endYear}-${m.num}`;
+                            const isSelected = endDate === monthString;
+                            return (
+                              <button
+                                key={m.num}
+                                type="button"
+                                onClick={() => {
+                                  setEndMonthObj(m);
+                                  setEndStep("days");
+                                  setEndDate(monthString);
+                                }}
+                                className={`p-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                  isSelected
+                                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                                    : "bg-secondary/50 hover:bg-primary/10 text-foreground hover:text-primary"
+                                }`}
+                              >
+                                {m.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         )}
       </div>
@@ -598,10 +931,10 @@ export default function TreasuryPage() {
       <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md">
         <div className="p-4 md:p-5 border-b border-border bg-secondary/30 flex items-center justify-between">
           <h2 className="font-black text-sm md:text-base flex items-center gap-2.5">
-            <Receipt className="w-5 h-5 text-orange-500" />
+            <Receipt className="w-5 h-5 text-primary" />
             <span>كشف حركة الصندوق والتصرفات المالية</span>
           </h2>
-          <span className="text-xs font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 px-3 py-1 rounded-full border border-orange-500/20">
+          <span className="text-xs font-black bg-primary/10 text-primary px-3 py-1 rounded-full border border-primary/20">
             {filteredTransactions.length} سجل
           </span>
         </div>
@@ -633,7 +966,7 @@ export default function TreasuryPage() {
                       <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
                         tx.type === "inflow"
                           ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                          : "bg-black text-white dark:bg-slate-800 dark:text-slate-100 border-slate-700"
+                          : "bg-secondary text-foreground border-border"
                       }`}>
                         {getCategoryLabel(tx.category)}
                       </span>
@@ -653,7 +986,7 @@ export default function TreasuryPage() {
                       {!tx.id?.startsWith("pay_") && !tx.id?.startsWith("down_") && !tx.id?.startsWith("cost_") ? (
                         <button
                           onClick={() => handleDeleteTx(tx)}
-                          className="p-2 text-red-600 hover:bg-red-500/10 rounded-xl transition-colors"
+                          className="p-2 text-red-600 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
                           title="حذف الحركة اليدوية"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -681,7 +1014,7 @@ export default function TreasuryPage() {
                 {modalType === "inflow" ? <PlusCircle className="w-5 h-5" /> : <MinusCircle className="w-5 h-5" />}
                 <span>{modalType === "inflow" ? "إيداع سيولة / رأس مال" : "تسجيل مصروف / سحب"}</span>
               </h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-secondary rounded-xl transition-colors">
+              <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-secondary rounded-xl transition-colors cursor-pointer">
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
@@ -692,7 +1025,7 @@ export default function TreasuryPage() {
                 <select
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value as any })}
-                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-primary outline-none cursor-pointer"
                 >
                   {modalType === "inflow" ? (
                     <>
@@ -709,17 +1042,49 @@ export default function TreasuryPage() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1.5">المبلغ (د.ع)</label>
+              {/* المبلغ المستلم / المصروف */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="block text-xs font-bold text-muted-foreground">المبلغ (د.ع)</label>
+                  {form.amount !== "" && (
+                    <span className={`text-[10px] font-black animate-pulse ${
+                      modalType === "inflow" ? "text-emerald-500" : "text-red-500"
+                    }`}>
+                      {formatArabicCurrency(form.amount)}
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="number"
+                  type="text"
                   required
-                  min="1"
                   placeholder="أدخل قيمة المبلغ..."
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className="w-full p-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-orange-500 outline-none font-mono"
+                  value={formatInputDisplay(form.amount)}
+                  onChange={(e) => setForm({ ...form, amount: parseFormattedNumber(e.target.value) })}
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-primary outline-none font-mono dir-ltr text-right"
                 />
+                <div className="flex gap-1 pt-0.5 dir-ltr justify-end">
+                  <button 
+                    type="button" 
+                    onClick={() => addAmount(form.amount, (v) => setForm((prev) => ({ ...prev, amount: v })), 1000, true)}
+                    className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                  >
+                    +000 (ألف)
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => addAmount(form.amount, (v) => setForm((prev) => ({ ...prev, amount: v })), 100000, false)}
+                    className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                  >
+                    +100 ألف
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => addAmount(form.amount, (v) => setForm((prev) => ({ ...prev, amount: v })), 1000000, true)}
+                    className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                  >
+                    +000000 (مليون)
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -729,7 +1094,7 @@ export default function TreasuryPage() {
                   placeholder="مثال: إيجار المحل لشهر 10، أو شراء 5 دراجات..."
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                  className="w-full p-3 rounded-2xl border border-border bg-background text-xs md:text-sm font-bold focus:ring-2 focus:ring-primary outline-none"
                 />
               </div>
 
@@ -737,14 +1102,14 @@ export default function TreasuryPage() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 py-3 text-xs md:text-sm font-bold rounded-2xl border border-border hover:bg-secondary transition-colors"
+                  className="flex-1 py-3 text-xs md:text-sm font-bold rounded-2xl border border-border hover:bg-secondary transition-colors cursor-pointer"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || !form.amount}
-                  className={`flex-1 py-3 text-xs md:text-sm rounded-2xl text-white font-black transition-all flex items-center justify-center gap-2 shadow-md ${
+                  className={`flex-1 py-3 text-xs md:text-sm rounded-2xl text-white font-black transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer ${
                     modalType === "inflow" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"
                   }`}
                 >

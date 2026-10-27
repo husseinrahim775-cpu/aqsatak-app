@@ -32,7 +32,7 @@ const allMenuItems = [
   { name: 'الخزينة والصندوق', path: '/treasury', icon: Vault, permissionKey: 'canViewTreasury' },
   { name: 'المخزن والمبيعات', path: '/inventory', icon: Package, permissionKey: 'canManageStore' },
   { name: 'سجل الديون', path: '/debts', icon: Wallet, permissionKey: 'canManageCustomers' }, 
-  { name: 'الإعدادات', path: '/settings', icon: Settings, permissionKey: 'isAdminOnly' },
+  { name: 'الإعدادات', path: '/settings', icon: Settings, permissionKey: 'allowAll' },
 ];
 
 export default function Sidebar() {
@@ -45,10 +45,12 @@ export default function Sidebar() {
 
   const ADMIN_EMAIL = "admin@aqsatak.com";
 
-  // 🔄 الاستماع الحي للشعار المرفوع من Firestore مع حماية الخطأ
   useEffect(() => {
     setMounted(true);
+  }, []);
 
+  // 🔄 الاستماع الحي للشعار المرفوع من Firestore
+  useEffect(() => {
     const unsubLogo = onSnapshot(
       doc(db, "settings", "global"), 
       (docSnap) => {
@@ -57,7 +59,6 @@ export default function Sidebar() {
         }
       },
       (error) => {
-        // تجاهل أخطاء الصلاحيات أثناء الخروج
         if (error.code === "permission-denied") return;
         console.warn("تعذر تحميل الشعار الحي:", error);
       }
@@ -66,7 +67,7 @@ export default function Sidebar() {
     return () => unsubLogo();
   }, []);
 
-  // 🚪 دالة تسجيل الخروج النظيفة
+  // 🚪 دالة تسجيل الخروج
   const handleLogout = async () => {
     if (window.confirm("هل أنت متأكد من تسجيل الخروج؟")) {
       try {
@@ -81,12 +82,18 @@ export default function Sidebar() {
     }
   };
 
+  // ☀️/🌙 التبديل السريع بين الوضع النهاري والداكن
+  const toggleDarkLight = () => {
+    const nextMode = theme === "dark" ? "light" : "dark";
+    setTheme(nextMode);
+  };
+
   const isEmployee = userData?.role === "employee";
   const userPermissions = userData?.permissions || {};
 
   const visibleMenuItems = allMenuItems.filter((item) => {
     if (!isEmployee) return true;
-    if (item.permissionKey === "isAdminOnly") return false;
+    if (item.permissionKey === "allowAll") return true;
     const permKey = item.permissionKey as keyof typeof userPermissions;
     return userPermissions?.[permKey] ?? false;
   });
@@ -96,8 +103,7 @@ export default function Sidebar() {
       
       {/* 1. الشعار والأيقونات */}
       <div className="flex flex-col items-center gap-7 w-full">
-        {/* الشعار الديناميكي V14 المربوط بـ Firestore */}
-        <div className="w-11 h-11 rounded-2xl p-0.5 bg-gradient-to-tr from-orange-500 to-red-500 shadow-md shadow-orange-500/20 flex items-center justify-center overflow-hidden">
+        <div className="w-11 h-11 rounded-2xl p-0.5 bg-theme-gradient shadow-md shadow-primary/20 flex items-center justify-center overflow-hidden">
           <img 
             src={logoUrl} 
             alt="أقساطك" 
@@ -105,7 +111,6 @@ export default function Sidebar() {
           />
         </div>
         
-        {/* أيقونات التنقل المصغرة مع التلميح (Tooltip) */}
         <nav className="flex flex-col gap-3 w-full px-3">
           {visibleMenuItems.map((item) => {
             const isActive = pathname.startsWith(item.path);
@@ -123,23 +128,21 @@ export default function Sidebar() {
                   whileTap={{ scale: 0.95 }}
                   className={`p-3.5 rounded-2xl transition-all duration-300 relative ${
                     isActive 
-                      ? "bg-gradient-to-tr from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/25" 
-                      : "text-foreground/70 hover:bg-secondary hover:text-orange-500"
+                      ? "bg-theme-gradient text-white shadow-lg shadow-primary/25" 
+                      : "text-foreground/70 hover:bg-secondary hover:text-theme-primary"
                   }`}
                 >
                   <Icon className="w-5 h-5" />
                   
-                  {/* شريط الإضاءة المعتمد للتبويب النشط */}
                   {isActive && (
                     <motion.div 
                       layoutId="activeSideDot"
-                      className="absolute -right-3 top-1/2 -translate-y-1/2 w-1.5 h-5 bg-orange-500 rounded-l-full"
+                      className="absolute -right-3 top-1/2 -translate-y-1/2 w-1.5 h-5 bg-theme-gradient rounded-l-full"
                       transition={{ type: "spring", stiffness: 300, damping: 25 }}
                     />
                   )}
                 </motion.div>
 
-                {/* نص مساعدة يظهر عند تحريك الماوس (Hover Label) */}
                 <span className="absolute right-16 top-1/2 -translate-y-1/2 bg-foreground text-background text-[11px] font-bold px-2.5 py-1 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md whitespace-nowrap z-50">
                   {item.name}
                 </span>
@@ -147,7 +150,6 @@ export default function Sidebar() {
             );
           })}
 
-          {/* زر الأدمن المصغر */}
           {(!isEmployee && user?.email === ADMIN_EMAIL) && (
             <div className="pt-2 border-t border-border/60 flex justify-center w-full">
               <Link href="/admin" title="إدارة الحسابات" className="relative group">
@@ -167,32 +169,30 @@ export default function Sidebar() {
           )}
         </nav>
       </div>
-      
 
-      {/* 2. الأزرار السفلية (الوضع الليلي وتسجيل الخروج) */}
+      {/* 2. الأزرار السفلية (الوضع النهاري/الداكن + تسجيل الخروج) */}
       {mounted && (
         <div className="flex flex-col gap-3 items-center w-full px-3">
+          
+          {/* زر التبديل المباشر بين النهار والليل فقط */}
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.95 }}
             type="button"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="p-3.5 rounded-2xl border border-border bg-background/80 text-foreground hover:bg-secondary transition-all shadow-sm"
-            title={theme === "dark" ? "الوضع النهاري" : "الوضع الليلي"}
+            onClick={toggleDarkLight}
+            className="p-3.5 rounded-2xl border border-border bg-secondary/80 text-foreground hover:text-theme-primary transition-all shadow-sm cursor-pointer"
+            title={theme === "dark" ? "التحويل للوضع النهاري" : "التحويل للوضع الداكن"}
           >
-            {theme === "dark" ? (
-              <Sun className="w-5 h-5 text-amber-500" />
-            ) : (
-              <Moon className="w-5 h-5 text-indigo-500" />
-            )}
+            {theme === "dark" ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-purple-400" />}
           </motion.button>
 
+          {/* زر تسجيل الخروج */}
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.95 }}
             type="button"
             onClick={handleLogout}
-            className="p-3.5 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all"
+            className="p-3.5 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all cursor-pointer"
             title="تسجيل الخروج"
           >
             <LogOut className="w-5 h-5" />

@@ -22,7 +22,7 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
     }
   };
 
-  // 1. إذا كان صاحب الحساب هو الأدمن الرئيسي للسيستم، لا تقفله
+  // 1. إذا كان صاحب الحساب هو الأدمن الرئيسي للسيستم، لا تقفله مطلقاً
   if (userData?.role === "admin" || user?.email === "admin@aqsatak.com") {
     return <>{children}</>;
   }
@@ -43,7 +43,7 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
       <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[999] flex items-center justify-center p-4 font-sans dir-rtl select-none">
         <div className="bg-card border border-border max-w-md w-full p-6 md:p-8 rounded-3xl shadow-2xl text-center space-y-5 animate-in zoom-in-95">
           
-          {/* أيقونة القفل المودرن */}
+          {/* أيقونة القفل المودرن المتجاوبة مع الثيم */}
           <div className="w-16 h-16 rounded-3xl bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center mx-auto shadow-md">
             <Lock className="w-8 h-8" />
           </div>
@@ -59,13 +59,13 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
             الحالة: <span className="text-rose-500 font-black">{isDisabled ? "حساب معطل" : "الاشتراك منتهي"}</span>
           </div>
 
-          {/* الأزرار الخروج والتواصل */}
+          {/* أزرار الخروج والتواصل */}
           <div className="space-y-2.5 pt-2">
             <a
               href={`https://wa.me/${ADMIN_WHATSAPP_NUMBER}?text=${whatsappMessage}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white font-black py-3.5 px-5 rounded-2xl text-xs md:text-sm transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+              className="w-full flex items-center justify-center gap-2 bg-theme-gradient hover:opacity-95 text-white font-black py-3.5 px-5 rounded-2xl text-xs md:text-sm transition-all shadow-lg shadow-primary/20 active:scale-95"
             >
               <MessageSquare className="w-4.5 h-4.5" />
               <span>تجديد الاشتراك عبر الواتساب</span>

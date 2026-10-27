@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import packageJson from "@/package.json";
+import { useTheme } from "next-themes";
 import { 
   Store, 
   Percent, 
@@ -44,7 +45,9 @@ import {
   HardDrive,
   Wifi,
   Usb,
-  Network
+  Network,
+  Type,
+  Palette
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -66,8 +69,55 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } fr
 import { db } from "@/services/firebase";
 import { toast } from "sonner";
 
+// 🎨 قائمة ثيمات كومبو الألوان المخصصة v14 (مع التدرجات الملونة الحقيقية)
+const V14_COMBO_THEMES = [
+  { 
+    id: "orange", 
+    name: "ثيم v14 الناري الأصلي", 
+    color: "from-orange-500 to-red-500", 
+    previewBg: "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
+    desc: "التدرج الناري الأصلي (البرتقالي والأحمر) الخاص ببطاقات السلايد بار والشريط العلوي" 
+  },
+  { 
+    id: "emerald", 
+    name: "ثيم v14 الزمردي الملكي", 
+    color: "from-emerald-500 to-teal-600", 
+    previewBg: "linear-gradient(135deg, #10b981 0%, #0d9488 100%)",
+    desc: "تدرج الأخضر الزمردي الفاخر" 
+  },
+  { 
+    id: "blue", 
+    name: "ثيم v14 الأزرق النيون", 
+    color: "from-blue-500 to-indigo-600", 
+    previewBg: "linear-gradient(135deg, #3b82f6 0%, #4f46e5 100%)",
+    desc: "تدرج الأزرق الملكي العصري" 
+  },
+  { 
+    id: "purple", 
+    name: "ثيم v14 الأرجواني الإمبراطوري", 
+    color: "from-purple-500 to-fuchsia-600", 
+    previewBg: "linear-gradient(135deg, #a855f7 0%, #c026d3 100%)",
+    desc: "تدرج البنفسجي الفاخر عالي التباين" 
+  },
+  { 
+    id: "amber", 
+    name: "ثيم v14 الذهبي الدافئ", 
+    color: "from-amber-400 to-orange-500", 
+    previewBg: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
+    desc: "تدرج الذهبي والبرونزي المميز" 
+  },
+  { 
+    id: "rose", 
+    name: "ثيم v14 الوردي الحديث", 
+    color: "from-rose-500 to-pink-600", 
+    previewBg: "linear-gradient(135deg, #f43f5e 0%, #db2777 100%)",
+    desc: "تدرج الوردي العصري الجذاب" 
+  },
+];
+
 export default function SettingsPage() {
   const { user, userData } = useAuth() as any;
+  const { theme, setTheme } = useTheme();
   const [saved, setSaved] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [uploadingToDrive, setUploadingToDrive] = useState(false);
@@ -79,23 +129,31 @@ export default function SettingsPage() {
   const [restoreProgress, setRestoreProgress] = useState(0);
   const [restoreStatusText, setRestoreStatusText] = useState("");
 
+  // 🔤 حالة حجم الخط بالمنظومة
+  const [fontSize, setFontSize] = useState<"normal" | "medium" | "large" | "xlarge">("normal");
+
+  // 🎨 حالة كومبو ألوان ثيم النظام المخصص لكل موظف
+  const [colorTheme, setColorTheme] = useState<string>("orange");
+
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
-  // فحص هل الحساب الحالي هو الأدمن الرئيسي
-  const isAdmin = userData?.role === "admin" || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+  
+  // 🔒 فحص أمني دقيق: هل المستخدم الحالي موظف؟
+  const isEmployee = userData?.role === "employee";
+  const isOwner = !isEmployee;
 
-  // 🗂️ حالة التحكم بالبطاقات المطوية
+  // 🗂️ حالة التحكم بالبطاقات المطوية (تم إغلاق كافة الأقسام افتراضياً لمنع الفوضى)
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
-    subscriptionInfo: true,
-    updates: true,
+    subscriptionInfo: false,
+    updates: false,
     security: false,
     employees: false,
     company: false,
     hardware: false,
     whatsapp: false,
     financial: false,
-    theme: false,
-    backup: true,
+    appearance: false,
+    backup: false,
   });
 
   const toggleSection = (key: string) => {
@@ -189,7 +247,23 @@ export default function SettingsPage() {
     return user?.uid || null;
   };
 
-  // ⚡ تحميل البيانات
+  // 🎨 تغيير وتطبيق كومبو ألوان الثيم دون المساس بوضع النهار/الليل
+  const handleColorThemeChange = (selectedThemeId: string) => {
+    setColorTheme(selectedThemeId);
+    
+    // حفظ في localStorage مخصص لكل موظف لضمان عدم ضياعه عند الريفريش على localhost:3000
+    const employeeKey = userData?.id || user?.uid || userData?.username;
+    if (employeeKey) {
+      localStorage.setItem(`user_color_theme_${employeeKey}`, selectedThemeId);
+    }
+    localStorage.setItem("app_color_theme", selectedThemeId);
+    
+    document.documentElement.setAttribute("data-theme", selectedThemeId);
+    document.body.setAttribute("data-theme", selectedThemeId);
+    toast.success("تم اختيار وتثبيت كومبو ألوان الثيم بنجاح!");
+  };
+
+  // ⚡ تحميل البيانات واسترجاع إعدادات الثيم والخطوط عند التحميل
   const fetchUsersAndSettings = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) {
@@ -199,8 +273,10 @@ export default function SettingsPage() {
 
     setLoadingUsers(true);
     try {
-      const list = await getSystemUsers(ownerUid);
-      setUsersList(list || []);
+      if (isOwner) {
+        const list = await getSystemUsers(ownerUid);
+        setUsersList(list || []);
+      }
 
       const companyData = await getCompanySettings(ownerUid);
       if (companyData) {
@@ -241,7 +317,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔄 الاستماع لإشارات التحديث واكتشاف الطابعات المربوطة من Electron
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).require) {
       try {
@@ -329,7 +404,7 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
   };
 
-  // 🔄 دالة استعادة النسخة الاحتياطية الشاملة والمضمونة مع شريط تقدم تفاعلي
+  // 🔄 دالة استعادة النسخة الاحتياطية الشاملة
   const processBackupJSON = async (content: any) => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) {
@@ -361,7 +436,6 @@ export default function SettingsPage() {
         setRestoreStatusText(`${statusLabel} (${processed} من ${totalItems})`);
       };
 
-      // 1️⃣ مسح تفريغي كامل لمنع التكرار نهائياً
       setRestoreStatusText("جاري تهيئة قاعدة البيانات وتنظيف السجلات التالفة...");
       const collectionsToClear = ["installments", "payments", "treasury_transactions", "inventory"];
       for (const colName of collectionsToClear) {
@@ -376,7 +450,6 @@ export default function SettingsPage() {
         }
       }
 
-      // 2️⃣ استعادة سجلات العقود والأقساط الأصلية
       for (const inst of installments) {
         const targetId = inst.id || doc(collection(db, "installments")).id;
         const instRef = doc(db, "installments", targetId);
@@ -389,7 +462,6 @@ export default function SettingsPage() {
         updateProgressStep("استعادة عقود الأقساط والعملاء");
       }
 
-      // 3️⃣ استعادة جدول المدفوعات لتحديث حالة "تم دفع"
       for (const pay of payments) {
         const targetId = pay.id || doc(collection(db, "payments")).id;
         const payRef = doc(db, "payments", targetId);
@@ -401,7 +473,6 @@ export default function SettingsPage() {
         updateProgressStep("استعادة سجل الدفعات والمقبوضات");
       }
 
-      // 4️⃣ استعادة حركات الخزينة والصندوق
       for (const tx of treasury) {
         const targetId = tx.id || doc(collection(db, "treasury_transactions")).id;
         const txRef = doc(db, "treasury_transactions", targetId);
@@ -413,7 +484,6 @@ export default function SettingsPage() {
         updateProgressStep("استعادة حركات الخزينة والصندوق");
       }
 
-      // 5️⃣ استعادة المخزن
       for (const inv of inventory) {
         const targetId = inv.id || doc(collection(db, "inventory")).id;
         const invRef = doc(db, "inventory", targetId);
@@ -476,13 +546,12 @@ export default function SettingsPage() {
     }
   };
 
-  // ☁️ دالة الرفع الذكي إلى Google Drive (تحديث نفس ملف اليوم بدلاً من تكرار النسخ)
   const handleUploadToGoogleDrive = async (isSilent = false) => {
     const ownerUid = getOwnerUid();
     const googleAccessToken = localStorage.getItem("google_drive_access_token");
     if (!ownerUid || !googleAccessToken) return;
 
-    if (uploadingToDrive) return; // منع التزامن المتعدد بنفس اللحظة
+    if (uploadingToDrive) return;
 
     try {
       if (!isSilent) setUploadingToDrive(true);
@@ -512,7 +581,6 @@ export default function SettingsPage() {
       const fileName = `aqsatk_backup_${todayDateStr}.json`;
       const fileContent = JSON.stringify(backupData, null, 2);
 
-      // 1️⃣ البحث أولاً هل يوجد ملف بنفس اسم اليوم على Google Drive لمنع التكرار
       const searchRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+trashed=false`,
         { headers: { Authorization: `Bearer ${googleAccessToken}` } }
@@ -528,7 +596,6 @@ export default function SettingsPage() {
 
       let response;
 
-      // 2️⃣ إذا كان ملف اليوم موجوداً، نحدث محتواه (UPDATE) لمنع تكرار الملفات
       if (existingFileId) {
         response = await fetch(
           `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
@@ -542,7 +609,6 @@ export default function SettingsPage() {
           }
         );
       } else {
-        // 3️⃣ إذا لم يكن موجوداً، ننشئ ملف جديد اليوم (CREATE)
         const metadata = { name: fileName, mimeType: "application/json" };
         const formData = new FormData();
         formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
@@ -572,7 +638,16 @@ export default function SettingsPage() {
     }
   };
 
-  // 🌙 المؤقت والرفع التلقائي المضمون فور فتح التطبيق/الموقع (من الهاتف والديسك توب)
+  const handleFontSizeChange = (size: "normal" | "medium" | "large" | "xlarge") => {
+    setFontSize(size);
+    localStorage.setItem("app_font_size", size);
+
+    document.body.classList.remove("text-size-normal", "text-size-medium", "text-size-large", "text-size-xlarge");
+    document.body.classList.add(`text-size-${size}`);
+
+    toast.success("تم تغيير حجم الخط بنجاح!");
+  };
+
   useEffect(() => {
     const checkAndTriggerNightlyBackup = async () => {
       const savedToken = localStorage.getItem("google_drive_access_token");
@@ -586,17 +661,14 @@ export default function SettingsPage() {
 
       const lastBackupDate = localStorage.getItem("last_auto_drive_backup_date");
 
-      // فور دخول يوم جديد وعدم الرفع فيه مسبقاً (سواء فُتح الموقع بالليل أو ثاني يوم الصبح)
       if (lastBackupDate !== todayDateStr) {
         console.log("🚀 جاري الرفع الآلي للنسخة اليومية الجديدة إلى Google Drive...");
         await handleUploadToGoogleDrive(true);
       }
     };
 
-    // 📱 1. فحص فوري فور فتح المتصفح/التطبيق
     checkAndTriggerNightlyBackup();
 
-    // 💻 2. في حال كان التطبيق يعمل ببيئة الديسك توب (Electron)
     if (typeof window !== "undefined" && (window as any).require) {
       try {
         const { ipcRenderer } = (window as any).require("electron");
@@ -606,7 +678,6 @@ export default function SettingsPage() {
       } catch (e) {}
     }
 
-    // ⏱️ 3. مؤقت يعمل كل دقيقة لو كان الموقع مفتوحاً أثناء حلول منتصف الليل
     const timerInterval = setInterval(() => {
       checkAndTriggerNightlyBackup();
     }, 60000);
@@ -614,8 +685,19 @@ export default function SettingsPage() {
     return () => clearInterval(timerInterval);
   }, []);
 
+  // 🔒 استرجاع ثيم الموظف والمظهر فور تحميل الصفحة
   useEffect(() => {
     if (typeof window !== "undefined") {
+      const employeeKey = userData?.id || user?.uid || userData?.username;
+      
+      // استرجاع كومبو الألوان المحفوظ للموظف
+      const savedColorTheme = (employeeKey && localStorage.getItem(`user_color_theme_${employeeKey}`)) || localStorage.getItem("app_color_theme");
+      if (savedColorTheme) {
+        setColorTheme(savedColorTheme);
+        document.documentElement.setAttribute("data-theme", savedColorTheme);
+        document.body.setAttribute("data-theme", savedColorTheme);
+      }
+
       if (window.location.hash && window.location.hash.includes("access_token=")) {
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const token = hashParams.get("access_token");
@@ -645,6 +727,13 @@ export default function SettingsPage() {
       const savedToken = localStorage.getItem("google_drive_access_token");
       if (savedToken) {
         setIsDriveConnected(true);
+      }
+
+      const savedFontSize = localStorage.getItem("app_font_size") as any;
+      if (savedFontSize) {
+        setFontSize(savedFontSize);
+        document.body.classList.remove("text-size-normal", "text-size-medium", "text-size-large", "text-size-xlarge");
+        document.body.classList.add(`text-size-${savedFontSize}`);
       }
 
       const savedProfitRate = localStorage.getItem("app_default_profit_rate");
@@ -687,18 +776,12 @@ export default function SettingsPage() {
         window.removeEventListener("message", handleAuthMessage);
       };
     }
-  }, [user]);
+  }, [user, userData]);
 
   const toggleTheme = () => {
-    const nextState = !isDarkMode;
-    setIsDarkMode(nextState);
-    if (nextState) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    setIsDarkMode(nextTheme === "dark");
   };
 
   const handleTestPrinter = (type: "doc" | "receipt" | "pos") => {
@@ -774,6 +857,11 @@ export default function SettingsPage() {
   };
 
   const handleSendPasswordReset = async () => {
+    if (isEmployee) {
+      toast.error("عذراً، هذه الخاصية مخصصة للمالك الرئيسي فقط.");
+      return;
+    }
+
     if (!user?.email) {
       toast.error("تعذر العثور على البريد الإلكتروني للحساب الحالي.");
       return;
@@ -793,6 +881,11 @@ export default function SettingsPage() {
   };
 
   const handleUpdateAdminPin = async () => {
+    if (isEmployee) {
+      toast.error("عذراً، تغيير رمز المالك مخصص للمالك الأصلي فقط.");
+      return;
+    }
+
     const ownerUid = getOwnerUid();
     if (!ownerUid) return;
     if (!adminPin.trim()) {
@@ -807,13 +900,18 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("خطأ في حفظ رمز PIN المالك:", error);
       toast.error("حدث خطأ أثناء حفظ الرمز.");
-    } finally{
+    } finally {
       setSavingPin(false);
     }
   };
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEmployee) {
+      toast.error("عذراً، إدارة وتحديد صلاحيات الموظفين مخصصة للمالك الأصلي فقط.");
+      return;
+    }
+
     const ownerUid = getOwnerUid();
     if (!ownerUid || !empForm.name || !empForm.username || !empForm.password) return;
 
@@ -860,6 +958,11 @@ export default function SettingsPage() {
   };
 
   const handleDeleteEmp = async (id: string, name: string) => {
+    if (isEmployee) {
+      toast.error("عذراً، حذف حسابات الموظفين مخصص للمالك الأصلي فقط.");
+      return;
+    }
+
     try {
       await deleteSystemUser(id);
       toast.success(`تم حذف الموظف (${name}) وإلغاء صلاحية دخوله.`);
@@ -1059,8 +1162,8 @@ export default function SettingsPage() {
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-card border border-border rounded-3xl p-6 md:p-8 max-w-md w-full text-center space-y-5 shadow-2xl"
             >
-              <div className="w-16 h-16 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mx-auto border border-orange-500/20">
-                <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+              <div className="w-16 h-16 bg-theme-primary/10 text-theme-primary rounded-full flex items-center justify-center mx-auto border border-theme-primary/20">
+                <Loader2 className="w-8 h-8 animate-spin text-theme-primary" />
               </div>
 
               <div className="space-y-1.5">
@@ -1072,12 +1175,12 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <div className="w-full bg-secondary rounded-full h-4 overflow-hidden border border-border/80 p-0.5">
                   <div 
-                    className="bg-gradient-to-r from-orange-500 to-amber-500 h-full rounded-full transition-all duration-300 ease-out"
+                    className="bg-theme-gradient h-full rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${restoreProgress}%` }}
                   />
                 </div>
                 <div className="flex justify-between items-center text-xs font-black font-mono px-1">
-                  <span className="text-orange-500">{restoreProgress}%</span>
+                  <span className="text-theme-primary">{restoreProgress}%</span>
                   <span className="text-muted-foreground">يرجى الانتظار وعدم إغلاق الصفحة</span>
                 </div>
               </div>
@@ -1090,16 +1193,16 @@ export default function SettingsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <Settings className="w-6 h-6 text-orange-500" />
-            إعدادات النظام وإدارة الموظفين والأجهزة
+            <Settings className="w-6 h-6 text-theme-primary" />
+            إعدادات النظام والأجهزة
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">تخصيص تفاصيل المكتب، التحديثات المباشرة، ربط الطابعات، الصلاحيات، والنسخ الاحتياطي .</p>
+          <p className="text-xs text-muted-foreground mt-1">تخصيص تفاصيل المكتب، كومبو ثيمات الألوان الاحترافية v14، التحديثات، والخطوط.</p>
         </div>
 
         <button
           onClick={() => handleSaveSettings({ preventDefault: () => {} } as any)}
           disabled={loadingAction}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-3 rounded-2xl font-bold text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-all disabled:opacity-50"
+          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-theme-gradient text-white px-5 py-3 rounded-2xl font-bold text-xs md:text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-all disabled:opacity-50 cursor-pointer"
         >
           {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           <span>حفظ التعديلات العامة</span>
@@ -1117,11 +1220,11 @@ export default function SettingsPage() {
       <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-4">
         <div className="flex justify-between items-center border-b border-border/60 pb-3">
           <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-orange-500" />
+            <Zap className="w-5 h-5 text-theme-primary" />
             <h3 className="font-black text-sm text-foreground">حالة اشتراك الحساب المسجل</h3>
           </div>
-          <span className="text-[10px] font-black px-3 py-1 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-            {isAdmin ? "وصول غير محدود" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية")}
+          <span className="text-[10px] font-black px-3 py-1 rounded-xl bg-theme-primary/10 text-theme-primary border border-theme-primary/20">
+            {isOwner ? "وصول غير محدود" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية")}
           </span>
         </div>
 
@@ -1129,20 +1232,20 @@ export default function SettingsPage() {
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">نوع الباقة المخصصة</span>
             <span className="text-xs font-black text-foreground">
-              {isAdmin ? "الباقة الإدارية الشاملة" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية (Basic)")}
+              {isOwner ? "الباقة الإدارية الشاملة" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية (Basic)")}
             </span>
           </div>
 
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">فترة الاشتراك</span>
             <span className="text-xs font-black text-foreground">
-              {isAdmin ? "دائم / غير محدود" : (currentSub?.period === "yearly" ? "سنوي" : "شهري")}
+              {isOwner ? "دائم / غير محدود" : (currentSub?.period === "yearly" ? "سنوي" : "شهري")}
             </span>
           </div>
 
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">المدة المتبقية</span>
-            {isAdmin ? (
+            {isOwner ? (
               <span className="text-xs font-black text-purple-600 dark:text-purple-400 flex items-center gap-1">
                 <ShieldCheck className="w-4 h-4 text-purple-500" />
                 غير محدود (أدمن)
@@ -1159,7 +1262,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {!isAdmin && daysLeft <= 7 && daysLeft > 0 && (
+        {!isOwner && daysLeft <= 7 && daysLeft > 0 && (
           <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold rounded-2xl flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>تنبيّه: اشتراكك الحسابي على وشك الانتهاء خلال {daysLeft} أيام!</span>
@@ -1174,14 +1277,14 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => toggleSection("updates")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
-              <div className="p-2 bg-orange-500/10 text-orange-500 rounded-xl">
+              <div className="p-2 bg-theme-primary/10 text-theme-primary rounded-xl">
                 <RefreshCw className={`w-4 h-4 ${updateStatus === "checking" ? "animate-spin" : ""}`} />
               </div>
               <span>تحديثات النظام وإصدار التطبيق</span>
-              <span className="text-[10px] bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 px-2.5 py-0.5 rounded-full font-bold dir-ltr">
+              <span className="text-[10px] bg-theme-primary/10 text-theme-primary border border-theme-primary/20 px-2.5 py-0.5 rounded-full font-bold dir-ltr">
                 v{currentAppVersion}
               </span>
             </div>
@@ -1207,7 +1310,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={handleCheckForUpdates}
                     disabled={updateStatus === "checking" || updateStatus === "downloading"}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all disabled:opacity-50 shadow-sm shrink-0"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-theme-gradient text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all disabled:opacity-50 shadow-sm shrink-0 cursor-pointer"
                   >
                     {updateStatus === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     <span>{updateStatus === "checking" ? "جاري الفحص..." : "فحص التحديثات الآن"}</span>
@@ -1235,7 +1338,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={handleRestartAndInstall}
-                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm w-full sm:w-auto justify-center"
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm w-full sm:w-auto justify-center cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
                       <span>إعادة التشغيل والتثبيت الآن</span>
@@ -1259,265 +1362,437 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 🔒 2. قسم أمان حساب الشركة ورمز PIN السريع للمالك Card */}
+        {/* 🔤 2. قسم المظهر، اختيار كومبو ألوان ثيمات v14 وتكبير الخطوط */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
-            onClick={() => toggleSection("security")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            onClick={() => toggleSection("appearance")}
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
-              <div className="p-2 bg-purple-500/10 text-purple-500 rounded-xl">
-                <Key className="w-4 h-4" />
+              <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+                <Palette className="w-4 h-4" />
               </div>
-              <span>أمان حساب الشركة ورمز PIN السريع للمالك</span>
+              <span>مظهر النظام، كومبو ألوان ثيمات v14 الاحترافية وحجم الخطوط</span>
             </div>
 
-            {openSections.security ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            {openSections.appearance ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
           </button>
 
           <AnimatePresence>
-            {openSections.security && (
+            {openSections.appearance && (
               <motion.div 
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="p-5 border-t border-border space-y-4"
+                className="p-5 border-t border-border space-y-6"
               >
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-orange-500/5 border border-orange-500/20 p-4 rounded-2xl">
-                  <div className="space-y-1">
-                    <p className="font-bold text-xs text-foreground flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-orange-500" />
-                      <span>البريد الإلكتروني الحالي لمالك المنظومة:</span>
-                    </p>
-                    <p className="text-xs font-mono font-bold text-orange-500 dir-ltr">{user?.email || "غير مسجل"}</p>
+                {/* 🎨 اختيار كومبو ألوان ثيمات v14 الاحترافية Mapped المخصصة لكل حساب */}
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-bold text-xs text-foreground flex items-center gap-2">
+                      <Palette className="w-4 h-4 text-theme-primary" />
+                      <span>اختيار ثيم كومبو الألوان v14 (Combo Color Themes):</span>
+                    </h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      إرسال رابط استعادة وتغيير كلمة السر الرسمية للشركة إلى صندوق الجيميل الخاص بك.
+                      اختر ثيم الألوان المفضل لك، يحفظ تلقائياً لحساب الموظف دون التأثير على الوضع النهاري/الداكن الخاص بالسلايد بار.
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleSendPasswordReset}
-                    disabled={isSendingReset}
-                    className="px-4 py-2.5 bg-orange-500 text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all shadow-sm flex items-center gap-2 shrink-0 disabled:opacity-50"
-                  >
-                    {isSendingReset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    <span>إرسال رابط التغيير للجيميل</span>
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {V14_COMBO_THEMES.map((t) => {
+                      const isSelected = colorTheme === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => handleColorThemeChange(t.id)}
+                          className={`p-3.5 rounded-2xl border text-right flex items-start gap-3 transition-all duration-300 relative ${
+                            isSelected
+                              ? "bg-theme-gradient text-white shadow-lg shadow-primary/25 border-transparent"
+                              : "text-foreground/70 hover:bg-secondary hover:text-theme-primary border-border"
+                          }`}
+                        >
+                          {/* 🎨 إظهار دائرة معاينة الكومبو بتدرج ألوان حقيقي (Gradient Preview) */}
+                          <span 
+                            className="w-6 h-6 rounded-full shrink-0 mt-0.5 border border-white/30 shadow-md transition-transform hover:scale-110" 
+                            style={{ background: t.previewBg }}
+                          />
+                          <div className="flex-1">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black">{t.name}</span>
+                              {isSelected && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                            <span className={`text-[10px] font-bold block mt-0.5 ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {t.desc}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="pt-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/30 p-4 rounded-2xl border border-border/50">
+                {/* 🔤 قسم تخصيص حجم الخط المفضل */}
+                <div className="border-t border-border/50 pt-5 space-y-3">
                   <div>
-                    <p className="text-xs font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
+                    <h4 className="font-bold text-xs text-foreground flex items-center gap-2">
+                      <Type className="w-4 h-4 text-theme-primary" />
+                      <span>اختر حجم الخط المناسب لك في الشاشة:</span>
+                    </h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      الرمز الذي تستخدمه لدخول حساب المالك من شاشة الموظفين بدلاً من كتابة كلمة سر الشركة.
+                      يمكنك تكبير أو تصغير الخطوط بسهولة لتوضيح القراءة في الجداول والعقود بدون زوم للشاشة.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input
-                      type="password"
-                      value={adminPin}
-                      onChange={(e) => setAdminPin(e.target.value)}
-                      placeholder="1234"
-                      className="p-2.5 border border-border bg-background rounded-2xl text-center font-mono w-28 text-xs outline-none focus:ring-2 focus:ring-orange-500 font-bold"
-                      dir="ltr"
-                    />
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     <button
                       type="button"
-                      onClick={handleUpdateAdminPin}
-                      disabled={savingPin}
-                      className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all shadow-sm disabled:opacity-50"
+                      onClick={() => handleFontSizeChange("normal")}
+                      className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
+                        fontSize === "normal"
+                          ? "bg-theme-primary/10 border-theme-primary text-theme-primary font-black shadow-sm"
+                          : "bg-background border-border text-muted-foreground font-bold hover:bg-secondary"
+                      }`}
                     >
-                      {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ الرمز"}
+                      <span className="block text-xs">عادي (100%)</span>
+                      <span className="text-[10px] opacity-75">القياسي</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleFontSizeChange("medium")}
+                      className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
+                        fontSize === "medium"
+                          ? "bg-theme-primary/10 border-theme-primary text-theme-primary font-black shadow-sm"
+                          : "bg-background border-border text-muted-foreground font-bold hover:bg-secondary"
+                      }`}
+                    >
+                      <span className="block text-sm">متوسط (110%)</span>
+                      <span className="text-[10px] opacity-75">مريح للقراءة</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleFontSizeChange("large")}
+                      className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
+                        fontSize === "large"
+                          ? "bg-theme-primary/10 border-theme-primary text-theme-primary font-black shadow-sm"
+                          : "bg-background border-border text-muted-foreground font-bold hover:bg-secondary"
+                      }`}
+                    >
+                      <span className="block text-base">كبير (120%)</span>
+                      <span className="text-[10px] opacity-75">واضح جداً</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleFontSizeChange("xlarge")}
+                      className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
+                        fontSize === "xlarge"
+                          ? "bg-theme-primary/10 border-theme-primary text-theme-primary font-black shadow-sm"
+                          : "bg-background border-border text-muted-foreground font-bold hover:bg-secondary"
+                      }`}
+                    >
+                      <span className="block text-lg">كبير جداً (130%)</span>
+                      <span className="text-[10px] opacity-75">أقصى وضوح</span>
                     </button>
                   </div>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
 
-        {/* 👥 3. قسم إضافة وتحديد صلاحيات الموظفين Card */}
-        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
-          <button
-            type="button"
-            onClick={() => toggleSection("employees")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
-          >
-            <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
-              <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
-                <UserPlus className="w-4 h-4" />
-              </div>
-              <span>إدارة الموظفين وتحديد صلاحيات النظام ({usersList.length})</span>
-            </div>
+                <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50 space-y-2">
+                  <span className="text-[10px] font-bold text-muted-foreground block">معاينة حية لخط العقد المختار:</span>
+                  <p className="font-bold text-foreground">
+                    اسم العميل: محمد علي أحمد • المبلغ المتبقي: <span className="text-theme-primary font-mono">250,000 د.ع</span>
+                  </p>
+                </div>
 
-            {openSections.employees ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-          </button>
-
-          <AnimatePresence>
-            {openSections.employees && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="p-5 border-t border-border space-y-4"
-              >
-                <div className="space-y-4 bg-secondary/20 p-4 rounded-2xl border border-border/50">
-                  <h4 className="font-bold text-xs text-foreground">إضافة موظف أو كادر جديد للمكتب:</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم الموظف الثلاثي</label>
-                      <input
-                        type="text"
-                        placeholder="مثال: أحمد علي"
-                        value={empForm.name}
-                        onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
-                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم المستخدم (Username)</label>
-                      <input
-                        type="text"
-                        placeholder="مثال: ahmed123"
-                        value={empForm.username}
-                        onChange={(e) => setEmpForm({ ...empForm, username: e.target.value })}
-                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 text-left font-mono"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">رمز السر الخاص به</label>
-                      <input
-                        type="text"
-                        placeholder="11223344"
-                        value={empForm.password}
-                        onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
-                        className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 text-left font-mono"
-                        dir="ltr"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-muted-foreground mb-2">تحديد الصلاحيات المسموح بها للموظف:</label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-bold">
-                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={empForm.canManageCustomers}
-                          onChange={(e) => setEmpForm({ ...empForm, canManageCustomers: e.target.checked })}
-                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
-                        />
-                        <span>تسجيل عملاء وتلقي دفعات</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={empForm.canManageStore}
-                          onChange={(e) => setEmpForm({ ...empForm, canManageStore: e.target.checked })}
-                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
-                        />
-                        <span>إدارة المخزن والمبيعات</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={empForm.canViewDashboard}
-                          onChange={(e) => setEmpForm({ ...empForm, canViewDashboard: e.target.checked })}
-                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
-                        />
-                        <span>عرض الداشبورد والمالية</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={empForm.canViewTreasury}
-                          onChange={(e) => setEmpForm({ ...empForm, canViewTreasury: e.target.checked })}
-                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
-                        />
-                        <span>عرض الخزينة والسيولة</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-orange-500 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={empForm.canDeleteOrEdit}
-                          onChange={(e) => setEmpForm({ ...empForm, canDeleteOrEdit: e.target.checked })}
-                          className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4 accent-orange-500"
-                        />
-                        <span>تعديل وحذف العقود</span>
-                      </label>
-                    </div>
+                <div className="pt-2 border-t border-border/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {isDarkMode ? <Moon className="w-4 h-4 text-purple-400" /> : <Sun className="w-4 h-4 text-amber-500" />}
+                    <span className="text-xs font-bold text-foreground">التحويل بين الوضع النهاري والداكن</span>
                   </div>
 
                   <button
                     type="button"
-                    onClick={handleAddEmployee}
-                    disabled={submittingUser || !empForm.name || !empForm.username}
-                    className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-2xl text-xs hover:opacity-95 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                    onClick={toggleTheme}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                      isDarkMode 
+                        ? "bg-purple-600 text-white" 
+                        : "bg-secondary text-foreground border border-border"
+                    }`}
                   >
-                    {submittingUser ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                    <span>تأكيد وحفظ الموظف</span>
+                    {isDarkMode ? "الوضع الداكن" : "الوضع النهاري"}
                   </button>
-                </div>
-
-                <div className="pt-2 space-y-2">
-                  <h4 className="font-bold text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Shield className="w-4 h-4 text-orange-500" />
-                    <span>قائمة الكادر والموظفين المسجلين:</span>
-                  </h4>
-
-                  {loadingUsers ? (
-                    <div className="text-center py-4 text-orange-500">
-                      <Loader2 className="w-5 h-5 animate-spin mx-auto" />
-                    </div>
-                  ) : usersList.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic py-2">لا يوجد موظفين مسجلين في الوقت الحالي.</p>
-                  ) : (
-                    <div className="divide-y divide-border/60 border border-border/80 rounded-2xl overflow-hidden bg-background">
-                      {usersList.map((emp) => (
-                        <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-secondary/30 transition-colors">
-                          <div>
-                            <p className="font-bold text-xs text-foreground flex items-center gap-2">
-                              <UserCheck className="w-4 h-4 text-emerald-500" />
-                              <span>{emp.name}</span>
-                            </p>
-                            <p className="text-[10px] text-muted-foreground font-mono mt-0.5" dir="ltr">
-                              المستخدم: <strong className="text-orange-500">{emp.username || emp.email.split('@')[0]}</strong> • الرمز: {emp.password}
-                            </p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => emp.id && handleDeleteEmp(emp.id, emp.name)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"
-                            title="حذف الموظف"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* 🏢 4. تفاصيل الشركة والشعار وعقود الطباعة الرسمية Card */}
+        {/* 🔒 3. قسم أمان حساب الشركة ورمز PIN السريع للمالك (يخفى تماماً إذا كان موظفاً) */}
+        {!isEmployee && (
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+            <button
+              type="button"
+              onClick={() => toggleSection("security")}
+              className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+                <div className="p-2 bg-purple-500/10 text-purple-500 rounded-xl">
+                  <Key className="w-4 h-4" />
+                </div>
+                <span>أمان حساب الشركة ورمز PIN السريع للمالك</span>
+              </div>
+
+              {openSections.security ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </button>
+
+            <AnimatePresence>
+              {openSections.security && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="p-5 border-t border-border space-y-4"
+                >
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-theme-primary/5 border border-theme-primary/20 p-4 rounded-2xl">
+                    <div className="space-y-1">
+                      <p className="font-bold text-xs text-foreground flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-theme-primary" />
+                        <span>البريد الإلكتروني الحالي لمالك المنظومة:</span>
+                      </p>
+                      <p className="text-xs font-mono font-bold text-theme-primary dir-ltr">{user?.email || "غير مسجل"}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        إرسال رابط استعادة وتغيير كلمة السر الرسمية للشركة إلى صندوق الجيميل الخاص بك.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSendPasswordReset}
+                      disabled={isSendingReset}
+                      className="px-4 py-2.5 bg-theme-gradient text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all shadow-sm flex items-center gap-2 shrink-0 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSendingReset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                      <span>إرسال رابط التغيير للجيميل</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-secondary/30 p-4 rounded-2xl border border-border/50">
+                    <div>
+                      <p className="text-xs font-bold text-foreground">رمز PIN السريع لحساب الأدمن / المالك:</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        الرمز الذي تستخدمه لدخول حساب المالك من شاشة الموظفين بدلاً من كتابة كلمة سر الشركة.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="password"
+                        value={adminPin}
+                        onChange={(e) => setAdminPin(e.target.value)}
+                        placeholder="1234"
+                        className="p-2.5 border border-border bg-background rounded-2xl text-center font-mono w-28 text-xs outline-none focus:ring-2 focus:ring-primary font-bold"
+                        dir="ltr"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUpdateAdminPin}
+                        disabled={savingPin}
+                        className="px-4 py-2.5 bg-theme-gradient text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all shadow-sm disabled:opacity-50 cursor-pointer"
+                      >
+                        {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ الرمز"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* 👥 4. قسم إضافة وتحديد صلاحيات الموظفين (يخفى تماماً إذا كان موظفاً) */}
+        {!isEmployee && (
+          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+            <button
+              type="button"
+              onClick={() => toggleSection("employees")}
+              className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
+                <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <span>إدارة الموظفين وتحديد صلاحيات النظام ({usersList.length})</span>
+              </div>
+
+              {openSections.employees ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </button>
+
+            <AnimatePresence>
+              {openSections.employees && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="p-5 border-t border-border space-y-4"
+                >
+                  <div className="space-y-4 bg-secondary/20 p-4 rounded-2xl border border-border/50">
+                    <h4 className="font-bold text-xs text-foreground">إضافة موظف أو كادر جديد للمكتب:</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم الموظف الثلاثي</label>
+                        <input
+                          type="text"
+                          placeholder="مثال: أحمد علي"
+                          value={empForm.name}
+                          onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
+                          className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">اسم المستخدم (Username)</label>
+                        <input
+                          type="text"
+                          placeholder="مثال: ahmed123"
+                          value={empForm.username}
+                          onChange={(e) => setEmpForm({ ...empForm, username: e.target.value })}
+                          className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary text-left font-mono"
+                          dir="ltr"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-muted-foreground mb-1">رمز السر الخاص به</label>
+                        <input
+                          type="text"
+                          placeholder="11223344"
+                          value={empForm.password}
+                          onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
+                          className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary text-left font-mono"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-2">تحديد الصلاحيات المسموح بها للموظف:</label>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-bold">
+                        <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-theme-primary transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={empForm.canManageCustomers}
+                            onChange={(e) => setEmpForm({ ...empForm, canManageCustomers: e.target.checked })}
+                            className="rounded text-theme-primary focus:ring-primary w-4 h-4 accent-orange-500"
+                          />
+                          <span>تسجيل عملاء وتلقي دفعات</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-theme-primary transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={empForm.canManageStore}
+                            onChange={(e) => setEmpForm({ ...empForm, canManageStore: e.target.checked })}
+                            className="rounded text-theme-primary focus:ring-primary w-4 h-4 accent-orange-500"
+                          />
+                          <span>إدارة المخزن والمبيعات</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-theme-primary transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={empForm.canViewDashboard}
+                            onChange={(e) => setEmpForm({ ...empForm, canViewDashboard: e.target.checked })}
+                            className="rounded text-theme-primary focus:ring-primary w-4 h-4 accent-orange-500"
+                          />
+                          <span>عرض الداشبورد والمالية</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-theme-primary transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={empForm.canViewTreasury}
+                            onChange={(e) => setEmpForm({ ...empForm, canViewTreasury: e.target.checked })}
+                            className="rounded text-theme-primary focus:ring-primary w-4 h-4 accent-orange-500"
+                          />
+                          <span>عرض الخزينة والسيولة</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 p-2.5 rounded-2xl bg-background border border-border/80 cursor-pointer hover:border-theme-primary transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={empForm.canDeleteOrEdit}
+                            onChange={(e) => setEmpForm({ ...empForm, canDeleteOrEdit: e.target.checked })}
+                            className="rounded text-theme-primary focus:ring-primary w-4 h-4 accent-orange-500"
+                          />
+                          <span>تعديل وحذف العقود والمالية</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAddEmployee}
+                      disabled={submittingUser || !empForm.name || !empForm.username}
+                      className="px-5 py-2.5 bg-theme-gradient text-white font-bold rounded-2xl text-xs hover:opacity-95 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm cursor-pointer"
+                    >
+                      {submittingUser ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                      <span>تأكيد وحفظ الموظف</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 space-y-2">
+                    <h4 className="font-bold text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Shield className="w-4 h-4 text-theme-primary" />
+                      <span>قائمة الكادر والموظفين المسجلين:</span>
+                    </h4>
+
+                    {loadingUsers ? (
+                      <div className="text-center py-4 text-theme-primary">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                      </div>
+                    ) : usersList.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-2">لا يوجد موظفين مسجلين في الوقت الحالي.</p>
+                    ) : (
+                      <div className="divide-y divide-border/60 border border-border/80 rounded-2xl overflow-hidden bg-background">
+                        {usersList.map((emp) => (
+                          <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-secondary/30 transition-colors">
+                            <div>
+                              <p className="font-bold text-xs text-foreground flex items-center gap-2">
+                                <UserCheck className="w-4 h-4 text-emerald-500" />
+                                <span>{emp.name}</span>
+                              </p>
+                              <p className="text-[10px] text-muted-foreground font-mono mt-0.5" dir="ltr">
+                                المستخدم: <strong className="text-theme-primary">{emp.username || emp.email.split('@')[0]}</strong> • الرمز: {emp.password}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => emp.id && handleDeleteEmp(emp.id, emp.name)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+                              title="حذف الموظف"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* 🏢 5. تفاصيل الشركة والشعار وعقود الطباعة الرسمية Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
             onClick={() => toggleSection("company")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
               <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
@@ -1555,7 +1830,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    <label className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all cursor-pointer shadow-sm flex items-center gap-1.5">
+                    <label className="px-4 py-2.5 bg-theme-gradient text-white font-bold text-xs rounded-2xl hover:opacity-95 transition-all cursor-pointer shadow-sm flex items-center gap-1.5">
                       <Upload className="w-4 h-4" />
                       <span>رفع شعار جديد</span>
                       <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
@@ -1565,7 +1840,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => setStoreLogo("")}
-                        className="px-3 py-2.5 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl text-xs font-bold transition-colors"
+                        className="px-3 py-2.5 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl text-xs font-bold transition-colors cursor-pointer"
                       >
                         إزالة
                       </button>
@@ -1581,20 +1856,20 @@ export default function SettingsPage() {
                       value={storeName}
                       onChange={(e) => setStoreName(e.target.value)}
                       placeholder="مثال: أقساطك للتجارة والتقسيط"
-                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
-                      <Phone className="w-3.5 h-3.5 text-orange-500" /> رقم هاتف المكتب الرئيسي
+                      <Phone className="w-3.5 h-3.5 text-theme-primary" /> رقم هاتف المكتب الرئيسي
                     </label>
                     <input
                       type="text"
                       value={storePhone}
                       onChange={(e) => setStorePhone(e.target.value)}
                       placeholder="07700000000"
-                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary font-mono"
                       dir="ltr"
                     />
                   </div>
@@ -1603,14 +1878,14 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-orange-500" /> عنوان الفرع الرئيسي
+                      <MapPin className="w-3.5 h-3.5 text-theme-primary" /> عنوان الفرع الرئيسي
                     </label>
                     <input
                       type="text"
                       value={storeAddress}
                       onChange={(e) => setStoreAddress(e.target.value)}
                       placeholder="مثال: بغداد - المنصور"
-                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
 
@@ -1628,14 +1903,14 @@ export default function SettingsPage() {
 
                 <div>
                   <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5 text-orange-500" /> شروط وتعهدات العقد المطبوع
+                    <FileText className="w-3.5 h-3.5 text-theme-primary" /> شروط وتعهدات العقد المطبوع
                   </label>
                   <textarea
                     rows={4}
                     value={contractTerms}
                     onChange={(e) => setContractTerms(e.target.value)}
                     placeholder="أدخل الشروط والأحكام التي تظهر بأسفل العقد..."
-                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </motion.div>
@@ -1643,12 +1918,12 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 🖨️ 5. قسم ربط الأجهزة الملحقة والطابعات Card */}
+        {/* 🖨️ 6. قسم ربط الأجهزة الملحقة والطابعات Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
             onClick={() => toggleSection("hardware")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
               <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
@@ -1673,7 +1948,7 @@ export default function SettingsPage() {
                   {/* 1. طابعة العقود العامة */}
                   <div className="p-4 bg-secondary/20 rounded-2xl border border-border space-y-3.5">
                     <div className="flex items-center gap-2.5 border-b border-border/60 pb-2.5">
-                      <div className="p-2 rounded-xl bg-orange-500/10 text-orange-500">
+                      <div className="p-2 rounded-xl bg-theme-primary/10 text-theme-primary">
                         <Printer className="w-5 h-5" />
                       </div>
                       <div>
@@ -1688,9 +1963,9 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setDocPrinterConn("usb")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
                             docPrinterConn === "usb"
-                              ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                              ? "bg-theme-primary/10 border-theme-primary text-theme-primary"
                               : "bg-background border-border text-muted-foreground"
                           }`}
                         >
@@ -1701,9 +1976,9 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setDocPrinterConn("wifi")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
                             docPrinterConn === "wifi"
-                              ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                              ? "bg-theme-primary/10 border-theme-primary text-theme-primary"
                               : "bg-background border-border text-muted-foreground"
                           }`}
                         >
@@ -1719,7 +1994,7 @@ export default function SettingsPage() {
                         <select
                           value={docPrinterName}
                           onChange={(e) => setDocPrinterName(e.target.value)}
-                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500"
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-primary"
                         >
                           <option value="">-- اختر طابعة من النظام --</option>
                           {availablePrinters.map((printer, idx) => (
@@ -1744,7 +2019,7 @@ export default function SettingsPage() {
                           value={docPrinterIp}
                           onChange={(e) => setDocPrinterIp(e.target.value)}
                           placeholder="192.168.1.200"
-                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold font-mono dir-ltr text-right outline-none focus:ring-2 focus:ring-orange-500"
+                          className="w-full p-2.5 bg-background border border-border rounded-xl text-xs font-bold font-mono dir-ltr text-right outline-none focus:ring-2 focus:ring-primary"
                         />
                       </div>
                     )}
@@ -1753,7 +2028,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => handleTestPrinter("doc")}
                       disabled={testingHardware === "doc"}
-                      className="w-full py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 bg-theme-primary/10 hover:bg-theme-primary/20 text-theme-primary border border-theme-primary/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       {testingHardware === "doc" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
                       <span>طباعة صفحة اختبار A4</span>
@@ -1778,7 +2053,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setReceiptPaperSize("80mm")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                             receiptPaperSize === "80mm"
                               ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                               : "bg-background border-border text-muted-foreground"
@@ -1790,7 +2065,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setReceiptPaperSize("58mm")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                             receiptPaperSize === "58mm"
                               ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                               : "bg-background border-border text-muted-foreground"
@@ -1807,7 +2082,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setReceiptConnType("usb")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
                             receiptConnType === "usb"
                               ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                               : "bg-background border-border text-muted-foreground"
@@ -1820,7 +2095,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => setReceiptConnType("lan")}
-                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
                             receiptConnType === "lan"
                               ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                               : "bg-background border-border text-muted-foreground"
@@ -1872,7 +2147,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => handleTestPrinter("receipt")}
                       disabled={testingHardware === "receipt"}
-                      className="w-full py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       {testingHardware === "receipt" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
                       <span>طباعة وصل اختبار ({receiptPaperSize})</span>
@@ -1922,7 +2197,7 @@ export default function SettingsPage() {
                         type="button"
                         onClick={() => handleTestPrinter("pos")}
                         disabled={testingHardware === "pos"}
-                        className="w-full py-2.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         {testingHardware === "pos" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
                         <span>اختبار إشارة جهاز الدفع</span>
@@ -1936,12 +2211,12 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 💬 6. قسم ربط الواتساب والإشعارات الآلية Card */}
+        {/* 💬 7. قسم ربط الواتساب والإشعارات الآلية Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
             onClick={() => toggleSection("whatsapp")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
               <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
@@ -2012,7 +2287,7 @@ export default function SettingsPage() {
                     rows={3}
                     value={whatsappTemplate}
                     onChange={(e) => setWhatsappTemplate(e.target.value)}
-                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-bold outline-none resize-none focus:ring-2 focus:ring-primary"
                   />
                   <p className="text-[10px] text-muted-foreground mt-1 font-mono">
                     المتغيرات المتاحة: &#123;name&#125; اسم العميل، &#123;amount&#125; القسط، &#123;product&#125; المنتج.
@@ -2023,58 +2298,30 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 📊 7. قسم النسبة المالية الافتراضية والمظهر Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center gap-2 text-orange-500 border-b border-border/60 pb-2.5">
-              <Percent className="w-4 h-4" />
-              <h3 className="font-extrabold text-xs">النسبة المالية الافتراضية</h3>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-muted-foreground mb-1">نسبة الربح الافتراضية (%)</label>
-              <input
-                type="number"
-                value={defaultProfitRate}
-                onChange={(e) => setDefaultProfitRate(Number(e.target.value))}
-                className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-black dir-ltr text-right focus:ring-2 focus:ring-orange-500 outline-none"
-              />
-            </div>
+        {/* 📊 8. قسم النسبة المالية الافتراضية */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-theme-primary border-b border-border/60 pb-2.5">
+            <Percent className="w-4 h-4" />
+            <h3 className="font-extrabold text-xs">النسبة المالية الافتراضية</h3>
           </div>
 
-          <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center gap-2 text-purple-500 border-b border-border/60 pb-2.5">
-              <Sun className="w-4 h-4" />
-              <h3 className="font-extrabold text-xs">مظهر المنظومة (Dark / Light)</h3>
-            </div>
-
-            <div className="flex items-center justify-between p-2.5 bg-secondary/30 rounded-2xl border border-border/50">
-              <div className="flex items-center gap-2">
-                {isDarkMode ? <Moon className="w-4 h-4 text-purple-400" /> : <Sun className="w-4 h-4 text-amber-500" />}
-                <span className="text-xs font-bold text-foreground">الوضع الليلي (Dark)</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                  isDarkMode 
-                    ? "bg-purple-600 text-white" 
-                    : "bg-secondary text-foreground border border-border"
-                }`}
-              >
-                {isDarkMode ? "مُفعل" : "معطل"}
-              </button>
-            </div>
+          <div>
+            <label className="block text-[11px] font-bold text-muted-foreground mb-1">نسبة الربح الافتراضية (%)</label>
+            <input
+              type="number"
+              value={defaultProfitRate}
+              onChange={(e) => setDefaultProfitRate(Number(e.target.value))}
+              className="w-full p-3 bg-background border border-border rounded-2xl text-xs font-black dir-ltr text-right focus:ring-2 focus:ring-primary outline-none font-mono"
+            />
           </div>
         </div>
 
-        {/* 💾 8. قسم النسخ الاحتياطي و Google Drive Card */}
+        {/* 💾 9. قسم النسخ الاحتياطي و Google Drive Card */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
             type="button"
             onClick={() => toggleSection("backup")}
-            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
+            className="w-full p-4 md:p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 font-extrabold text-sm text-foreground">
               <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
@@ -2099,19 +2346,19 @@ export default function SettingsPage() {
                     type="button"
                     onClick={handleExportBackup}
                     disabled={loadingAction}
-                    className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-orange-500/50 transition-all text-right flex flex-col justify-between space-y-2 group"
+                    className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-theme-primary/50 transition-all text-right flex flex-col justify-between space-y-2 group cursor-pointer"
                   >
                     <div className="flex items-center justify-between w-full">
-                      <span className="font-bold text-xs text-foreground group-hover:text-orange-500 transition-colors">تصدير نسخة (JSON)</span>
-                      <Download className="w-4 h-4 text-orange-500" />
+                      <span className="font-bold text-xs text-foreground group-hover:text-theme-primary transition-colors">تصدير نسخة (JSON)</span>
+                      <Download className="w-4 h-4 text-theme-primary" />
                     </div>
                     <p className="text-[10px] text-muted-foreground">حفظ كامل بياناتك وسجلاتك في ملف خارجي آمن.</p>
                   </button>
 
-                  <label className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-orange-500/50 transition-all text-right flex flex-col justify-between space-y-2 cursor-pointer group">
+                  <label className="p-4 bg-secondary/20 border border-border rounded-2xl hover:border-theme-primary/50 transition-all text-right flex flex-col justify-between space-y-2 cursor-pointer group">
                     <div className="flex items-center justify-between w-full">
-                      <span className="font-bold text-xs text-foreground group-hover:text-orange-500 transition-colors">استعادة نسخة محليّة</span>
-                      <Upload className="w-4 h-4 text-orange-500" />
+                      <span className="font-bold text-xs text-foreground group-hover:text-theme-primary transition-colors">استعادة نسخة محليّة</span>
+                      <Upload className="w-4 h-4 text-theme-primary" />
                     </div>
                     <p className="text-[10px] text-muted-foreground">قراءة واسترجاع السجلات من ملف .json محلي.</p>
                     <input type="file" accept=".json" onChange={handleImportBackup} disabled={loadingAction || isRestoring} className="hidden" />
@@ -2135,7 +2382,7 @@ export default function SettingsPage() {
                             setIsDriveConnected(false);
                             toast.info("تم إلغاء ربط Google Drive.");
                           }}
-                          className="w-full py-2 px-3 bg-emerald-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1"
+                          className="w-full py-2 px-3 bg-emerald-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Check className="w-3.5 h-3.5" />
                           <span>Google Drive مُتصل بنجاح</span>
@@ -2144,7 +2391,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={handleConnectGoogleDrive}
-                          className="w-full py-2 px-3 bg-blue-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 shadow-sm"
+                          className="w-full py-2 px-3 bg-blue-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 shadow-sm cursor-pointer"
                         >
                           <Key className="w-3.5 h-3.5" />
                           <span>ربط حساب Google Drive</span>
@@ -2156,7 +2403,7 @@ export default function SettingsPage() {
                           type="button"
                           onClick={() => handleUploadToGoogleDrive(false)}
                           disabled={uploadingToDrive || loadingAction || !isDriveConnected || isRestoring}
-                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50 cursor-pointer"
                         >
                           {uploadingToDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <CloudUpload className="w-3.5 h-3.5 text-blue-500" />}
                           <span>رفع سحابي الآن</span>
@@ -2166,7 +2413,7 @@ export default function SettingsPage() {
                           type="button"
                           onClick={() => handleDownloadFromGoogleDrive(undefined, false)}
                           disabled={downloadingFromDrive || loadingAction || !isDriveConnected || isRestoring}
-                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                          className="flex-1 py-1.5 px-2 bg-secondary text-foreground border border-border rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 disabled:opacity-50 cursor-pointer"
                         >
                           {downloadingFromDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" /> : <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />}
                           <span>استعادة شاملة</span>

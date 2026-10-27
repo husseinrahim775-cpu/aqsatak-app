@@ -20,7 +20,7 @@ import {
   ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, 
   Edit, Trash2, X, Receipt, Printer, Camera, FileText, Image as ImageIcon, Download, 
   ExternalLink, Eye, EyeOff, ChevronDown, ChevronUp, RefreshCw, Upload, CheckCircle2, AlertCircle, Sparkles,
-  Clock, CalendarDays, ChevronRight, ChevronLeft
+  Clock, CalendarDays, ChevronRight, ChevronLeft, Coins
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -54,12 +54,26 @@ function CustomerDetailsContent() {
   const rawParam = getParamId();
   const phoneOrId = rawParam ? decodeURIComponent(rawParam) : "";
 
-  const { user } = useAuth();
+  const { user, userData } = useAuth() as any;
   
+  // 🔒 فحص الصلاحيات الأمنية: هل المستخدم مالك أو لديه صلاحية التعديل والحذف؟
+  const isEmployee = userData?.role === "employee";
+  const canDeleteOrEdit = !isEmployee || !!userData?.permissions?.canDeleteOrEdit;
+
   const [installments, setInstallments] = useState<InstallmentData[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
+
+  // 📂 حالة طي وفتح كروت الأقساط (مغلقة افتراضياً)
+  const [expandedInstIds, setExpandedInstIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpandInst = (id: string) => {
+    setExpandedInstIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
 
   // 🔒 حالة إظهار / إخفاء المستندات
   const [showDocs, setShowDocs] = useState(false);
@@ -149,6 +163,10 @@ function CustomerDetailsContent() {
 
   // 🗑️ دالة حذف صورة وثيقة محددة
   const handleDeleteDoc = async (inst: InstallmentData, docKey: "idCardUrl" | "contractUrl" | "personalPhotoUrl", docName: string) => {
+    if (!canDeleteOrEdit) {
+      alert("عذراً، لا تملك صلاحية حذف المستندات.");
+      return;
+    }
     if (!inst.id) return;
     const confirmDelete = window.confirm(`هل أنت متأكد من حذف صورة (${docName})؟`);
     if (!confirmDelete) return;
@@ -333,6 +351,10 @@ function CustomerDetailsContent() {
   };
 
   const handleDeleteInstallment = async (id: string, productName: string) => {
+    if (!canDeleteOrEdit) {
+      alert("عذراً، لا تملك صلاحية حذف الأقساط والعقود.");
+      return;
+    }
     const confirmDelete = window.confirm(
       `هل أنت متأكد من حذف قسط "${productName}" بالكامل؟\n\nتنبيه: سيتم إرجاع السلعة المربوطة للمخزن تلقائياً.`
     );
@@ -351,6 +373,10 @@ function CustomerDetailsContent() {
   };
 
   const openEditModal = (inst: InstallmentData) => {
+    if (!canDeleteOrEdit) {
+      alert("عذراً، لا تملك صلاحية تعديل بيانات الأقساط.");
+      return;
+    }
     setEditingInstallment(inst);
     setEditForm({
       productName: inst.productName,
@@ -362,7 +388,7 @@ function CustomerDetailsContent() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingInstallment?.id) return;
+    if (!editingInstallment?.id || !canDeleteOrEdit) return;
     setIsSaving(true);
     try {
       await updateInstallment(editingInstallment.id, {
@@ -383,6 +409,10 @@ function CustomerDetailsContent() {
   };
 
   const handleDeletePayment = async (payment: PaymentRecord) => {
+    if (!canDeleteOrEdit) {
+      alert("عذراً، لا تملك صلاحية حذف سجل الدفعات.");
+      return;
+    }
     const confirmDelete = window.confirm(
       `هل أنت متأكد من حذف هذه الدفعة بقيمة ${payment.amount} د.ع؟\nسيتم إرجاع المبلغ إلى ديون العميل وإلغاء حالة الدفع.`
     );
@@ -398,6 +428,10 @@ function CustomerDetailsContent() {
   };
 
   const openEditPaymentModal = (payment: PaymentRecord) => {
+    if (!canDeleteOrEdit) {
+      alert("عذراً، لا تملك صلاحية تعديل سجل الدفعات.");
+      return;
+    }
     setEditingPayment(payment);
     const target = payment.targetMonth || "";
     setEditPaymentForm({
@@ -416,7 +450,7 @@ function CustomerDetailsContent() {
   };
 
   const handleSavePaymentEdit = async () => {
-    if (!editingPayment?.id) return;
+    if (!editingPayment?.id || !canDeleteOrEdit) return;
     setIsSavingPayment(true);
     try {
       await updatePaymentRecord(
@@ -517,9 +551,14 @@ function CustomerDetailsContent() {
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
+  // 💳 الانتقال المباشر لصفحة الحسابات للتسديد التلقائي مع تفعيل autoOpen=true
+  const handleQuickPay = (installmentId: string, dueDate: string, amount: number) => {
+    router.push(`/accounts?payInstId=${installmentId}&targetDate=${dueDate}&amount=${amount}&autoOpen=true`);
+  };
+
   if (loading) {
     return (
-      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-primary">
         <Loader2 className="w-10 h-10 animate-spin" />
         <span className="text-sm font-bold text-muted-foreground animate-pulse">جاري جلب ملف العميل ...</span>
       </div>
@@ -530,7 +569,7 @@ function CustomerDetailsContent() {
     return (
       <div className="text-center py-16 space-y-4">
         <h2 className="text-2xl font-black text-foreground">لم يتم العثور على أقساط لهذا العميل</h2>
-        <Link href="/customers" className="text-orange-500 hover:underline text-sm font-bold">العودة لقائمة العملاء ←</Link>
+        <Link href="/customers" className="text-primary hover:underline text-sm font-bold">العودة لقائمة العملاء ←</Link>
       </div>
     );
   }
@@ -547,7 +586,7 @@ function CustomerDetailsContent() {
       {/* 1. الترويسة الرئيسية */}
       <div className="flex items-center justify-between bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div className="flex items-center gap-4">
-          <Link href="/customers" className="p-3 bg-secondary hover:bg-orange-500/10 hover:text-orange-500 text-foreground rounded-2xl border border-border/80 transition-all">
+          <Link href="/customers" className="p-3 bg-secondary hover:bg-primary/10 hover:text-primary text-foreground rounded-2xl border border-border/80 transition-all">
             <ArrowRight className="w-6 h-6" />
           </Link>
           <div>
@@ -560,7 +599,7 @@ function CustomerDetailsContent() {
           </div>
         </div>
 
-        <span className="text-xs md:text-sm font-black px-4 py-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-2xl">
+        <span className="text-xs md:text-sm font-black px-4 py-2 bg-primary/10 text-primary border border-primary/20 rounded-2xl">
           حساب نشط
         </span>
       </div>
@@ -568,7 +607,7 @@ function CustomerDetailsContent() {
       {/* 2. بطاقات بيانات العميل والكفيل */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2.5 text-orange-500 border-b border-border/60 pb-3.5">
+          <div className="flex items-center gap-2.5 text-primary border-b border-border/60 pb-3.5">
             <User className="w-6 h-6" />
             <h2 className="font-black text-lg">معلومات العميل الشخصية</h2>
           </div>
@@ -617,10 +656,10 @@ function CustomerDetailsContent() {
           onClick={() => setShowDocs(!showDocs)}
           className="w-full p-5 flex items-center justify-between bg-secondary/30 hover:bg-secondary/60 transition-colors"
         >
-          <div className="flex items-center gap-3 text-orange-500 font-black text-base">
+          <div className="flex items-center gap-3 text-primary font-black text-base">
             <Camera className="w-6 h-6" />
             <span>الأوراق والمستندات الثبوتية</span>
-            <span className="text-xs bg-orange-500/10 px-3 py-1 rounded-full text-orange-600 dark:text-orange-400 font-extrabold border border-orange-500/20">إدارة وتعديل </span>
+            <span className="text-xs bg-primary/10 px-3 py-1 rounded-full text-primary font-extrabold border border-primary/20">إدارة وتعديل </span>
           </div>
 
           <div className="flex items-center gap-2 text-xs md:text-sm font-black text-muted-foreground">
@@ -632,7 +671,7 @@ function CustomerDetailsContent() {
               </>
             ) : (
               <>
-                <Eye className="w-5 h-5 text-orange-500" />
+                <Eye className="w-5 h-5 text-primary" />
                 <span>عرض المستندات</span>
                 <ChevronDown className="w-5 h-5" />
               </>
@@ -648,19 +687,19 @@ function CustomerDetailsContent() {
               return (
                 <div key={inst.id || instIdx} className="space-y-4">
                   {installments.length > 1 && (
-                    <p className="text-sm font-black text-orange-500 border-b border-border/60 pb-2">
+                    <p className="text-sm font-black text-primary border-b border-border/60 pb-2">
                       مستندات العقد ({inst.productName}):
                     </p>
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                     {/* 1. الهوية / البطاقة الموحدة */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-orange-500/50 transition relative">
+                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
                       <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
                         <span className="flex items-center gap-2">
-                          <ImageIcon className="w-4 h-4 text-orange-500" /> الهوية / الموحدة
+                          <ImageIcon className="w-4 h-4 text-primary" /> الهوية / الموحدة
                         </span>
-                        {docs.idCardUrl && (
+                        {docs.idCardUrl && canDeleteOrEdit && (
                           <button
                             onClick={() => handleDeleteDoc(inst, "idCardUrl", "الهوية/الموحدة")}
                             disabled={updatingDocType === "idCardUrl"}
@@ -700,7 +739,7 @@ function CustomerDetailsContent() {
                             if (file) handleUploadOrReplaceDoc(inst, "idCardUrl", file);
                           }}
                         />
-                        <span className="w-full py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
+                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
                           {updatingDocType === "idCardUrl" ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : docs.idCardUrl ? (
@@ -719,12 +758,12 @@ function CustomerDetailsContent() {
                     </div>
 
                     {/* 2. صورة العقد الورقي */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-orange-500/50 transition relative">
+                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
                       <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
                         <span className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-orange-500" /> العقد الورقي
+                          <FileText className="w-4 h-4 text-primary" /> العقد الورقي
                         </span>
-                        {docs.contractUrl && (
+                        {docs.contractUrl && canDeleteOrEdit && (
                           <button
                             onClick={() => handleDeleteDoc(inst, "contractUrl", "العقد الورقي")}
                             disabled={updatingDocType === "contractUrl"}
@@ -764,7 +803,7 @@ function CustomerDetailsContent() {
                             if (file) handleUploadOrReplaceDoc(inst, "contractUrl", file);
                           }}
                         />
-                        <span className="w-full py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
+                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
                           {updatingDocType === "contractUrl" ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : docs.contractUrl ? (
@@ -783,12 +822,12 @@ function CustomerDetailsContent() {
                     </div>
 
                     {/* 3. الصورة الشخصية للزبون */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-orange-500/50 transition relative">
+                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
                       <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
                         <span className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-orange-500" /> الصورة الشخصية
+                          <User className="w-4 h-4 text-primary" /> الصورة الشخصية
                         </span>
-                        {docs.personalPhotoUrl && (
+                        {docs.personalPhotoUrl && canDeleteOrEdit && (
                           <button
                             onClick={() => handleDeleteDoc(inst, "personalPhotoUrl", "الصورة الشخصية")}
                             disabled={updatingDocType === "personalPhotoUrl"}
@@ -828,7 +867,7 @@ function CustomerDetailsContent() {
                             if (file) handleUploadOrReplaceDoc(inst, "personalPhotoUrl", file);
                           }}
                         />
-                        <span className="w-full py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
+                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
                           {updatingDocType === "personalPhotoUrl" ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : docs.personalPhotoUrl ? (
@@ -853,30 +892,38 @@ function CustomerDetailsContent() {
         )}
       </div>
 
-      {/* 4. تفاصيل الأقساط وجدول الدفعات */}
+      {/* 4. تفاصيل الأقساط وجدول الدفعات المعتمدة على الطي والتوسيع Accordion */}
       {installments.map((item, idx) => {
+        const instId = item.id || String(idx);
+        const isExpanded = !!expandedInstIds[instId];
         const currentInstPayments = payments.filter((p) => p.installmentId === item.id);
         const periodUnitName = item.paymentPeriod === "daily" ? "أيام" : item.paymentPeriod === "weekly" ? "أسابيع" : "أشهر";
         const periodLabel = item.paymentPeriod === "daily" ? "يومي" : item.paymentPeriod === "weekly" ? "أسبوعي" : "شهري";
 
         return (
-          <div key={item.id || idx} className="space-y-5 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-6 md:p-7 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-5 group">
-              <div className="flex items-center gap-3 text-orange-500 font-black text-xl md:text-2xl flex-wrap">
-                <CreditCard className="w-7 h-7 shrink-0" />
+          <div key={instId} className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
+            {/* ترويسة العقد المألوفة القابلة للضغط للطي والفتح */}
+            <div 
+              onClick={() => toggleExpandInst(instId)}
+              className="p-5 md:p-6 bg-secondary/30 hover:bg-secondary/60 cursor-pointer transition-colors flex flex-wrap items-center justify-between gap-4 border-b border-border/60 group select-none"
+            >
+              <div className="flex items-center gap-3 text-primary font-black text-lg md:text-xl flex-wrap">
+                <CreditCard className="w-6 h-6 shrink-0" />
                 <span className="text-foreground">القسط #{idx + 1}: {item.productName}</span>
                 
-                <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mr-2">
-                  <button onClick={() => openEditModal(item)} className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-xl transition-colors" title="تعديل بيانات القسط">
-                    <Edit className="w-5 h-5" />
-                  </button>
-                  <button onClick={() => item.id && handleDeleteInstallment(item.id, item.productName)} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors" title="حذف القسط بالكامل">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
+                {canDeleteOrEdit && (
+                  <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mr-2" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => openEditModal(item)} className="p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-xl transition-colors" title="تعديل بيانات القسط">
+                      <Edit className="w-4.5 h-4.5" />
+                    </button>
+                    <button onClick={() => item.id && handleDeleteInstallment(item.id, item.productName)} className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors" title="حذف القسط بالكامل">
+                      <Trash2 className="w-4.5 h-4.5" />
+                    </button>
+                  </div>
+                )}
               </div>
               
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => {
@@ -884,202 +931,231 @@ function CustomerDetailsContent() {
                     setPrintContractData(item);
                     triggerPrint("contract");
                   }}
-                  className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white text-xs md:text-sm font-black rounded-2xl transition-all flex items-center gap-2 shadow-md shadow-orange-500/20"
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-primary to-primary/80 hover:opacity-95 text-primary-foreground text-xs font-black rounded-2xl transition-all flex items-center gap-1.5 shadow-sm"
                 >
-                  <Printer className="w-4 h-4" />
+                  <Printer className="w-3.5 h-3.5" />
                   <span>طباعة العقد</span>
                 </button>
 
-                <span className="inline-flex items-center gap-1.5 text-xs md:text-sm font-black px-3.5 py-1.5 rounded-2xl bg-slate-900 text-white border border-slate-700 dark:bg-slate-800 dark:text-slate-100 shadow-sm">
-                  <Clock className="w-4 h-4 text-amber-400" />
-                  <span>قسط {periodLabel}</span>
+                <span className="inline-flex items-center gap-1 text-xs font-black px-3 py-1 rounded-2xl bg-secondary text-foreground border border-border">
+                  <Clock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{periodLabel}</span>
                 </span>
 
-                <span className="inline-flex items-center gap-1.5 text-xs md:text-sm font-black px-3.5 py-1.5 rounded-2xl bg-slate-900 text-white border border-slate-700 dark:bg-slate-800 dark:text-slate-100 shadow-sm">
-                  <CalendarDays className="w-4 h-4 text-orange-400" />
+                <span className="inline-flex items-center gap-1 text-xs font-black px-3 py-1 rounded-2xl bg-secondary text-foreground border border-border">
+                  <CalendarDays className="w-3.5 h-3.5 text-primary" />
                   <span>{item.months} {periodUnitName}</span>
                 </span>
+
+                <button 
+                  type="button" 
+                  onClick={() => toggleExpandInst(instId)} 
+                  className="p-1.5 text-muted-foreground hover:text-foreground rounded-xl transition-colors"
+                >
+                  {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-5 rounded-2xl text-xs md:text-sm border border-border/50">
-              <div>
-                <p className="text-muted-foreground font-bold">سعر المنتج</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
-                  {item.productPrice.toLocaleString("en-US")} د.ع
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground font-bold">الدفعة المقدمة</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
-                  {item.downPayment.toLocaleString("en-US")} د.ع
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground font-bold">المتبقي للتقسيط</p>
-                <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
-                  {Math.round(item.totalDue).toLocaleString("en-US")} د.ع
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground font-bold">القسط الـ{periodLabel}</p>
-                <p className="font-black text-orange-500 text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
-                  {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
-                </p>
-              </div>
-            </div>
+            {/* محتوى العقد عند الفتح */}
+            {isExpanded && (
+              <div className="p-6 md:p-7 space-y-5 animate-in fade-in duration-200 border-t border-border/40">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-5 rounded-2xl text-xs md:text-sm border border-border/50">
+                  <div>
+                    <p className="text-muted-foreground font-bold">سعر المنتج</p>
+                    <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                      {item.productPrice.toLocaleString("en-US")} د.ع
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-bold">الدفعة المقدمة</p>
+                    <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                      {item.downPayment.toLocaleString("en-US")} د.ع
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-bold">المتبقي للتقسيط</p>
+                    <p className="font-black text-foreground text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                      {Math.round(item.totalDue).toLocaleString("en-US")} د.ع
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-bold">القسط الـ{periodLabel}</p>
+                    <p className="font-black text-primary text-base md:text-lg mt-1 font-mono inline-block" dir="ltr" style={{ unicodeBidi: "embed" }}>
+                      {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
+                    </p>
+                  </div>
+                </div>
 
-            {/* جدول الاستحقاقات */}
-            <div className="border border-border/80 rounded-2xl overflow-hidden mt-5 shadow-sm">
-              <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
-                <Calendar className="w-5 h-5 text-orange-500" />
-                <span>جدول دفعات ({item.productName})</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-right text-xs md:text-sm">
-                  <thead className="bg-secondary/30 text-muted-foreground border-b border-border">
-                    <tr>
-                      <th className="p-3.5 font-black">رقم الدفعة</th>
-                      <th className="p-3.5 font-black">المبلغ المطلوب</th>
-                      <th className="p-3.5 font-black">تاريخ الاستحقاق</th>
-                      <th className="p-3.5 font-black text-center">الحالة / الإجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {Array.from({ length: item.months }).map((_, mIdx) => {
-                      const dueDateFormatted = getDueDate(item.startDate, mIdx, item.paymentPeriod);
-                      const [year, month] = dueDateFormatted.split("-");
-                      const targetMonthString = `${year}-${month}`;
-                      
-                      const isPaid = currentInstPayments.some((p) => 
-                        p.targetMonth === dueDateFormatted || p.targetMonth === targetMonthString
-                      ) || item.paidMonths?.includes(dueDateFormatted) || item.paidMonths?.includes(targetMonthString);
-
-                      const btnKey = `${item.id || idx}-${mIdx}`;
-
-                      return (
-                        <tr key={mIdx} className="hover:bg-secondary/20 transition-colors">
-                          <td className="p-3.5 font-black text-orange-500">الدفعة #{mIdx + 1}</td>
-                          <td className="p-3.5 font-black text-foreground font-mono">
-                            <span dir="ltr" style={{ unicodeBidi: "embed" }}>
-                              {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-muted-foreground font-mono font-black">
-                            <span dir="ltr" style={{ unicodeBidi: "embed" }}>{dueDateFormatted}</span>
-                          </td>
-                          <td className="p-3.5 text-center">
-                            {isPaid ? (
-                              <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-3.5 py-1.5 rounded-full text-xs font-black shadow-sm inline-block">
-                                تم الدفع ✓
-                              </span>
-                            ) : (
-                              <div className="flex items-center justify-center gap-2.5">
-                                <span className="bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 px-3.5 py-1.5 rounded-full text-xs font-black shadow-sm">
-                                  مستحق
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSendWhatsApp(
-                                    btnKey,
-                                    mainInfo.customerName, 
-                                    mainInfo.phoneNumber, 
-                                    item.monthlyInstallment, 
-                                    item.productName,
-                                    dueDateFormatted
-                                  )}
-                                  disabled={sendingIndex === btnKey}
-                                  className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center gap-1.5 text-xs font-black shadow-sm"
-                                  title="إرسال تذكير عبر الواتساب"
-                                >
-                                  {sendingIndex === btnKey ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <MessageSquare className="w-4 h-4" />
-                                  )}
-                                  <span>تذكير</span>
-                                </button>
-                              </div>
-                            )}
-                          </td>
+                {/* جدول الاستحقاقات وزر التسديد التلقائي */}
+                <div className="border border-border/80 rounded-2xl overflow-hidden mt-5 shadow-sm">
+                  <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
+                    <Calendar className="w-5 h-5 text-primary" />
+                    <span>جدول دفعات ({item.productName})</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs md:text-sm">
+                      <thead className="bg-secondary/30 text-muted-foreground border-b border-border">
+                        <tr>
+                          <th className="p-3.5 font-black">رقم الدفعة</th>
+                          <th className="p-3.5 font-black">المبلغ المطلوب</th>
+                          <th className="p-3.5 font-black">تاريخ الاستحقاق</th>
+                          <th className="p-3.5 font-black text-center">الحالة / الإجراء</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {Array.from({ length: item.months }).map((_, mIdx) => {
+                          const dueDateFormatted = getDueDate(item.startDate, mIdx, item.paymentPeriod);
+                          const [year, month] = dueDateFormatted.split("-");
+                          const targetMonthString = `${year}-${month}`;
+                          
+                          const isPaid = currentInstPayments.some((p) => 
+                            p.targetMonth === dueDateFormatted || p.targetMonth === targetMonthString
+                          ) || item.paidMonths?.includes(dueDateFormatted) || item.paidMonths?.includes(targetMonthString);
 
-            {/* سجل المقبوضات والغرامات المسددة */}
-            <div className="border border-border/80 rounded-2xl overflow-hidden mt-6 shadow-sm">
-              <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
-                <Receipt className="w-5 h-5 text-orange-500" />
-                <span>سجل الدفعات والغرامات المسددة</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-right text-xs md:text-sm">
-                  <thead className="bg-secondary/30 text-muted-foreground border-b border-border">
-                    <tr>
-                      <th className="p-3.5 font-black">التاريخ</th>
-                      <th className="p-3.5 font-black">المبلغ</th>
-                      <th className="p-3.5 font-black">عن فترة/شهر</th>
-                      <th className="p-3.5 font-black">النوع / الملاحظات</th>
-                      <th className="p-3.5 font-black text-center">إجراءات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {currentInstPayments.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="p-5 text-center text-muted-foreground font-bold text-sm">لا توجد دفعات أو غرامات مسجلة بعد.</td>
-                      </tr>
-                    ) : (
-                      currentInstPayments.map((p) => {
-                        const paidDate = p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-GB").split("/").reverse().join("-") : "-";
-                        return (
-                          <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
-                            <td className="p-3.5 font-bold">
-                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>{paidDate}</span>
-                            </td>
-                            <td className="p-3.5 font-black text-emerald-600 dark:text-emerald-400 font-mono text-base">
-                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>+{p.amount.toLocaleString("en-US")} د.ع</span>
-                            </td>
-                            <td className="p-3.5 font-black text-muted-foreground font-mono">
-                              <span dir="ltr" style={{ unicodeBidi: "embed" }}>{p.targetMonth || "-"}</span>
-                            </td>
-                            <td className="p-3.5 text-muted-foreground font-bold text-xs max-w-[200px] truncate" title={p.notes}>
-                              {p.notes || "دفعة اعتيادية"}
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <div className="flex justify-center items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPrintContractData(null);
-                                    setPrintPaymentData(p);
-                                    triggerPrint("payment", p);
-                                  }}
-                                  className="p-2 text-emerald-600 hover:bg-emerald-500/10 rounded-xl transition-colors"
-                                  title="طباعة وصل إيصال"
-                                >
-                                  <Printer className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => openEditPaymentModal(p)} className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-xl transition-colors" title="تعديل الدفعة">
-                                  <Edit className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDeletePayment(p)} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors" title="حذف الدفعة">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
+                          const btnKey = `${item.id || idx}-${mIdx}`;
+
+                          return (
+                            <tr key={mIdx} className="hover:bg-secondary/20 transition-colors">
+                              <td className="p-3.5 font-black text-primary">الدفعة #{mIdx + 1}</td>
+                              <td className="p-3.5 font-black text-foreground font-mono">
+                                <span dir="ltr" style={{ unicodeBidi: "embed" }}>
+                                  {Math.round(item.monthlyInstallment).toLocaleString("en-US")} د.ع
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-muted-foreground font-mono font-black">
+                                <span dir="ltr" style={{ unicodeBidi: "embed" }}>{dueDateFormatted}</span>
+                              </td>
+                              <td className="p-3.5 text-center">
+                                {isPaid ? (
+                                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-3.5 py-1.5 rounded-full text-xs font-black shadow-sm inline-block">
+                                    تم الدفع ✓
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center justify-center gap-2">
+                                    <span className="bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 px-3 py-1.5 rounded-full text-xs font-black shadow-sm">
+                                      مستحق
+                                    </span>
+
+                                    {/* 💳 زر التسديد التلقائي المباشر */}
+                                    <button
+                                      type="button"
+                                      onClick={() => item.id && handleQuickPay(item.id, dueDateFormatted, item.monthlyInstallment)}
+                                      className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white rounded-xl transition-all flex items-center gap-1 text-xs font-black shadow-sm"
+                                      title="تسديد الدفعة فوراً"
+                                    >
+                                      <Coins className="w-3.5 h-3.5" />
+                                      <span>تسديد</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendWhatsApp(
+                                        btnKey,
+                                        mainInfo.customerName, 
+                                        mainInfo.phoneNumber, 
+                                        item.monthlyInstallment, 
+                                        item.productName,
+                                        dueDateFormatted
+                                      )}
+                                      disabled={sendingIndex === btnKey}
+                                      className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center gap-1 text-xs font-black shadow-sm"
+                                      title="إرسال تذكير عبر الواتساب"
+                                    >
+                                      {sendingIndex === btnKey ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <MessageSquare className="w-3.5 h-3.5" />
+                                      )}
+                                      <span>تذكير</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* سجل المقبوضات والغرامات المسددة */}
+                <div className="border border-border/80 rounded-2xl overflow-hidden mt-6 shadow-sm">
+                  <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
+                    <Receipt className="w-5 h-5 text-primary" />
+                    <span>سجل الدفعات والغرامات المسددة</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs md:text-sm">
+                      <thead className="bg-secondary/30 text-muted-foreground border-b border-border">
+                        <tr>
+                          <th className="p-3.5 font-black">التاريخ</th>
+                          <th className="p-3.5 font-black">المبلغ</th>
+                          <th className="p-3.5 font-black">عن فترة/شهر</th>
+                          <th className="p-3.5 font-black">النوع / الملاحظات</th>
+                          <th className="p-3.5 font-black text-center">إجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {currentInstPayments.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="p-5 text-center text-muted-foreground font-bold text-sm">لا توجد دفعات أو غرامات مسجلة بعد.</td>
                           </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                        ) : (
+                          currentInstPayments.map((p) => {
+                            const paidDate = p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-GB").split("/").reverse().join("-") : "-";
+                            return (
+                              <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
+                                <td className="p-3.5 font-bold">
+                                  <span dir="ltr" style={{ unicodeBidi: "embed" }}>{paidDate}</span>
+                                </td>
+                                <td className="p-3.5 font-black text-emerald-600 dark:text-emerald-400 font-mono text-base">
+                                  <span dir="ltr" style={{ unicodeBidi: "embed" }}>+{p.amount.toLocaleString("en-US")} د.ع</span>
+                                </td>
+                                <td className="p-3.5 font-black text-muted-foreground font-mono">
+                                  <span dir="ltr" style={{ unicodeBidi: "embed" }}>{p.targetMonth || "-"}</span>
+                                </td>
+                                <td className="p-3.5 text-muted-foreground font-bold text-xs max-w-[200px] truncate" title={p.notes}>
+                                  {p.notes || "دفعة اعتيادية"}
+                                </td>
+                                <td className="p-3.5 text-center">
+                                  <div className="flex justify-center items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPrintContractData(null);
+                                        setPrintPaymentData(p);
+                                        triggerPrint("payment", p);
+                                      }}
+                                      className="p-2 text-emerald-600 hover:bg-emerald-500/10 rounded-xl transition-colors"
+                                      title="طباعة وصل إيصال"
+                                    >
+                                      <Printer className="w-4 h-4" />
+                                    </button>
+
+                                    {canDeleteOrEdit && (
+                                      <>
+                                        <button onClick={() => openEditPaymentModal(p)} className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-xl transition-colors" title="تعديل الدفعة">
+                                          <Edit className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => handleDeletePayment(p)} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors" title="حذف الدفعة">
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-            
+            )}
           </div>
         );
       })}
@@ -1119,7 +1195,7 @@ function CustomerDetailsContent() {
                 <a 
                   href={previewImage.url} 
                   download="document.jpg"
-                  className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl text-xs font-bold flex items-center gap-1.5 hover:opacity-95 transition"
+                  className="px-4 py-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground rounded-2xl text-xs font-bold flex items-center gap-1.5 hover:opacity-95 transition"
                 >
                   <Download className="w-4 h-4" />
                   <span>تحميل الصورة</span>
@@ -1144,7 +1220,7 @@ function CustomerDetailsContent() {
 
       {/* modal تعديل القسط */}
       <AnimatePresence>
-        {editingInstallment && (
+        {editingInstallment && canDeleteOrEdit && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1171,7 +1247,7 @@ function CustomerDetailsContent() {
                     type="text"
                     value={editForm.productName}
                     onChange={(e) => setEditForm({...editForm, productName: e.target.value})}
-                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none"
+                    className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1181,7 +1257,7 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.productPrice}
                       onChange={(e) => setEditForm({...editForm, productPrice: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-primary outline-none text-right"
                       dir="ltr"
                     />
                   </div>
@@ -1191,7 +1267,7 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.downPayment}
                       onChange={(e) => setEditForm({...editForm, downPayment: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-primary outline-none text-right"
                       dir="ltr"
                     />
                   </div>
@@ -1203,7 +1279,7 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.monthlyInstallment}
                       onChange={(e) => setEditForm({...editForm, monthlyInstallment: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-primary outline-none text-right"
                       dir="ltr"
                     />
                   </div>
@@ -1213,7 +1289,7 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editForm.months}
                       onChange={(e) => setEditForm({...editForm, months: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-orange-500 outline-none text-right"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-black focus:ring-2 focus:ring-primary outline-none text-right"
                       dir="ltr"
                     />
                   </div>
@@ -1230,7 +1306,7 @@ function CustomerDetailsContent() {
                   <button
                     onClick={handleSaveEdit}
                     disabled={isSaving || !editForm.productName}
-                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
+                    className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-primary/20"
                   >
                     {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ التعديلات'}
                   </button>
@@ -1241,9 +1317,9 @@ function CustomerDetailsContent() {
         )}
       </AnimatePresence>
 
-      {/* 💳 modal تعديل الدفعة المصمم تماماً بنمط واجهة التسديد والمنقي المخصص */}
+      {/* 💳 modal تعديل الدفعة */}
       <AnimatePresence>
-        {editingPayment && (() => {
+        {editingPayment && canDeleteOrEdit && (() => {
           const matchedInst = installments.find(inst => inst.id === editingPayment.installmentId);
           const isMonthly = matchedInst?.paymentPeriod === "monthly" || !matchedInst?.paymentPeriod;
 
@@ -1275,26 +1351,25 @@ function CustomerDetailsContent() {
                       type="number"
                       value={editPaymentForm.amount}
                       onChange={(e) => setEditPaymentForm({...editPaymentForm, amount: Number(e.target.value)})}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-orange-500 outline-none text-right font-mono"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-sm font-black focus:ring-2 focus:ring-primary outline-none text-right font-mono"
                       dir="ltr"
                     />
                   </div>
 
-                  {/* اختيارات التاريخ بنمط شبكة التسديد السوداء المخصصة */}
+                  {/* اختيارات التاريخ */}
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                      <Calendar className="w-4 h-4 text-orange-500" />
+                      <Calendar className="w-4 h-4 text-primary" />
                       <span>{isMonthly ? "اختر الشهر والسنة المستحقة" : "اختر تاريخ الدفعة المستحقة"}</span>
                     </label>
 
-                    {/* الزر الرئيسي لعرض التاريخ المحدد */}
                     <button
                       type="button"
                       onClick={() => setShowDatePickerModal(!showDatePickerModal)}
-                      className="w-full p-3.5 bg-background border border-border hover:border-orange-500 rounded-2xl text-xs font-bold flex items-center justify-between transition shadow-sm"
+                      className="w-full p-3.5 bg-background border border-border hover:border-primary rounded-2xl text-xs font-bold flex items-center justify-between transition shadow-sm"
                     >
                       <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-orange-500" />
+                        <Calendar className="w-4 h-4 text-primary" />
                         <span className="font-mono text-sm font-black dir-ltr text-right">
                           {editPaymentForm.targetMonth || "اختر تاريخ الاستحقاق..."}
                         </span>
@@ -1302,7 +1377,6 @@ function CustomerDetailsContent() {
                       <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${showDatePickerModal ? "rotate-180" : ""}`} />
                     </button>
 
-                    {/* المنقي السلس المخصص بنفس الشكل المتوفر في التسديد */}
                     {showDatePickerModal && (
                       <motion.div 
                         initial={{ opacity: 0, y: -5 }}
@@ -1311,7 +1385,6 @@ function CustomerDetailsContent() {
                       >
                         {isMonthly ? (
                           <>
-                            {/* شريط اختيار السنة */}
                             <div className="flex items-center justify-between border-b border-border/60 pb-2">
                               <button
                                 type="button"
@@ -1322,7 +1395,7 @@ function CustomerDetailsContent() {
                                 <span>السابقة</span>
                               </button>
 
-                              <span className="font-mono text-base font-black text-orange-500">{pickerYear}</span>
+                              <span className="font-mono text-base font-black text-primary">{pickerYear}</span>
 
                               <button
                                 type="button"
@@ -1334,7 +1407,6 @@ function CustomerDetailsContent() {
                               </button>
                             </div>
 
-                            {/* شبكة الأشهر (شهر 1 إلى شهر 12) */}
                             <div className="grid grid-cols-3 gap-2 pt-1">
                               {Array.from({ length: 12 }).map((_, mIdx) => {
                                 const mNum = mIdx + 1;
@@ -1351,8 +1423,8 @@ function CustomerDetailsContent() {
                                     }}
                                     className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all ${
                                       isSelected
-                                        ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 scale-105"
-                                        : "bg-background border border-border/80 hover:border-orange-500 text-foreground"
+                                        ? "bg-primary text-primary-foreground shadow-md shadow-primary/30 scale-105"
+                                        : "bg-background border border-border/80 hover:border-primary text-foreground"
                                     }`}
                                   >
                                     شهر {mNum}
@@ -1362,7 +1434,6 @@ function CustomerDetailsContent() {
                             </div>
                           </>
                         ) : (
-                          /* اختيار يومي / أسبوعي بالرزنامة المباشرة */
                           <div>
                             <input
                               type="date"
@@ -1371,7 +1442,7 @@ function CustomerDetailsContent() {
                                 setEditPaymentForm({ ...editPaymentForm, targetMonth: e.target.value });
                                 setShowDatePickerModal(false);
                               }}
-                              className="w-full p-3 bg-background border border-border rounded-xl text-xs font-mono font-bold text-center outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                              className="w-full p-3 bg-background border border-border rounded-xl text-xs font-mono font-bold text-center outline-none focus:ring-2 focus:ring-primary cursor-pointer"
                             />
                           </div>
                         )}
@@ -1386,7 +1457,7 @@ function CustomerDetailsContent() {
                       value={editPaymentForm.notes}
                       onChange={(e) => setEditPaymentForm({...editPaymentForm, notes: e.target.value})}
                       rows={3}
-                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-orange-500 outline-none resize-none"
+                      className="w-full px-4 py-3 rounded-2xl border border-border bg-background text-xs font-bold focus:ring-2 focus:ring-primary outline-none resize-none"
                       placeholder="مثال: [دفع نقدي] أو غرامة تأخير..."
                     />
                   </div>
@@ -1402,7 +1473,7 @@ function CustomerDetailsContent() {
                     <button
                       onClick={handleSavePaymentEdit}
                       disabled={isSavingPayment || !editPaymentForm.amount}
-                      className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-orange-500/20"
+                      className="flex-1 py-3 text-xs rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-bold hover:opacity-95 transition-opacity flex justify-center items-center gap-2 disabled:opacity-50 shadow-md shadow-primary/20"
                     >
                       {isSavingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ التعديلات'}
                     </button>
@@ -1420,7 +1491,7 @@ function CustomerDetailsContent() {
 export default function CustomerDetailPage() {
   return (
     <Suspense fallback={
-      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-orange-500">
+      <div className="h-[80vh] flex flex-col items-center justify-center gap-3 text-primary">
         <Loader2 className="w-10 h-10 animate-spin" />
         <span className="text-xs font-bold text-muted-foreground animate-pulse">جاري جلب تفاصيل العميل...</span>
       </div>

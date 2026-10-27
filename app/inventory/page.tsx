@@ -15,9 +15,48 @@ import {
   InventoryItem 
 } from "../../services/firestore";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
+
+// 🗣️ دالة تفقيط وتسهيل قراءة المبالغ المالية بالعربية
+const formatArabicCurrency = (val: number | ""): string => {
+  if (val === "" || isNaN(Number(val)) || Number(val) === 0) return "";
+  const num = Number(val);
+
+  if (num >= 1000000000) {
+    const bil = Math.floor(num / 1000000000);
+    const rem = num % 1000000000;
+    return `${bil} مليار ${rem > 0 ? "و " + formatArabicCurrency(rem) : "د.ع"}`;
+  }
+  if (num >= 1000000) {
+    const mil = Math.floor(num / 1000000);
+    const rem = num % 1000000;
+    return `${mil} مليون ${rem > 0 ? "و " + formatArabicCurrency(rem) : "د.ع"}`;
+  }
+  if (num >= 1000) {
+    const th = Math.floor(num / 1000);
+    const rem = num % 1000;
+    return `${th} ألف ${rem > 0 ? "و " + rem + " د.ع" : "د.ع"}`;
+  }
+  return `${num.toLocaleString("en-US")} د.ع`;
+};
+
+// 🔢 تحويل النص المنسق بالفواصل إلى رقم صافي
+const parseFormattedNumber = (val: string): number | "" => {
+  const clean = val.replace(/,/g, "").trim();
+  if (clean === "" || isNaN(Number(clean))) return "";
+  return Number(clean);
+};
+
+// 🏷️ تنسيق العرض للمستخدم بالفواصل
+const formatInputDisplay = (val: number | ""): string => {
+  if (val === "" || isNaN(Number(val))) return "";
+  return val.toLocaleString("en-US");
+};
 
 export default function InventoryPage() {
   const { user } = useAuth();
+  const { theme } = useTheme();
+
   const [activeTab, setActiveTab] = useState<"available" | "sold">("available");
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,12 +68,27 @@ export default function InventoryPage() {
   const [formData, setFormData] = useState({
     title: "",
     category: "هواتف",
-    costPrice: "", // سعر الشراء
-    price: "",     // سعر البيع
+    costPrice: "" as number | "", // سعر الشراء (التكلفة)
+    price: "" as number | "",     // سعر البيع
     chassisNumber: "",
     color: "",
     modelYear: "",
   });
+
+  // ➕ إضافة أصفار أو مبالغ سريعة للمدخلات
+  const addAmount = (
+    currentVal: number | "", 
+    setterFunc: (v: number | "") => void, 
+    multiplierOrAdd: number, 
+    isMultiplier = false
+  ) => {
+    const base = Number(currentVal) || 0;
+    if (isMultiplier) {
+      setterFunc(base === 0 ? multiplierOrAdd : base * multiplierOrAdd);
+    } else {
+      setterFunc(base + multiplierOrAdd);
+    }
+  };
 
   // جلب ownerUid الخاص بالحساب المسجل
   const getOwnerUid = () => {
@@ -72,8 +126,8 @@ export default function InventoryPage() {
     setFormData({
       title: item.title || "",
       category: item.category || "هواتف",
-      costPrice: String(item.costPrice || ""),
-      price: String(item.price || ""),
+      costPrice: item.costPrice ? Number(item.costPrice) : "",
+      price: item.price ? Number(item.price) : "",
       chassisNumber: item.specs?.chassisNumber || "",
       color: item.specs?.color || "",
       modelYear: item.specs?.modelYear || "",
@@ -88,7 +142,7 @@ export default function InventoryPage() {
     setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
   };
 
-  // دالة الحفظ (إضافة أو تعديل) مع الربط التلقائي بالخزينة
+  // دالة الحفظ مع الربط التلقائي بالخزينة (مرة واحدة فقط عند إضافة السلعة)
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.price) {
@@ -123,7 +177,7 @@ export default function InventoryPage() {
           status: "available",
         });
 
-        // 2. ⚡ ربط تلقائي بالخزينة: تسجيل حركة شراء بضاعة ومخزن إذا وجد سعر شراء
+        // 2. ⚡ ربط تلقائي بالخزينة: تسجيل حركة شراء بضاعة ومخزن المرة الأولى فقط عند إضافة المادة للمخزن
         if (costPriceNum > 0) {
           const ownerUid = getOwnerUid();
           if (ownerUid) {
@@ -170,14 +224,14 @@ export default function InventoryPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-5 md:space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
     >
-      {/* 1. ترويسة الصفحة Dashboard  Glass Style */}
+      {/* 1. ترويسة الصفحة المربوطة بثيم الإعدادات */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <Package className="w-6 h-6 text-orange-500" />
+            <Package className="w-6 h-6 text-primary" />
             إدارة المخزن المالي والمنتجات
           </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">عرض السلع المتوفرة، حركات البيع، والربط بالخزينة .</p>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1 font-bold">عرض السلع المتوفرة، حركات البيع، والربط بالخزينة.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
@@ -189,7 +243,7 @@ export default function InventoryPage() {
               setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
               setIsAddOpen(true);
             }}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-5 py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة منتج جديد</span>
@@ -199,7 +253,7 @@ export default function InventoryPage() {
             <button
               onClick={() => setActiveTab("available")}
               className={`px-4 py-2 text-xs md:text-sm font-black rounded-xl transition-all ${
-                activeTab === "available" ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                activeTab === "available" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               المتوفر
@@ -207,7 +261,7 @@ export default function InventoryPage() {
             <button
               onClick={() => setActiveTab("sold")}
               className={`px-4 py-2 text-xs md:text-sm font-black rounded-xl transition-all ${
-                activeTab === "sold" ? "bg-slate-900 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                activeTab === "sold" ? "bg-secondary text-foreground shadow-sm border border-border" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               المباع
@@ -216,7 +270,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* 2. شبكة كروت المنتجات العصرية  */}
+      {/* 2. شبكة كروت المنتجات */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
         {loading ? (
           <div className="col-span-full bg-card/40 backdrop-blur-md p-12 text-center text-muted-foreground text-sm font-black rounded-3xl border border-dashed border-border animate-pulse">
@@ -231,18 +285,17 @@ export default function InventoryPage() {
             <motion.div 
               key={item.id || index} 
               whileHover={{ y: -4 }}
-              className="bg-card/90 backdrop-blur-md p-5 rounded-3xl border border-border space-y-4 flex flex-col justify-between shadow-sm hover:border-orange-500/40 transition-all relative group"
+              className="bg-card/90 backdrop-blur-md p-5 rounded-3xl border border-border space-y-4 flex flex-col justify-between shadow-sm hover:border-primary/40 transition-all relative group"
             >
               <div>
                 <div className="flex justify-between items-start border-b border-border/60 pb-3">
-                  <span className="text-xs font-black px-3 py-1 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+                  <span className="text-xs font-black px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
                     {item.category}
                   </span>
                   
                   <div className="flex items-center gap-2">
                     <div className="text-left">
-                      {/* ⚡ التعديل الرئيسي: أسود ناصع بالنهاري + أخضر زمردي بالليلي */}
-                      <span className="text-lg md:text-2xl font-black text-slate-950 dark:text-emerald-400 block tracking-tight font-mono">
+                      <span className="text-lg md:text-2xl font-black text-foreground block tracking-tight font-mono">
                         {Number(item.price).toLocaleString("en-US")} د.ع
                       </span>
                       {item.costPrice ? (
@@ -252,19 +305,18 @@ export default function InventoryPage() {
                       ) : null}
                     </div>
                     
-                    {/* أزرار التحكم السريعة */}
                     <div className="flex items-center gap-1 bg-secondary/80 p-1 rounded-xl border border-border/60 mr-1.5">
                       <button
                         onClick={() => handleOpenEdit(item)}
                         title="تعديل المنتج"
-                        className="text-blue-600 hover:text-blue-700 p-1.5 rounded-lg transition-colors"
+                        className="text-blue-600 hover:text-blue-700 p-1.5 rounded-lg transition-colors cursor-pointer"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteItem(item)}
                         title="حذف المنتج"
-                        className="text-rose-600 hover:text-rose-700 p-1.5 rounded-lg transition-colors"
+                        className="text-rose-600 hover:text-rose-700 p-1.5 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -274,12 +326,11 @@ export default function InventoryPage() {
 
                 <h3 className="font-black text-foreground text-base md:text-lg mt-3">{item.title}</h3>
 
-                {/* مواصفات وسيريال السلعة */}
                 <div className="mt-3 space-y-2 text-xs md:text-sm text-muted-foreground bg-secondary/40 p-3.5 rounded-2xl border border-border/50">
                   {item.specs?.chassisNumber && (
                     <div className="flex justify-between items-center">
-                      <span className="font-bold">السيريال / الشاصي:</span>
-                      <span className="font-mono font-black text-orange-500">{item.specs.chassisNumber}</span>
+                      <span className="font-bold">السيريال  :</span>
+                      <span className="font-mono font-black text-primary">{item.specs.chassisNumber}</span>
                     </div>
                   )}
                   {item.specs?.color && (
@@ -300,13 +351,13 @@ export default function InventoryPage() {
               {item.status === "sold" && item.soldToClientId && (
                 <div className="pt-3 border-t border-border/60 flex justify-between items-center text-xs md:text-sm">
                   <div className="flex items-center gap-1.5 text-muted-foreground font-bold">
-                    <User className="w-4 h-4 text-slate-800 dark:text-slate-200" />
+                    <User className="w-4 h-4 text-primary" />
                     <span>المشتري: <strong className="text-foreground font-black">{item.soldToClientName}</strong></span>
                   </div>
 
                   <Link
                     href={`/customers?id=${item.soldToClientId}`}
-                    className="flex items-center gap-1 text-orange-500 hover:underline font-black transition-all"
+                    className="flex items-center gap-1 text-primary hover:underline font-black transition-all"
                   >
                     <span>سجل العميل</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -318,7 +369,7 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* 3. نافذة الإضافة والتعديل  Modal */}
+      {/* 3. نافذة الإضافة والتعديل Modal */}
       <AnimatePresence>
         {isAddOpen && (
           <motion.div 
@@ -331,14 +382,14 @@ export default function InventoryPage() {
               initial={{ scale: 0.95, y: 10 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 10 }}
-              className="bg-card border border-border rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl"
+              className="bg-card border border-border rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center border-b border-border pb-3.5">
                 <h3 className="text-base md:text-lg font-black text-foreground flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-orange-500" />
+                  <Sparkles className="w-5 h-5 text-primary" />
                   {editingItem ? "تعديل بيانات المنتج" : "إضافة مادة جديدة للمخزن"}
                 </h3>
-                <button onClick={handleCloseModal} className="p-1.5 hover:bg-secondary rounded-xl text-muted-foreground">
+                <button onClick={handleCloseModal} className="p-1.5 hover:bg-secondary rounded-xl text-muted-foreground cursor-pointer">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -352,7 +403,7 @@ export default function InventoryPage() {
                     placeholder="مثال: ايفون 16 برو ماكس أو دراجة ياماها"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
@@ -361,7 +412,7 @@ export default function InventoryPage() {
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
                   >
                     <option value="هواتف">هواتف / أجهزة ذكية</option>
                     <option value="دراجات">دراجات وهواتف نارية</option>
@@ -371,29 +422,76 @@ export default function InventoryPage() {
                   </select>
                 </div>
 
-                {/* حقول المدخلات - أسود بالنهار وأخضر بالليل */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">سعر التكلفة / الشراء (د.ع)</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* سعر الشراء / التكلفة */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs md:text-sm font-black text-foreground block">سعر التكلفة / الشراء (د.ع)</label>
+                      {formData.costPrice !== "" && (
+                        <span className="text-[10px] font-black text-amber-500 animate-pulse">
+                          {formatArabicCurrency(formData.costPrice)}
+                        </span>
+                      )}
+                    </div>
                     <input
-                      type="number"
+                      type="text"
                       placeholder="0"
-                      value={formData.costPrice}
-                      onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
-                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-amber-600 dark:text-amber-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                      value={formatInputDisplay(formData.costPrice)}
+                      onChange={(e) => setFormData({ ...formData, costPrice: parseFormattedNumber(e.target.value) })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-amber-600 dark:text-amber-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-primary font-mono"
                     />
+                    <div className="flex gap-1 pt-0.5 dir-ltr justify-end">
+                      <button 
+                        type="button" 
+                        onClick={() => addAmount(formData.costPrice, (v) => setFormData((prev) => ({ ...prev, costPrice: v })), 1000, true)}
+                        className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                      >
+                        +000 (ألف)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => addAmount(formData.costPrice, (v) => setFormData((prev) => ({ ...prev, costPrice: v })), 1000000, true)}
+                        className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                      >
+                        +000000 (مليون)
+                      </button>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-xs md:text-sm font-black text-foreground block mb-1.5">سعر البيع المطلوب (د.ع) *</label>
+                  {/* سعر البيع المطلوب */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs md:text-sm font-black text-foreground block">سعر البيع المطلوب (د.ع) *</label>
+                      {formData.price !== "" && (
+                        <span className="text-[10px] font-black text-emerald-500 animate-pulse">
+                          {formatArabicCurrency(formData.price)}
+                        </span>
+                      )}
+                    </div>
                     <input
-                      type="number"
+                      type="text"
                       required
                       placeholder="0"
-                      value={formData.price}
-                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-slate-950 dark:text-emerald-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                      value={formatInputDisplay(formData.price)}
+                      onChange={(e) => setFormData({ ...formData, price: parseFormattedNumber(e.target.value) })}
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-sm md:text-base font-black text-emerald-600 dark:text-emerald-400 dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-primary font-mono"
                     />
+                    <div className="flex gap-1 pt-0.5 dir-ltr justify-end">
+                      <button 
+                        type="button" 
+                        onClick={() => addAmount(formData.price, (v) => setFormData((prev) => ({ ...prev, price: v })), 1000, true)}
+                        className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                      >
+                        +000 (ألف)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => addAmount(formData.price, (v) => setFormData((prev) => ({ ...prev, price: v })), 1000000, true)}
+                        className="px-2 py-0.5 bg-secondary hover:bg-primary/20 border border-border rounded-lg text-[10px] font-black text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                      >
+                        +000000 (مليون)
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -404,7 +502,7 @@ export default function InventoryPage() {
                     placeholder="رقم الشاصي أو Serial Number"
                     value={formData.chassisNumber}
                     onChange={(e) => setFormData({ ...formData, chassisNumber: e.target.value })}
-                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
@@ -416,7 +514,7 @@ export default function InventoryPage() {
                       placeholder="أسود، أبيض..."
                       value={formData.color}
                       onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
 
@@ -427,7 +525,7 @@ export default function InventoryPage() {
                       placeholder="2026"
                       value={formData.modelYear}
                       onChange={(e) => setFormData({ ...formData, modelYear: e.target.value })}
-                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full bg-background border border-border rounded-2xl px-4 py-3 text-xs md:text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                 </div>
@@ -436,13 +534,13 @@ export default function InventoryPage() {
                   <button
                     type="button"
                     onClick={handleCloseModal}
-                    className="flex-1 bg-secondary hover:bg-secondary/80 text-foreground py-3 rounded-2xl font-black text-xs md:text-sm border border-border transition-colors"
+                    className="flex-1 bg-secondary hover:bg-secondary/80 text-foreground py-3 rounded-2xl font-black text-xs md:text-sm border border-border transition-colors cursor-pointer"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 text-white py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition-opacity"
+                    className="flex-1 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity cursor-pointer"
                   >
                     {editingItem ? "حفظ التعديلات" : "حفظ المنتج بالنظام"}
                   </button>
