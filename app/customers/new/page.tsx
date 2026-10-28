@@ -115,7 +115,7 @@ function NewInstallmentContent() {
     startDate: new Date().toISOString().split("T")[0],
   });
 
-// 🔍 دالة المسح الضوئي المستهدفة الدقيقة لحقول الهوية العراقية الاربعة
+  // 🔍 دالة المسح الضوئي المستهدفة الدقيقة لحقول الهوية العراقية الاربعة (Client-Side)
   const handleScanIDCard = async (file: File) => {
     if (!file) return;
 
@@ -133,23 +133,40 @@ function NewInstallmentContent() {
         return;
       }
 
-      const res = await fetch("/api/ocr", {
+      // تجهيز FormData للإرسال المباشر لخدمة OCR.space
+      const ocrFormData = new FormData();
+      const formattedBase64 = base64Image.startsWith("data:") 
+        ? base64Image 
+        : `data:image/jpeg;base64,${base64Image}`;
+
+      ocrFormData.append("base64Image", formattedBase64);
+      ocrFormData.append("OCREngine", "2");
+      ocrFormData.append("scale", "true");
+
+      const res = await fetch("https://api.ocr.space/parse/image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64Image }),
+        headers: {
+          apikey: "K88888888888957",
+        },
+        body: ocrFormData,
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "خطأ غير معروف في السيرفر" }));
-        console.error("خطأ السيرفر أثناء الـ OCR:", res.status, errorData);
-        toast.error(`خطأ (${res.status}): ${errorData.error || "تعذر تحليل الصورة"}`);
+        console.error("خطأ أثناء الـ OCR المباشر:", res.status);
+        toast.error(`خطأ (${res.status}): تعذر الاتصال بخدمة تحليل الصور`);
         return;
       }
 
       const data = await res.json();
 
-      if (data.text) {
-        const fullText: string = data.text;
+      if (data.IsErroredOnProcessing) {
+        toast.error(data.ErrorMessage?.[0] || "فشل تحليل الصورة");
+        return;
+      }
+
+      const fullText: string = data.ParsedResults?.[0]?.ParsedText || "";
+
+      if (fullText) {
         console.log("النص الكامل المستخرج من OCR:\n", fullText);
 
         const phoneMatch = fullText.match(/(07[3-9]\d{8})/);
@@ -235,6 +252,7 @@ function NewInstallmentContent() {
       setIsScanningId(false);
     }
   };
+
   useEffect(() => {
     const priceParam = searchParams.get("price");
     const downParam = searchParams.get("down");
