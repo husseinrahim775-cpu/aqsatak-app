@@ -8,25 +8,32 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   Wallet, Users, Percent, Coins, Banknote, 
   Loader2, MessageSquare, AlertTriangle, Activity, Landmark, 
-  CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, Plus, Calendar,
-  ChevronRight, ChevronLeft, X
+  CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, ArrowDownRight, Plus, Calendar,
+  ChevronRight, ChevronLeft, X, Layers, Filter, TrendingUp, CheckSquare, Square
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { auth } from "@/services/firebase";
 import { getUserInstallments, getUserPayments, PaymentRecord, InstallmentData } from "@/services/firestore";
 import Link from "next/link";
 import { useTheme } from "next-themes";
+import { requestNotificationPermission } from "@/services/notifications";
 
 interface UpcomingAlert {
+  installmentId: string;
   customerName: string;
   phoneNumber: string;
   productName: string;
-  amount: number;
-  dueDate: Date;
-  daysLeft: number; 
+  totalOverdueAmount: number;
+  unpaidCount: number;
+  hasTodayDue: boolean;
+  maxDaysOverdue: number;
+  paymentPeriod?: string;
+  hasMultipleContracts?: boolean;
 }
 
 type TimeRange = "today" | "week" | "month" | "custom" | "all";
+type PaymentPeriodType = "daily" | "weekly" | "monthly";
+type OverdueFilterType = "all" | "today" | "past";
 
 const getSmartGreeting = () => {
   const hour = new Date().getHours();
@@ -62,9 +69,25 @@ export default function DashboardPage() {
     setGreeting(getSmartGreeting());
   }, []);
 
+  // 🔔 فحص وتحديث توكن إشعارات FCM صامتاً إذا كان الإذن ممنوحاً سابقاً
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "granted") {
+        requestNotificationPermission();
+      }
+    }
+  }, []);
+
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
+
+  // 🗂️ نظام الفصل بين الدفاتر المخصص للتحديد المتعدد الديناميكي
+  const [showLedgerFilter, setShowLedgerFilter] = useState(false);
+  const [selectedPeriods, setSelectedPeriods] = useState<PaymentPeriodType[]>(["daily", "weekly", "monthly"]);
+
+  // 🎯 فلترة المتأخرات للموظف (الكل / مستحق اليوم / متأخر سابقاً)
+  const [overdueFilter, setOverdueFilter] = useState<OverdueFilterType>("all");
 
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -127,6 +150,34 @@ export default function DashboardPage() {
 
   const [overdueAlerts, setOverdueAlerts] = useState<UpcomingAlert[]>([]);
 
+  // 🎯 تبديل أو تفعيل الخيارات المحددة لنظام الفصل
+  const togglePeriodSelection = (period: PaymentPeriodType) => {
+    if (selectedPeriods.includes(period)) {
+      if (selectedPeriods.length > 1) {
+        setSelectedPeriods(selectedPeriods.filter((p) => p !== period));
+      }
+    } else {
+      setSelectedPeriods([...selectedPeriods, period]);
+    }
+  };
+
+  // 🎯 تصفية العقود بناءً على الفلاتر المختارة بالتحديد المتعدد
+  const activeInstallments = useMemo(() => {
+    if (!showLedgerFilter) return rawInstallments;
+    return rawInstallments.filter((inst) => {
+      const p = inst.paymentPeriod || "monthly";
+      return selectedPeriods.includes(p as PaymentPeriodType);
+    });
+  }, [rawInstallments, showLedgerFilter, selectedPeriods]);
+
+  const activeInstallmentIds = useMemo(() => new Set(activeInstallments.map((i) => i.id)), [activeInstallments]);
+
+  // 🎯 تصفية المقبوضات التابعة للعقود الفعالة
+  const activePayments = useMemo(() => {
+    if (!showLedgerFilter) return rawPayments;
+    return rawPayments.filter((p) => activeInstallmentIds.has(p.installmentId));
+  }, [rawPayments, activeInstallmentIds, showLedgerFilter]);
+
   useEffect(() => {
     async function fetchDashboardData() {
       const userId = user?.uid || auth?.currentUser?.uid;
@@ -146,129 +197,6 @@ export default function DashboardPage() {
         setRawPayments(payments || []);
         setRawInstallments(installments || []);
 
-        if (!installments || installments.length === 0) {
-          setLoading(false);
-          return;
-        }
-
-        let remainingCapitalSum = 0;
-        let remainingProfitsSum = 0;
-        let remainingDebtSum = 0;
-        let profitMarginSum = 0;
-        
-        let expectedDailySum = 0;
-        let expectedWeeklySum = 0;
-        let expectedMonthlySum = 0;
-
-        let totalExpectedToDate = 0;
-        let totalCollectedAllTime = 0;
-
-        const uniquePhones = new Set<string>();
-        const overdueList: UpcomingAlert[] = [];
-        const now = new Date();
-
-        installments.forEach((inst) => {
-          const installmentAmount = Number(inst.monthlyInstallment) || 0;
-          const totalMonths = Number(inst.months) || 1;
-          const margin = Number(inst.profitMargin) || 0;
-          const totalProfit = Number(inst.totalProfit) || 0;
-
-          const totalPaidForInst = (payments || [])
-            .filter((p) => p.installmentId === inst.id)
-            .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-          const calculatedRemainingDebt = Math.max(0, (Number(inst.totalDue) || 0));
-
-          totalCollectedAllTime += totalPaidForInst;
-          profitMarginSum += margin;
-
-          const remainingProfit = Math.min(totalProfit, calculatedRemainingDebt);
-          const remainingCapital = Math.max(0, calculatedRemainingDebt - remainingProfit);
-
-          remainingDebtSum += calculatedRemainingDebt;
-          remainingCapitalSum += remainingCapital;
-          remainingProfitsSum += remainingProfit;
-
-          if (calculatedRemainingDebt > 0 && inst.phoneNumber) {
-            uniquePhones.add(inst.phoneNumber.trim());
-          }
-
-          if (calculatedRemainingDebt > 0) {
-            const dueNow = Math.min(installmentAmount, calculatedRemainingDebt);
-            if (inst.paymentPeriod === "daily") {
-              expectedDailySum += dueNow;
-            } else if (inst.paymentPeriod === "weekly") {
-              expectedWeeklySum += dueNow;
-            } else {
-              expectedMonthlySum += dueNow;
-            }
-          }
-
-          if (!inst.startDate || calculatedRemainingDebt <= 0) return;
-
-          const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
-          let hasFoundNextUnpaid = false;
-
-          for (let m = 0; m < totalMonths; m++) {
-            let dueDate: Date;
-            if (inst.paymentPeriod === "daily") {
-              dueDate = new Date(sYear, sMonth - 1, sDay + m);
-            } else if (inst.paymentPeriod === "weekly") {
-              dueDate = new Date(sYear, sMonth - 1, sDay + (m * 7));
-            } else {
-              dueDate = new Date(sYear, sMonth - 1 + m, sDay);
-            }
-
-            const requiredForStep = installmentAmount * (m + 1);
-            const isPaid = totalPaidForInst >= requiredForStep - 50;
-
-            if (dueDate.getTime() <= now.getTime()) {
-              totalExpectedToDate += installmentAmount;
-            }
-
-            if (!isPaid && calculatedRemainingDebt > 0 && !hasFoundNextUnpaid) {
-              const diffTime = dueDate.getTime() - now.getTime();
-              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-              if (diffDays < 0) {
-                overdueList.push({
-                  customerName: inst.customerName,
-                  phoneNumber: inst.phoneNumber,
-                  productName: inst.productName,
-                  amount: Math.min(installmentAmount, calculatedRemainingDebt), 
-                  dueDate: dueDate,
-                  daysLeft: Math.abs(diffDays), 
-                });
-                hasFoundNextUnpaid = true;
-              }
-            }
-          }
-        });
-
-        const avgProfitMargin = installments.length > 0 ? Math.round(profitMarginSum / installments.length) : 0;
-        
-        const efficiency = totalExpectedToDate > 0 
-          ? Math.min(100, Math.round((totalCollectedAllTime / totalExpectedToDate) * 100)) 
-          : 100;
-
-        setStats({
-          totalRemainingCapital: remainingCapitalSum,
-          totalRemainingProfits: remainingProfitsSum,
-          totalRemainingDebt: remainingDebtSum,
-          activeCustomers: uniquePhones.size,
-          avgInterest: avgProfitMargin,
-          collectionEfficiency: efficiency,
-        });
-
-        setExpectedIncome({
-          daily: expectedDailySum,
-          weekly: expectedWeeklySum,
-          monthly: expectedMonthlySum,
-        });
-
-        overdueList.sort((a, b) => b.daysLeft - a.daysLeft);
-        setOverdueAlerts(overdueList.slice(0, 5));
-
       } catch (error) {
         console.error("خطأ في جلب بيانات الداشبورد:", error);
       } finally {
@@ -279,8 +207,179 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [user]);
 
-  // تصفية المقبوضات
-  const filteredCollectedAmount = useMemo(() => {
+  // 🎯 حساب الإحصائيات الشاملة وتجميع التعثرات المالية لكل عقد بدون تكرار
+  useEffect(() => {
+    if (!rawInstallments) return;
+
+    let remainingCapitalSum = 0;
+    let remainingProfitsSum = 0;
+    let remainingDebtSum = 0;
+    let profitMarginSum = 0;
+    
+    let expectedDailySum = 0;
+    let expectedWeeklySum = 0;
+    let expectedMonthlySum = 0;
+
+    let totalExpectedToDate = 0;
+    let totalCollectedAllTime = 0;
+
+    const uniquePhones = new Set<string>();
+    const overdueList: UpcomingAlert[] = [];
+
+    // 🎯 توحيد تاريخ اليوم عند 00:00:00
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    // 🎯 رصد عدد العقود القائمة لكل عميل للتمييز باسم المنتج إذا تكرر العميل
+    const customerContractCountMap = new Map<string, number>();
+    activeInstallments.forEach((inst) => {
+      const nameKey = (inst.customerName || "").trim();
+      if (nameKey) {
+        customerContractCountMap.set(nameKey, (customerContractCountMap.get(nameKey) || 0) + 1);
+      }
+    });
+
+    activeInstallments.forEach((inst) => {
+      const installmentAmount = Number(inst.monthlyInstallment) || 0;
+      const totalMonths = Number(inst.months) || 1;
+      const margin = Number(inst.profitMargin) || 0;
+      const totalProfit = Number(inst.totalProfit) || 0;
+
+      const totalPaidForInst = activePayments
+        .filter((p) => p.installmentId === inst.id)
+        .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+      const calculatedRemainingDebt = Math.max(0, (Number(inst.totalDue) || 0));
+
+      totalCollectedAllTime += totalPaidForInst;
+      profitMarginSum += margin;
+
+      const remainingProfit = Math.min(totalProfit, calculatedRemainingDebt);
+      const remainingCapital = Math.max(0, calculatedRemainingDebt - remainingProfit);
+
+      remainingDebtSum += calculatedRemainingDebt;
+      remainingCapitalSum += remainingCapital;
+      remainingProfitsSum += remainingProfit;
+
+      if (calculatedRemainingDebt > 0 && inst.phoneNumber) {
+        uniquePhones.add(inst.phoneNumber.trim());
+      }
+
+      if (calculatedRemainingDebt > 0) {
+        const dueNow = Math.min(installmentAmount, calculatedRemainingDebt);
+        if (inst.paymentPeriod === "daily") {
+          expectedDailySum += dueNow;
+        } else if (inst.paymentPeriod === "weekly") {
+          expectedWeeklySum += dueNow;
+        } else {
+          expectedMonthlySum += dueNow;
+        }
+      }
+
+      if (!inst.startDate || calculatedRemainingDebt <= 0) return;
+
+      const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
+
+      let contractOverdueSum = 0;
+      let unpaidCount = 0;
+      let hasTodayDue = false;
+      let maxDaysOverdue = 0;
+
+      // 🎯 فحص جميع الدفعات وتجميعها لكل عقد في عنصر واحد
+      for (let m = 0; m < totalMonths; m++) {
+        let dueDate: Date;
+        if (inst.paymentPeriod === "daily") {
+          dueDate = new Date(sYear, sMonth - 1, sDay + m);
+        } else if (inst.paymentPeriod === "weekly") {
+          dueDate = new Date(sYear, sMonth - 1, sDay + (m * 7));
+        } else {
+          dueDate = new Date(sYear, sMonth - 1 + m, sDay);
+        }
+
+        const dueDateMidnight = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()).getTime();
+
+        const requiredForStep = installmentAmount * (m + 1);
+        const isStepPaid = totalPaidForInst >= requiredForStep - 50;
+
+        if (dueDateMidnight <= todayMidnight) {
+          totalExpectedToDate += installmentAmount;
+        }
+
+        // 🎯 تجميع الأقساط المستحقة المتأخرة لهذا العقد
+        if (!isStepPaid && calculatedRemainingDebt > 0 && dueDateMidnight <= todayMidnight) {
+          const diffDays = Math.floor((todayMidnight - dueDateMidnight) / (1000 * 60 * 60 * 24)) + 1;
+
+          if (diffDays >= 1) {
+            const stepAmount = Math.min(installmentAmount, Math.max(0, calculatedRemainingDebt - contractOverdueSum));
+            if (stepAmount > 0) {
+              contractOverdueSum += stepAmount;
+              unpaidCount += 1;
+              if (diffDays === 1) hasTodayDue = true;
+              if (diffDays > maxDaysOverdue) maxDaysOverdue = diffDays;
+            }
+          }
+        }
+      }
+
+      // 🎯 إضافة العقد المتعثر مرة واحدة فقط
+      if (unpaidCount > 0 && contractOverdueSum > 0) {
+        const custName = (inst.customerName || "").trim();
+        const hasMultiple = (customerContractCountMap.get(custName) || 0) > 1;
+
+        overdueList.push({
+          installmentId: inst.id,
+          customerName: custName,
+          phoneNumber: inst.phoneNumber,
+          productName: inst.productName || "عقد أجهزة",
+          totalOverdueAmount: contractOverdueSum,
+          unpaidCount: unpaidCount,
+          hasTodayDue: hasTodayDue,
+          maxDaysOverdue: maxDaysOverdue,
+          paymentPeriod: inst.paymentPeriod || "monthly",
+          hasMultipleContracts: hasMultiple,
+        });
+      }
+    });
+
+    const avgProfitMargin = activeInstallments.length > 0 ? Math.round(profitMarginSum / activeInstallments.length) : 0;
+    
+    const efficiency = totalExpectedToDate > 0 
+      ? Math.min(100, Math.round((totalCollectedAllTime / totalExpectedToDate) * 100)) 
+      : 100;
+
+    setStats({
+      totalRemainingCapital: remainingCapitalSum,
+      totalRemainingProfits: remainingProfitsSum,
+      totalRemainingDebt: remainingDebtSum,
+      activeCustomers: uniquePhones.size,
+      avgInterest: avgProfitMargin,
+      collectionEfficiency: efficiency,
+    });
+
+    setExpectedIncome({
+      daily: expectedDailySum,
+      weekly: expectedWeeklySum,
+      monthly: expectedMonthlySum,
+    });
+
+    // 🎯 الترتيب: العقود التي تملك استحقاقات قديمة وأكثر تأخيراً تتصدر القائمة
+    overdueList.sort((a, b) => b.maxDaysOverdue - a.maxDaysOverdue);
+    setOverdueAlerts(overdueList);
+  }, [activeInstallments, activePayments]);
+
+  // 🎯 تصفية قائمة المتأخرات للموظف بحسب التبويب المختار
+  const filteredOverdueAlerts = useMemo(() => {
+    let list = overdueAlerts;
+    if (overdueFilter === "today") {
+      list = overdueAlerts.filter(a => a.hasTodayDue);
+    } else if (overdueFilter === "past") {
+      list = overdueAlerts.filter(a => a.maxDaysOverdue > 1);
+    }
+    return list.slice(0, 15);
+  }, [overdueAlerts, overdueFilter]);
+
+  // 📊 تصفية المقبوضات وحساب نسبة النمو الحقيقية (Growth Rate %)
+  const { filteredCollectedAmount, growthRate, growthLabel } = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
@@ -290,17 +389,28 @@ export default function DashboardPage() {
 
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    return rawPayments.reduce((sum, p) => {
+    let currentSum = 0;
+    let previousSum = 0;
+
+    const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+    const startOfPrevWeek = new Date(startOfWeek.getTime() - 7 * 86400000);
+    const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    activePayments.forEach((p) => {
       const dateStr = p.paidAt || p.createdAt;
-      if (!dateStr) return sum;
+      if (!dateStr) return;
       const pDate = new Date(dateStr);
+      const amount = Number(p.amount) || 0;
 
       if (timeRange === "today") {
-        if (pDate >= startOfToday) return sum + (Number(p.amount) || 0);
+        if (pDate >= startOfToday) currentSum += amount;
+        else if (pDate >= startOfYesterday && pDate < startOfToday) previousSum += amount;
       } else if (timeRange === "week") {
-        if (pDate >= startOfWeek) return sum + (Number(p.amount) || 0);
+        if (pDate >= startOfWeek) currentSum += amount;
+        else if (pDate >= startOfPrevWeek && pDate < startOfWeek) previousSum += amount;
       } else if (timeRange === "month") {
-        if (pDate >= startOfMonth) return sum + (Number(p.amount) || 0);
+        if (pDate >= startOfMonth) currentSum += amount;
+        else if (pDate >= startOfPrevMonth && pDate < startOfMonth) previousSum += amount;
       } else if (timeRange === "custom") {
         const start = customStartDate ? new Date(customStartDate) : null;
         const end = customEndDate ? new Date(customEndDate) : null;
@@ -309,20 +419,41 @@ export default function DashboardPage() {
         if (end) end.setHours(23, 59, 59, 999);
 
         if (start && end) {
-          if (pDate >= start && pDate <= end) return sum + (Number(p.amount) || 0);
+          if (pDate >= start && pDate <= end) currentSum += amount;
         } else if (start) {
-          if (pDate >= start) return sum + (Number(p.amount) || 0);
+          if (pDate >= start) currentSum += amount;
         } else if (end) {
-          if (pDate <= end) return sum + (Number(p.amount) || 0);
+          if (pDate <= end) currentSum += amount;
         } else {
-          return sum + (Number(p.amount) || 0);
+          currentSum += amount;
         }
       } else {
-        return sum + (Number(p.amount) || 0);
+        currentSum += amount;
       }
-      return sum;
-    }, 0);
-  }, [rawPayments, timeRange, customStartDate, customEndDate]);
+    });
+
+    let growth = 0;
+    let label = "";
+
+    if (timeRange === "all") {
+      growth = 0;
+      label = "";
+    } else if (previousSum === 0 && currentSum === 0) {
+      growth = 0;
+      label = "0%";
+    } else if (previousSum === 0 && currentSum > 0) {
+      growth = 100;
+      label = "نشاط جديد";
+    } else if (currentSum === 0 && previousSum > 0) {
+      growth = -100;
+      label = "-100% (توقف)";
+    } else {
+      growth = Math.round(((currentSum - previousSum) / previousSum) * 100);
+      label = `${growth > 0 ? "+" : ""}${growth}%`;
+    }
+
+    return { filteredCollectedAmount: currentSum, growthRate: growth, growthLabel: label };
+  }, [activePayments, timeRange, customStartDate, customEndDate]);
 
   // رسم الأسبوع الحقيقي
   const weeklyDailyBreakdown = useMemo(() => {
@@ -336,7 +467,7 @@ export default function DashboardPage() {
 
     const totals = [0, 0, 0, 0, 0, 0, 0];
 
-    rawPayments.forEach((p) => {
+    activePayments.forEach((p) => {
       const dateStr = p.paidAt || p.createdAt;
       if (!dateStr) return;
       const pDate = new Date(dateStr);
@@ -358,13 +489,14 @@ export default function DashboardPage() {
       heightPercent: amount > 0 ? Math.max(15, Math.round((amount / maxVal) * 100)) : 8,
       isToday: idx === currentDayIdxIndex,
     }));
-  }, [rawPayments]);
+  }, [activePayments]);
 
-  const handleQuickWhatsApp = (alert: UpcomingAlert, isOverdue: boolean) => {
+  const handleQuickWhatsApp = (alert: UpcomingAlert) => {
     let cleanPhone = alert.phoneNumber.replace(/[^0-9]/g, "");
     if (cleanPhone.startsWith("0")) cleanPhone = "964" + cleanPhone.slice(1);
 
-    const message = `مرحباً ${alert.customerName}، نود تذكيرك بأن قسطك البالغ ${Math.round(alert.amount).toLocaleString()} د.ع لمنتج (${alert.productName}) قد تجاوز موعد استحقاقه.`;
+    const periodText = alert.paymentPeriod === "daily" ? "اليومي" : alert.paymentPeriod === "weekly" ? "الأسبوعي" : "الشهري";
+    const message = `مرحباً ${alert.customerName}، نود تذكيرك بأن لديك أقساط متأخرة لعقد (${alert.productName}) بإجمالي مبلغ ${Math.round(alert.totalOverdueAmount).toLocaleString()} د.ع. يرجى المبادرة بالتسديد.`;
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
@@ -388,8 +520,8 @@ export default function DashboardPage() {
         className="space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
       >
         
-        {/* 1. الترويسة الرئيسية */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        {/* 1. الترويسة الرئيسية مع زر تفعيل نظام الفصل الاختياري */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm">
           <div>
             <h1 className="text-2xl md:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
               <span>{greeting.title}، {userData?.name || "Code XR"}</span>
@@ -400,7 +532,23 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            {/* 🎯 زر التحكم في فتح/إغلاق نظام الفصل */}
+            <button
+              onClick={() => {
+                setShowLedgerFilter(!showLedgerFilter);
+                if (showLedgerFilter) setSelectedPeriods(["daily", "weekly", "monthly"]);
+              }}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                showLedgerFilter
+                  ? "bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-500/20"
+                  : "bg-secondary/80 hover:bg-secondary text-foreground border-border"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>{showLedgerFilter ? "إلغاء نظام الفصل" : "نظام فصل الدفاتر"}</span>
+            </button>
+
             <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-card border border-border shadow-sm">
               <Activity className="w-4 h-4 text-emerald-500" />
               <div className="text-right">
@@ -410,6 +558,64 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* 🗂️ شريط خيارات التصفية بالضغط والتحديد المتعدد (Multi-Select) */}
+        <AnimatePresence>
+          {showLedgerFilter && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, y: -10 }}
+              animate={{ opacity: 1, height: "auto", y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -10 }}
+              className="bg-purple-500/10 border border-purple-500/20 p-4 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2 text-xs font-black text-purple-600 dark:text-purple-400">
+                <Filter className="w-4 h-4" />
+                <span>حدد الأنواع المراد إظهارها بـ الإحصائيات (تحديد متعدد):</span>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                {/* 1. القسط اليومي */}
+                <button
+                  onClick={() => togglePeriodSelection("daily")}
+                  className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    selectedPeriods.includes("daily")
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("daily") ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                  <span> عقود يومية</span>
+                </button>
+
+                {/* 2. القسط الأسبوعي */}
+                <button
+                  onClick={() => togglePeriodSelection("weekly")}
+                  className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    selectedPeriods.includes("weekly")
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("weekly") ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                  <span> عقود أسبوعية</span>
+                </button>
+
+                {/* 3. القسط الشهري */}
+                <button
+                  onClick={() => togglePeriodSelection("monthly")}
+                  className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    selectedPeriods.includes("monthly")
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("monthly") ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                  <span> عقود شهرية </span>
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* 💳 2. بطاقات الأرصدة الرئيسية */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -421,7 +627,9 @@ export default function DashboardPage() {
           >
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-muted-foreground">إجمالي الديون بالسوق (الرصيد النشط)</span>
+                <span className="text-xs font-bold text-muted-foreground">
+                  إجمالي الديون بالسوق (الرصيد المفلتر)
+                </span>
                 <span className="text-xs font-black px-3 py-1 bg-primary/10 text-primary rounded-full border border-primary/20">
                   د.ع (IQD)
                 </span>
@@ -431,27 +639,41 @@ export default function DashboardPage() {
                 <h2 className="text-3xl md:text-4xl font-black text-foreground tracking-tight font-mono">
                   <AnimatedNumber value={stats.totalRemainingDebt} suffix="د.ع" />
                 </h2>
-                <p className="text-[11px] text-emerald-500 font-bold flex items-center gap-1 pt-1">
-                  <ArrowUpRight className="w-3.5 h-3.5" /> +{stats.collectionEfficiency}% معدل الاسترداد المالي
-                </p>
+                <div className="flex items-center gap-3 pt-1">
+                  <p className="text-[11px] text-emerald-500 font-bold flex items-center gap-1">
+                    <ArrowUpRight className="w-3.5 h-3.5" /> +{stats.collectionEfficiency}% معدل الاسترداد المالي
+                  </p>
+                  
+                  {/* مؤشر نسبة النمو */}
+                  {timeRange !== "all" && growthLabel && (
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg flex items-center gap-1 dir-ltr ${
+                      growthRate > 0 ? "bg-emerald-500/10 text-emerald-500" : growthRate < 0 ? "bg-rose-500/10 text-rose-500" : "bg-secondary text-muted-foreground"
+                    }`}>
+                      {growthRate > 0 ? <TrendingUp className="w-3 h-3" /> : growthRate < 0 ? <ArrowDownRight className="w-3 h-3" /> : null}
+                      {growthLabel}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              {/* أزرار الإجراءات السريعة - زر استلام دفعة يوجه إلى /accounts */}
+              {/* أزرار الإجراءات السريعة */}
               <div className="flex items-center gap-3 pt-2">
                 <Link 
                   href="/customers/new" 
-className="flex-1 py-3 px-4 bg-theme-gradient text-white font-black text-xs rounded-2xl flex items-center justify-center gap-2 border border-transparent shadow-md hover:opacity-90 transition-all cursor-pointer"                >
+                  className="flex-1 py-3 px-4 bg-theme-gradient text-white font-black text-xs rounded-2xl flex items-center justify-center gap-2 border border-transparent shadow-md hover:opacity-90 transition-all cursor-pointer"
+                >
                   <Plus className="w-4 h-4" /> إضافة عقد جديد
                 </Link>
                 <Link 
                   href="/accounts" 
-className="flex-1 py-3 px-4 bg-primary/10 text-theme-primary border border-theme-primary font-black text-xs rounded-2xl flex items-center justify-center gap-2 hover:bg-primary/20 transition-all cursor-pointer"                >
+                  className="flex-1 py-3 px-4 bg-primary/10 text-theme-primary border border-theme-primary font-black text-xs rounded-2xl flex items-center justify-center gap-2 hover:bg-primary/20 transition-all cursor-pointer"
+                >
                   <Coins className="w-4 h-4 text-primary" /> استلام دفعة
                 </Link>
               </div>
             </div>
 
-            {/* 🌟 كارتان متراصان (واحد فوق الآخر) بنفس تصميم الكروت البارزة */}
+            {/* 🌟 كارتان متراصان */}
             <div className="mt-6 pt-4 border-t border-border/60 flex flex-col gap-3">
               
               {/* 1. كارت رأس المال المتبقي بالسوق */}
@@ -503,7 +725,8 @@ className="flex-1 py-3 px-4 bg-primary/10 text-theme-primary border border-theme
             {/* 1. الوارد اليومي المتوقع */}
             <motion.div 
               whileHover={{ y: -3 }}
-className="bg-theme-gradient text-white p-5 rounded-3xl shadow-lg shadow-primary/20 flex flex-col justify-between"            >
+              className="bg-theme-gradient text-white p-5 rounded-3xl shadow-lg shadow-primary/20 flex flex-col justify-between"
+            >
               <div className="flex justify-between items-center">
                 <span className="text-xs font-black opacity-90">الوارد اليومي المتوقع</span>
                 <CalendarDays className="w-5 h-5 opacity-80" />
@@ -923,61 +1146,114 @@ className="bg-theme-gradient text-white p-5 rounded-3xl shadow-lg shadow-primary
             />
           </div>
 
-          {/* كارت المتأخرات والتنبيهات */}
+          {/* كارت المتأخرات المحدث والمعدل كلياً لتنسيق الموظف */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-card/90 backdrop-blur-md rounded-3xl border border-rose-500/20 p-5 md:p-6 shadow-sm hover:border-rose-500/40 transition-all flex flex-col justify-between"
           >
             <div>
-              <div className="flex items-center justify-between mb-4 border-b border-border/60 pb-3">
+              <div className="flex items-center justify-between mb-3 border-b border-border/60 pb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-600 border border-rose-500/20 shadow-sm">
                     <AlertTriangle className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-base font-black text-foreground">دفعات متأخرة (تعثر مالي)</h3>
-                    <p className="text-[10px] text-muted-foreground font-bold">قائمة العملاء المتأخرين عن التسديد</p>
+                    <p className="text-[10px] text-muted-foreground font-bold">قائمة العقود المتعثرة والمستحقة</p>
                   </div>
                 </div>
 
-                <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20">
-                  {overdueAlerts.length} تنبيه
+                <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-mono">
+                  {filteredOverdueAlerts.length} تنبيه
                 </span>
               </div>
+
+              {/* 🎯 شريط فلاتر متابعة الموظف للمتأخرات اليومية والسابقة */}
+              <div className="flex items-center gap-1 bg-secondary/60 p-1 rounded-2xl mb-3 text-[10px] font-black justify-between">
+                <button
+                  onClick={() => setOverdueFilter("all")}
+                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+                    overdueFilter === "all" ? "bg-rose-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  🔴 الكل ({overdueAlerts.length})
+                </button>
+                <button
+                  onClick={() => setOverdueFilter("today")}
+                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+                    overdueFilter === "today" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ⏰ مستحقة اليوم ({overdueAlerts.filter(a => a.hasTodayDue).length})
+                </button>
+                <button
+                  onClick={() => setOverdueFilter("past")}
+                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+                    overdueFilter === "past" ? "bg-rose-700 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ⚠️ متأخرة سابقاً ({overdueAlerts.filter(a => a.maxDaysOverdue > 1).length})
+                </button>
+              </div>
               
-              {overdueAlerts.length === 0 ? (
+              {filteredOverdueAlerts.length === 0 ? (
                 <div className="text-center py-8 bg-secondary/30 rounded-2xl border border-dashed border-border/50">
-                  <p className="text-xs text-emerald-600 font-black">ممتاز! لا توجد متأخرات مالية 👏</p>
+                  <p className="text-xs text-emerald-600 font-black">ممتاز! لا توجد متأخرات مالية في هذا التصنيف 👏</p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  {overdueAlerts.map((alert, index) => (
+                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                  {filteredOverdueAlerts.map((alert, index) => (
                     <motion.div 
-                      key={index} 
+                      key={alert.installmentId || index} 
                       whileHover={{ x: -4, scale: 1.01 }}
                       transition={{ duration: 0.2 }}
                       className="flex justify-between items-center p-3.5 rounded-2xl bg-secondary/40 hover:bg-secondary/80 border border-border/50 transition-all shadow-sm group"
                     >
                       <div className="space-y-0.5 min-w-0 pr-1">
-                        <p className="font-black text-xs truncate text-foreground group-hover:text-primary transition-colors">
-                          {alert.customerName}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground font-mono font-black" dir="ltr">
-                          {Math.round(alert.amount).toLocaleString()} د.ع
-                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-black text-xs truncate text-foreground group-hover:text-primary transition-colors">
+                            {alert.customerName}
+                          </p>
+                          {/* 🎯 إظهار اسم العقد/المنتج فقط إذا كان للعميل أكثر من عقد */}
+                          {alert.hasMultipleContracts && (
+                            <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 border border-purple-500/20 truncate max-w-[110px]">
+                              📦 {alert.productName}
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <p className="text-[10px] text-muted-foreground font-mono font-black" dir="ltr">
+                            {Math.round(alert.totalOverdueAmount).toLocaleString()} د.ع
+                          </p>
+                          <span className="text-[9px] text-muted-foreground font-bold">
+                            ({alert.unpaidCount} {alert.unpaidCount === 1 ? "دفعة" : "دفعات"})
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="px-2.5 py-1 rounded-xl bg-rose-500/10 text-rose-600 text-[10px] font-black border border-rose-500/20">
-                          تأخير {alert.daysLeft} يوم
+                        {/* 🎯 شارة توضيحية لسبب التنبيه بدقة */}
+                        <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border ${
+                          alert.hasTodayDue && alert.maxDaysOverdue === 1
+                            ? "bg-amber-500/10 text-amber-600 border-amber-500/20" 
+                            : alert.hasTodayDue
+                            ? "bg-orange-500/10 text-orange-600 border-orange-500/20"
+                            : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                        }`}>
+                          {alert.hasTodayDue && alert.maxDaysOverdue === 1 
+                            ? "مستحق اليوم" 
+                            : alert.hasTodayDue 
+                            ? `اليوم + تأخير ${alert.maxDaysOverdue - 1} أيام`
+                            : `تأخير ${alert.maxDaysOverdue - 1} أيام`}
                         </span>
 
                         <motion.button 
                           whileHover={{ scale: 1.08 }}
                           whileTap={{ scale: 0.95 }}
-                          onClick={() => handleQuickWhatsApp(alert, true)} 
-                          className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all shadow-md shadow-emerald-600/20" 
+                          onClick={() => handleQuickWhatsApp(alert)} 
+                          className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all shadow-md shadow-emerald-600/20 cursor-pointer" 
                           title="تذكير عبر الواتساب"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />

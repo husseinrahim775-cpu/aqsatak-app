@@ -116,6 +116,85 @@ const fetchWithCacheFirst = async (q: any) => {
 };
 
 // ==========================================
+// ====== ☁️ دالة الرفع السلس والتلقائي لـ Google Drive ======
+// ==========================================
+
+export const triggerSilentDriveBackup = async (ownerUid: string) => {
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem("google_drive_access_token");
+  if (!token || !ownerUid) return;
+
+  try {
+    const [installments, payments, treasury_transactions, inventory] = await Promise.all([
+      getUserInstallments(ownerUid).catch(() => []),
+      getUserPayments(ownerUid).catch(() => []),
+      getUserTreasuryTransactions(ownerUid).catch(() => []),
+      getAvailableInventory().catch(() => []),
+    ]);
+
+    const backupData = {
+      exportDate: new Date().toISOString(),
+      userId: ownerUid,
+      installments,
+      payments,
+      treasury_transactions,
+      inventory,
+    };
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const todayDateStr = `${year}-${month}-${day}`;
+
+    const fileName = `aqsatk_backup_${todayDateStr}.json`;
+    const fileContent = JSON.stringify(backupData, null, 2);
+
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+trashed=false`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    let existingFileId = null;
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (searchData.files && searchData.files.length > 0) {
+        existingFileId = searchData.files[0].id;
+      }
+    }
+
+    if (existingFileId) {
+      await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: fileContent,
+        }
+      );
+    } else {
+      const metadata = { name: fileName, mimeType: "application/json" };
+      const formData = new FormData();
+      formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      formData.append("file", new Blob([fileContent], { type: "application/json" }));
+
+      await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+    }
+
+    localStorage.setItem("last_auto_drive_backup_date", todayDateStr);
+  } catch (error) {
+    console.warn("تنبيه: تعذر الرفع التلقائي خلف الكواليس لـ Google Drive:", error);
+  }
+};
+
+// ==========================================
 // ====== 📸 0. تحويل وضغط الصور مجاناً (Base64) ======
 // ==========================================
 
@@ -261,6 +340,7 @@ export const toggleCustomerBlacklist = async (
     });
 
     await Promise.all(updatePromises);
+    triggerSilentDriveBackup(userId);
     return true;
   } catch (error) {
     console.error("خطأ في تحديث القائمة السوداء:", error);
@@ -297,6 +377,8 @@ export const addInstallmentRecord = async (data: Omit<InstallmentData, "id" | "c
       isBlacklisted: data.isBlacklisted || false,
       createdAt: serverTimestamp(),
     });
+
+    triggerSilentDriveBackup(data.userId);
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error("خطأ في حفظ القسط:", error);
@@ -345,6 +427,8 @@ export const updateInstallment = async (installmentId: string, updatedData: Part
       ...updatedData,
       updatedAt: serverTimestamp()
     });
+
+    if (updatedData.userId) triggerSilentDriveBackup(updatedData.userId);
     return true;
   } catch (error) {
     console.error("خطأ في تحديث بيانات العميل/القسط:", error);
@@ -374,8 +458,12 @@ export const deleteInstallment = async (installmentId: string) => {
     await Promise.all(resetPromises);
 
     const docRef = doc(db, "installments", installmentId);
+    const docSnap = await getDoc(docRef);
+    const userId = docSnap.exists() ? docSnap.data().userId : null;
+
     await deleteDoc(docRef);
 
+    if (userId) triggerSilentDriveBackup(userId);
     return true;
   } catch (error) {
     console.error("خطأ في حذف القسط وإرجاع المادة للمخزن:", error);
@@ -442,6 +530,7 @@ export const addPaymentRecord = async (data: Omit<PaymentRecord, "id">) => {
       }
     }
 
+    triggerSilentDriveBackup(data.userId);
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error("خطأ في إضافة الدفعة وتحديث القسط:", error);
@@ -499,6 +588,8 @@ export const updatePaymentRecord = async (
         await updateDoc(instRef, { totalDue: newTotalDue });
       }
     }
+
+    if (updatedData.userId) triggerSilentDriveBackup(updatedData.userId);
     return true;
   } catch (error) {
     console.error("خطأ في تعديل الدفعة:", error);
@@ -512,11 +603,13 @@ export const deletePaymentRecord = async (paymentId: string, installmentId: stri
     const paymentSnap = await getDoc(paymentRef);
     let targetMonthToRemove = "";
     let isPenaltyRecord = false;
+    let userId = "";
     
     if (paymentSnap.exists()) {
       const data = paymentSnap.data();
       targetMonthToRemove = data.targetMonth || "";
       isPenaltyRecord = data.isPenalty || false;
+      userId = data.userId || "";
     }
     
     await deleteDoc(paymentRef);
@@ -542,6 +635,8 @@ export const deletePaymentRecord = async (paymentId: string, installmentId: stri
         paidMonths: updatedPaidMonths 
       });
     }
+
+    if (userId) triggerSilentDriveBackup(userId);
     return true;
   } catch (error) {
     console.error("خطأ في حذف الدفعة/الغرامة:", error);
@@ -574,6 +669,8 @@ export const addPenaltyRecord = async (
         totalDue: currentTotalDue + amount,
       });
     }
+
+    triggerSilentDriveBackup(userId);
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error("خطأ في تسجيل الغرامة:", error);
@@ -591,6 +688,8 @@ export const addDebt = async (debtData: Omit<DebtData, "id" | "createdAt">) => {
       ...debtData,
       createdAt: serverTimestamp(),
     });
+
+    triggerSilentDriveBackup(debtData.userId);
     return docRef.id;
   } catch (error) {
     console.error("خطأ في إضافة الدين:", error);
@@ -622,6 +721,11 @@ export const toggleDebtStatus = async (debtId: string, currentStatus: boolean) =
     await updateDoc(debtRef, {
       isPaid: !currentStatus
     });
+
+    const debtSnap = await getDoc(debtRef);
+    if (debtSnap.exists() && debtSnap.data().userId) {
+      triggerSilentDriveBackup(debtSnap.data().userId);
+    }
     return true;
   } catch (error) {
     console.error("خطأ في تحديث حالة الدين:", error);
@@ -632,7 +736,12 @@ export const toggleDebtStatus = async (debtId: string, currentStatus: boolean) =
 export const deleteDebt = async (debtId: string) => {
   try {
     const debtRef = doc(db, "debts", debtId);
+    const debtSnap = await getDoc(debtRef);
+    const userId = debtSnap.exists() ? debtSnap.data().userId : null;
+
     await deleteDoc(debtRef);
+
+    if (userId) triggerSilentDriveBackup(userId);
     return true;
   } catch (error) {
     console.error("خطأ في حذف الدين:", error);
@@ -654,6 +763,8 @@ export const addInventoryItem = async (item: Omit<InventoryItem, "id">) => {
     status: "available",
     createdAt: serverTimestamp(),
   });
+
+  triggerSilentDriveBackup(user.uid);
   return docRef.id;
 };
 
@@ -664,6 +775,9 @@ export const updateInventoryItem = async (itemId: string, updatedData: Partial<I
       ...updatedData,
       updatedAt: serverTimestamp(),
     });
+
+    const user = auth.currentUser;
+    if (user) triggerSilentDriveBackup(user.uid);
     return true;
   } catch (error) {
     console.error("خطأ في تعديل المنتج:", error);
@@ -675,6 +789,9 @@ export const deleteInventoryItem = async (itemId: string) => {
   try {
     const itemRef = doc(db, "inventory", itemId);
     await deleteDoc(itemRef);
+
+    const user = auth.currentUser;
+    if (user) triggerSilentDriveBackup(user.uid);
     return true;
   } catch (error) {
     console.error("خطأ في حذف المنتج:", error);
@@ -722,6 +839,9 @@ export const bindProductToContract = async (
     contractId: contractId,
     soldAt: new Date().toISOString().split("T")[0],
   });
+
+  const user = auth.currentUser;
+  if (user) triggerSilentDriveBackup(user.uid);
 };
 
 export const unbindProductFromContract = async (itemId: string) => {
@@ -734,6 +854,9 @@ export const unbindProductFromContract = async (itemId: string) => {
       contractId: "",
       soldAt: "",
     });
+
+    const user = auth.currentUser;
+    if (user) triggerSilentDriveBackup(user.uid);
     return true;
   } catch (error) {
     console.error("خطأ في إلغاء ربط المادة وإرجاعها للمخزن:", error);
@@ -762,6 +885,8 @@ export const addTreasuryTransaction = async (transaction: Omit<TreasuryTransacti
       ...transaction,
       createdAt: new Date().toISOString(),
     });
+
+    triggerSilentDriveBackup(transaction.userId);
     return docRef.id;
   } catch (error) {
     console.error("خطأ في إضافة حركة الخزينة:", error);
@@ -789,7 +914,13 @@ export const getUserTreasuryTransactions = async (userId: string): Promise<Treas
 
 export const deleteTreasuryTransaction = async (id: string) => {
   try {
-    await deleteDoc(doc(db, "treasury_transactions", id));
+    const txRef = doc(db, "treasury_transactions", id);
+    const txSnap = await getDoc(txRef);
+    const userId = txSnap.exists() ? txSnap.data().userId : null;
+
+    await deleteDoc(txRef);
+
+    if (userId) triggerSilentDriveBackup(userId);
   } catch (error) {
     console.error("خطأ في حذف حركة الخزينة:", error);
     throw error;
@@ -928,8 +1059,8 @@ export const clearUserTreasuryData = async (ownerUid: string) => {
       deleteDoc(doc(db, "treasury_transactions", docSnap.id))
     );
 
-    // ❌ تم إغلاق وحذف كود مسح payments لحماية ملفات وتسديدات العملاء والتقارير والحسابات!
     await Promise.all(deleteTreasuryPromises);
+    triggerSilentDriveBackup(ownerUid);
     return true;
   } catch (error) {
     console.error("خطأ في مسح حركات الخزينة اليدوية:", error);

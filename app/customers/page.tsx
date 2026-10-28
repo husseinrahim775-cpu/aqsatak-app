@@ -17,7 +17,8 @@ import {
 import Link from "next/link";
 import { 
   Plus, Search, Eye, Edit, Trash2, X, Loader2, AlertCircle, CheckCircle2, Clock, 
-  Printer, ShieldAlert, ShieldCheck, Users, Phone, MapPin, ChevronRight, FileText
+  Printer, ShieldAlert, ShieldCheck, Users, Phone, MapPin, ChevronRight, FileText,
+  Layers, Filter, CheckSquare, Square
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -42,7 +43,21 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed" | "blacklist">("all");
 
-  // 🔒 فحص الصلاحيات الأمنية: هل المستخدم مالك أو لديه صلاحية التعديل والحذف؟
+  // 📖 حالات نظام فصل الدفاتر المماثلة للداشبورد (تحديد متعدد)
+  const [isBookMode, setIsBookMode] = useState(false);
+  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(["monthly", "weekly", "daily"]);
+
+  // toggle التحديد المتعدد لأنواع الدفاتر
+  const togglePeriodFilter = (period: string) => {
+    if (selectedPeriods.includes(period)) {
+      if (selectedPeriods.length === 1) return; // منع إلغاء تحديد الكل
+      setSelectedPeriods(selectedPeriods.filter((p) => p !== period));
+    } else {
+      setSelectedPeriods([...selectedPeriods, period]);
+    }
+  };
+
+  // 🔒 فحص الصلاحيات الأمنية
   const isEmployee = userData?.role === "employee";
   const canDeleteOrEdit = !isEmployee || !!userData?.permissions?.canDeleteOrEdit;
 
@@ -84,6 +99,12 @@ export default function CustomersPage() {
     const map = new Map<string, GroupedCustomer>();
 
     installments.forEach((item) => {
+      // 📖 تصفية الدفاتر بالنمط المزدوج عند تفعيل نظام الفصل
+      const instPeriod = item.paymentPeriod || "monthly";
+      if (isBookMode && !selectedPeriods.includes(instPeriod)) {
+        return;
+      }
+
       const key = item.phoneNumber?.trim() || item.customerName?.trim();
       if (!key) return;
 
@@ -144,7 +165,7 @@ export default function CustomersPage() {
     });
 
     return result;
-  }, [installments, payments, search, statusFilter]);
+  }, [installments, payments, search, statusFilter, isBookMode, selectedPeriods]);
 
   const openEditModal = (customer: GroupedCustomer) => {
     if (!canDeleteOrEdit) {
@@ -371,29 +392,110 @@ export default function CustomersPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-5 md:space-y-6 pb-12 max-w-7xl mx-auto font-sans dir-rtl text-right"
     >
-      {/* 1. ترويسة الصفحة */}
+      {/* 1. ترويسة الصفحة وزر نظام الفصل بأسلوب الداشبورد */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-border shadow-sm print:hidden">
-        <div>
-          <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
-            <Users className="w-6 h-6 text-primary" />
-            إدارة العملاء والأقساط
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">سجلات العملاء، التقييم الآلي لالتزام السداد، والقائمة السوداء.</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2.5">
+              <Users className="w-6 h-6 text-primary" />
+              إدارة العملاء والأقساط
+            </h1>
+            <p className="text-xs text-muted-foreground mt-1">سجلات العملاء، التقييم الآلي لالتزام السداد، والقائمة السوداء.</p>
+          </div>
         </div>
         
-        <Link href="/customers/new">
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-5 py-3 rounded-2xl font-bold text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity"
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          {/* ⚡ زر تفعيل/إلغاء نظام الفصل مثل الداشبورد تماماً */}
+          <button
+            type="button"
+            onClick={() => setIsBookMode(!isBookMode)}
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-bold text-xs md:text-sm border transition-all shadow-sm ${
+              isBookMode 
+                ? "bg-purple-600 text-white border-purple-500 shadow-purple-500/20" 
+                : "bg-secondary text-foreground hover:bg-secondary/80 border-border"
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            <span>إضافة قسط جديد</span>
-          </motion.button>
-        </Link>
+            <Layers className="w-4 h-4" />
+            <span>{isBookMode ? "إلغاء نظام الفصل" : "نظام فصل الدفاتر"}</span>
+          </button>
+
+          <Link href="/customers/new" className="flex-1 sm:flex-none">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-5 py-3 rounded-2xl font-bold text-xs md:text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة قسط جديد</span>
+            </motion.button>
+          </Link>
+        </div>
       </div>
 
-      {/* 2. شريط البحث والفلترة */}
+      {/* 📖 2. شريط التحديد المتعدد (الخاص بالداشبورد) تظهر فقط عند الضغط على زر نظام فصل الدفاتر */}
+      <AnimatePresence>
+        {isBookMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm print:hidden flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-black text-purple-400">
+                <Filter className="w-4 h-4" />
+                <span>حدد أنواع العقود المراد إظهارها (تحديد متعدد):</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* ⚡ عقود يومية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("daily")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 ${
+                    selectedPeriods.includes("daily")
+                       ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("daily") ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود يومية</span>
+                </button>
+
+                {/*  عقود أسبوعية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("weekly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 ${
+                    selectedPeriods.includes("weekly")
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("weekly") ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود أسبوعية</span>
+                </button>
+
+                {/*  عقود شهرية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("monthly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 ${
+                    selectedPeriods.includes("monthly")
+                   ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("monthly") ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود شهرية </span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. شريط البحث والفلترة */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between print:hidden">
         <div className="relative w-full sm:flex-1">
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -430,7 +532,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* 3. شبكة بطاقات العملاء */}
+      {/* 4. شبكة بطاقات العملاء */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 print:hidden">
         {groupedCustomers.map((customer) => {
           const totalPeriodic = customer.installments.reduce((acc, curr) => acc + curr.monthlyInstallment, 0);

@@ -47,7 +47,8 @@ import {
   Usb,
   Network,
   Type,
-  Palette
+  Palette,
+  Bell
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -68,6 +69,7 @@ import { getAuth, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { toast } from "sonner";
+import { requestNotificationPermission } from "@/services/notifications";
 
 // 🎨 قائمة ثيمات كومبو الألوان المخصصة v14 (مع التدرجات الملونة الحقيقية)
 const V14_COMBO_THEMES = [
@@ -124,6 +126,31 @@ export default function SettingsPage() {
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
+  // 🔔 حالة إشعارات FCM والتفعيل
+  const [isNotifActive, setIsNotifActive] = useState(false);
+  const [loadingNotif, setLoadingNotif] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "granted") {
+        setIsNotifActive(true);
+      }
+    }
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    setLoadingNotif(true);
+    const token = await requestNotificationPermission();
+    setLoadingNotif(false);
+
+    if (token) {
+      setIsNotifActive(true);
+      toast.success("تم تفعيل الإشعارات الفورية بنجاح! ستصلك التنبيهات عند تسديد الأقساط.");
+    } else {
+      toast.error("لم يتم منح إذن الإشعارات، يرجى التفعيل من إعدادات المتصفح.");
+    }
+  };
+
   // 🔄 حالات نافذة وشريط تقدم الاستعادة التفاعلي
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState(0);
@@ -138,11 +165,12 @@ export default function SettingsPage() {
   // إيميل الأدمن الرئيسي
   const ADMIN_EMAIL = "admin@aqsatak.com";
   
-  // 🔒 فحص أمني دقيق: هل المستخدم الحالي موظف؟
+  // 🔒 فحص أمني دقيق للتمييز بين الموظف، صاحب المكتب، والأدمن العام للنظام
   const isEmployee = userData?.role === "employee";
+  const isSystemAdmin = userData?.role === "admin" || user?.email === ADMIN_EMAIL;
   const isOwner = !isEmployee;
 
-  // 🗂️ حالة التحكم بالبطاقات المطوية (تم إغلاق كافة الأقسام افتراضياً لمنع الفوضى)
+  // 🗂️ حالة التحكم بالبطاقات المطوية
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
     subscriptionInfo: false,
     updates: false,
@@ -160,8 +188,43 @@ export default function SettingsPage() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 📐 حساب الأيام المتبقية والباقة للحساب المسجل
-  const currentSub = userData?.subscription;
+  const getOwnerUid = () => {
+    if (isEmployee) {
+      const activeSession = sessionStorage.getItem("active_session");
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession);
+          if (parsed.ownerUid) return parsed.ownerUid;
+        } catch (e) {}
+      }
+      return userData?.ownerUid || null;
+    }
+    return user?.uid || null;
+  };
+
+  // 🎯 جلب اشتراك المالك الرئيسي سواء كان المستخدم هو المالك أو موظف لديه
+  const [ownerSubscription, setOwnerSubscription] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchOwnerSubData = async () => {
+      const ownerUid = getOwnerUid();
+      if (ownerUid) {
+        try {
+          const ownerDocRef = doc(db, "users", ownerUid);
+          const ownerDocSnap = await getDoc(ownerDocRef);
+          if (ownerDocSnap.exists()) {
+            setOwnerSubscription(ownerDocSnap.data()?.subscription || null);
+          }
+        } catch (e) {
+          console.error("خطأ في قراءة اشتراك المالك الرئيسي:", e);
+        }
+      }
+    };
+    fetchOwnerSubData();
+  }, [user, userData]);
+
+  // 📐 حساب الأيام المتبقية والباقة للحساب المسجل بشكل دقيق عبر اشتراك المالك
+  const currentSub = ownerSubscription || userData?.subscription;
   const endDate = currentSub?.endDate ? new Date(currentSub.endDate) : null;
   const daysLeft = endDate ? Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
 
@@ -236,22 +299,10 @@ export default function SettingsPage() {
     canDeleteOrEdit: false,
   });
 
-  const getOwnerUid = () => {
-    const activeSession = sessionStorage.getItem("active_session");
-    if (activeSession) {
-      try {
-        const parsed = JSON.parse(activeSession);
-        if (parsed.ownerUid) return parsed.ownerUid;
-      } catch (e) {}
-    }
-    return user?.uid || null;
-  };
-
-  // 🎨 تغيير وتطبيق كومبو ألوان الثيم دون المساس بوضع النهار/الليل
+  // 🎨 تغيير وتطبيق كومبو ألوان الثيم
   const handleColorThemeChange = (selectedThemeId: string) => {
     setColorTheme(selectedThemeId);
     
-    // حفظ في localStorage مخصص لكل موظف لضمان عدم ضياعه عند الريفريش على localhost:3000
     const employeeKey = userData?.id || user?.uid || userData?.username;
     if (employeeKey) {
       localStorage.setItem(`user_color_theme_${employeeKey}`, selectedThemeId);
@@ -263,7 +314,7 @@ export default function SettingsPage() {
     toast.success("تم اختيار وتثبيت كومبو ألوان الثيم بنجاح!");
   };
 
-  // ⚡ تحميل البيانات واسترجاع إعدادات الثيم والخطوط عند التحميل
+  // ⚡ تحميل البيانات واسترجاع إعدادات الثيم والخطوط والتوكن من Firestore
   const fetchUsersAndSettings = async () => {
     const ownerUid = getOwnerUid();
     if (!ownerUid) {
@@ -294,6 +345,12 @@ export default function SettingsPage() {
       if (userDocSnap.exists()) {
         const data = userDocSnap.data();
         setAdminPin(data.adminPin || "1234");
+
+        // 🔄 استرجاع توكن Google Drive الدائم من Firestore للحفاظ عليه حتى عند تسجيل الخروج
+        if (data.gdriveAccessToken) {
+          localStorage.setItem("google_drive_access_token", data.gdriveAccessToken);
+          setIsDriveConnected(true);
+        }
 
         if (data.hardwareSettings) {
           const hw = data.hardwareSettings;
@@ -509,9 +566,30 @@ export default function SettingsPage() {
     }
   };
 
+  // 🛑 الاستعادة اليدوية فقط بضغط المستخدم
   const handleDownloadFromGoogleDrive = async (tokenParam?: string, isSilent = false) => {
-    const token = tokenParam || localStorage.getItem("google_drive_access_token");
-    if (!token) return;
+    let token = tokenParam || localStorage.getItem("google_drive_access_token");
+    const ownerUid = getOwnerUid();
+
+    if (!token && ownerUid) {
+      try {
+        const ownerSnap = await getDoc(doc(db, "users", ownerUid));
+        if (ownerSnap.exists() && ownerSnap.data()?.gdriveAccessToken) {
+          token = ownerSnap.data().gdriveAccessToken;
+          localStorage.setItem("google_drive_access_token", token!);
+          setIsDriveConnected(true);
+        }
+      } catch (e) {}
+    }
+
+    if (!token) {
+      toast.error("يرجى ربط حساب Google Drive أولاً.");
+      return;
+    }
+
+    if (!isSilent && !window.confirm("تنبيه هام: هل أنت متأكد من استعادة النسخة الاحتياطية من Google Drive؟ سيتم استبدال البيانات الحالية بالبيانات المسترجعة.")) {
+      return;
+    }
 
     try {
       if (!isSilent) setDownloadingFromDrive(true);
@@ -546,11 +624,23 @@ export default function SettingsPage() {
     }
   };
 
+  // ☁️ الرفع المباشر والتلقائي لـ Google Drive مع الحفظ في Firestore
   const handleUploadToGoogleDrive = async (isSilent = false) => {
     const ownerUid = getOwnerUid();
-    const googleAccessToken = localStorage.getItem("google_drive_access_token");
-    if (!ownerUid || !googleAccessToken) return;
+    let googleAccessToken = localStorage.getItem("google_drive_access_token");
 
+    if (!googleAccessToken && ownerUid) {
+      try {
+        const ownerSnap = await getDoc(doc(db, "users", ownerUid));
+        if (ownerSnap.exists() && ownerSnap.data()?.gdriveAccessToken) {
+          googleAccessToken = ownerSnap.data().gdriveAccessToken;
+          localStorage.setItem("google_drive_access_token", googleAccessToken!);
+          setIsDriveConnected(true);
+        }
+      } catch (e) {}
+    }
+
+    if (!ownerUid || !googleAccessToken) return;
     if (uploadingToDrive) return;
 
     try {
@@ -650,7 +740,20 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const checkAndTriggerNightlyBackup = async () => {
-      const savedToken = localStorage.getItem("google_drive_access_token");
+      let savedToken = localStorage.getItem("google_drive_access_token");
+      const ownerUid = getOwnerUid();
+
+      if (!savedToken && ownerUid) {
+        try {
+          const ownerSnap = await getDoc(doc(db, "users", ownerUid));
+          if (ownerSnap.exists() && ownerSnap.data()?.gdriveAccessToken) {
+            savedToken = ownerSnap.data().gdriveAccessToken;
+            localStorage.setItem("google_drive_access_token", savedToken!);
+            setIsDriveConnected(true);
+          }
+        } catch (e) {}
+      }
+
       if (!savedToken) return;
 
       const now = new Date();
@@ -685,12 +788,11 @@ export default function SettingsPage() {
     return () => clearInterval(timerInterval);
   }, []);
 
-  // 🔒 استرجاع ثيم الموظف والمظهر فور تحميل الصفحة
+  // 🔒 استرجاع التوكن والثيم والمظهر فور تحميل الصفحة ومعالجة توكن الـ Authorization Code
   useEffect(() => {
     if (typeof window !== "undefined") {
       const employeeKey = userData?.id || user?.uid || userData?.username;
       
-      // استرجاع كومبو الألوان المحفوظ للموظف
       const savedColorTheme = (employeeKey && localStorage.getItem(`user_color_theme_${employeeKey}`)) || localStorage.getItem("app_color_theme");
       if (savedColorTheme) {
         setColorTheme(savedColorTheme);
@@ -698,30 +800,77 @@ export default function SettingsPage() {
         document.body.setAttribute("data-theme", savedColorTheme);
       }
 
-      if (window.location.hash && window.location.hash.includes("access_token=")) {
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const token = hashParams.get("access_token");
+  // 🔍 1. قراءة الـ Token المباشر المرتجع في الـ Hash للتطبيق المحلي (EXE / Localhost)
+      if (window.location.hash && window.location.hash.includes("access_token")) {
+        const hashParams = new URLSearchParams(window.location.hash.replace("#", "?"));
+        const accessToken = hashParams.get("access_token");
 
-        if (token) {
-          localStorage.setItem("google_drive_access_token", token);
+        if (accessToken) {
+          localStorage.setItem("google_drive_access_token", accessToken);
+          setIsDriveConnected(true);
+          
+          const ownerUid = getOwnerUid();
+          if (ownerUid) {
+            setDoc(doc(db, "users", ownerUid), { gdriveAccessToken: accessToken }, { merge: true });
+          }
+
+          // 🛑 إغلاق النافذة المنبثقة فوراً وإرسال إشارة للنافذة الرئيسية
           if (window.opener) {
-            window.opener.postMessage({ type: "GOOGLE_AUTH_SUCCESS", token }, "*");
+            try {
+              window.opener.postMessage({ type: "GOOGLE_DRIVE_SUCCESS", token: accessToken }, "*");
+            } catch (e) {}
             window.close();
             return;
           }
+
+          toast.success("تم ربط حساب Google Drive بنجاح ومزامنته مع التطبيق!");
+          window.history.replaceState(null, "", window.location.pathname);
         }
       }
 
+      // 📩 استقبال إشارة النجاح من النافذة المنبثقة لإنعاش الشاشة الرئيسية
       const handleAuthMessage = async (event: MessageEvent) => {
-        if (event.data?.type === "GOOGLE_AUTH_SUCCESS") {
-          const token = event.data.token;
-          localStorage.setItem("google_drive_access_token", token);
+        if (event.data?.type === "GOOGLE_DRIVE_SUCCESS") {
           setIsDriveConnected(true);
-          toast.success("تم تسجيل الدخول وربط Google Drive بنجاح!");
-          await handleDownloadFromGoogleDrive(token, false);
+          toast.success("تم ربط حساب Google Drive بنجاح ومزامنته مع التطبيق!");
+        }
+
+        // 📩 استقبال الـ Code المرتجع من نافذة الـ Callback المنبثقة لـ Vercel
+        if (event.data?.type === "GOOGLE_AUTHORIZATION_CODE") {
+          const authCode = event.data.code;
+          
+          try {
+            const res = await fetch("https://aqsatak-app.vercel.app/api/google/refresh", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                code: authCode, 
+                redirectUri: "https://aqsatak-app.vercel.app/api/google/callback" 
+              }),
+            });
+
+            const data = await res.json();
+            if (data.accessToken) {
+              localStorage.setItem("google_drive_access_token", data.accessToken);
+              setIsDriveConnected(true);
+
+              const ownerUid = getOwnerUid();
+              if (ownerUid) {
+                await setDoc(doc(db, "users", ownerUid), { 
+                  gdriveAccessToken: data.accessToken,
+                  gdriveRefreshToken: data.refreshToken || "" 
+                }, { merge: true });
+              }
+
+              toast.success("تم تسجيل الدخول وربط Google Drive بنجاح ومزامنته دائمياً!");
+            } else {
+              toast.error(data.error || "فشل استخراج التوكن من Google");
+            }
+          } catch (err) {
+            toast.error("حدث خطأ أثناء الاتصال بالخادم للتأكيد.");
+          }
         }
       };
-
       window.addEventListener("message", handleAuthMessage);
 
       const savedToken = localStorage.getItem("google_drive_access_token");
@@ -1090,54 +1239,30 @@ export default function SettingsPage() {
     }
   };
 
+  // 🔗 تحديث دالة التوثيق المباشر لـ Google OAuth Implicit Flow للتطبيق المحلي
   const handleConnectGoogleDrive = () => {
-    const CLIENT_ID = "42704920630-fh1e8kni3er2bhc6ejjj2kkhcgi01nvc.apps.googleusercontent.com"; 
-    const REDIRECT_URI = "https://aqsatak-app.vercel.app/settings";
-    const SCOPE = "https://www.googleapis.com/auth/drive.file";
+    const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "433305361858-8hs07vrqm9nl3rdr181ranfs3u6n6sk6.apps.googleusercontent.com"; 
+    // التوجيه التلقائي للمنفذ 39200 الخاص بتطبيق الـ EXE أو 3000 أثناء التطوير
+    const REDIRECT_URI = typeof window !== "undefined" && window.location.origin.includes("127.0.0.1:39200") 
+      ? "http://127.0.0.1:39200/settings" 
+      : (typeof window !== "undefined" ? window.location.origin + "/settings" : "http://127.0.0.1:39200/settings");
+      
+    const SCOPE = encodeURIComponent("https://www.googleapis.com/auth/drive.file");
 
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
       REDIRECT_URI
-    )}&response_type=token&scope=${encodeURIComponent(SCOPE)}`;
+    )}&response_type=token&scope=${SCOPE}`;
 
     const width = 500;
     const height = 650;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
-    const authWindow = window.open(
+    window.open(
       authUrl,
       "GoogleDriveAuth",
       `width=${width},height=${height},top=${top},left=${left}`
     );
-
-    const checkTokenInterval = setInterval(() => {
-      try {
-        if (!authWindow || authWindow.closed) {
-          clearInterval(checkTokenInterval);
-          return;
-        }
-
-        const currentUrl = authWindow.location.href;
-        if (currentUrl && currentUrl.includes("access_token=")) {
-          const hashString = currentUrl.split("#")[1];
-          if (hashString) {
-            const hashParams = new URLSearchParams(hashString);
-            const token = hashParams.get("access_token");
-
-            if (token) {
-              localStorage.setItem("google_drive_access_token", token);
-              setIsDriveConnected(true);
-              toast.success("تم تسجيل الدخول وربط Google Drive بنجاح!");
-
-              authWindow.close();
-              clearInterval(checkTokenInterval);
-
-              handleDownloadFromGoogleDrive(token, false);
-            }
-          }
-        }
-      } catch (e) {}
-    }, 300);
   };
 
   return (
@@ -1224,7 +1349,7 @@ export default function SettingsPage() {
             <h3 className="font-black text-sm text-foreground">حالة اشتراك الحساب المسجل</h3>
           </div>
           <span className="text-[10px] font-black px-3 py-1 rounded-xl bg-theme-primary/10 text-theme-primary border border-theme-primary/20">
-            {isOwner ? "وصول غير محدود" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية")}
+            {isSystemAdmin ? "وصول غير محدود" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية")}
           </span>
         </div>
 
@@ -1232,20 +1357,20 @@ export default function SettingsPage() {
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">نوع الباقة المخصصة</span>
             <span className="text-xs font-black text-foreground">
-              {isOwner ? "الباقة الإدارية الشاملة" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية (Basic)")}
+              {isSystemAdmin ? "الباقة الإدارية الشاملة" : (planNames[currentSub?.planType || "basic"] || "الباقة الأساسية (Basic)")}
             </span>
           </div>
 
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">فترة الاشتراك</span>
             <span className="text-xs font-black text-foreground">
-              {isOwner ? "دائم / غير محدود" : (currentSub?.period === "yearly" ? "سنوي" : "شهري")}
+              {isSystemAdmin ? "دائم / غير محدود" : (currentSub?.period === "yearly" ? "سنوي" : "شهري")}
             </span>
           </div>
 
           <div className="p-4 bg-secondary/30 rounded-2xl border border-border/50">
             <span className="text-[10px] text-muted-foreground font-bold block">المدة المتبقية</span>
-            {isOwner ? (
+            {isSystemAdmin ? (
               <span className="text-xs font-black text-purple-600 dark:text-purple-400 flex items-center gap-1">
                 <ShieldCheck className="w-4 h-4 text-purple-500" />
                 غير محدود (أدمن)
@@ -1262,16 +1387,50 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {!isOwner && daysLeft <= 7 && daysLeft > 0 && (
+        {!isSystemAdmin && daysLeft <= 7 && daysLeft > 0 && (
           <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold rounded-2xl flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>تنبيّه: اشتراكك الحسابي على وشك الانتهاء خلال {daysLeft} أيام!</span>
+            <span>تنبيّه: اشتراك المنظومة الحسابية على وشك الانتهاء خلال {daysLeft} أيام!</span>
           </div>
         )}
       </div>
 
       <form onSubmit={handleSaveSettings} className="space-y-4">
         
+        {/* 🔔 قسم تفعيل الإشعارات الفورية للمتصفح والدعم اللحظي */}
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between border-b border-border/60 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-theme-primary/10 text-theme-primary rounded-xl">
+                <Bell className="w-5 h-5 text-theme-primary" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-foreground">الإشعارات الفورية والتنبيهات (FCM)</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">تلقي تنبيهات لحظية على الجهاز فور تسديد قسط جديد أو تسجيل عملية دخول.</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleEnableNotifications}
+              disabled={loadingNotif || isNotifActive}
+              className="flex items-center gap-2 bg-theme-gradient text-white px-5 py-2.5 rounded-2xl text-xs font-bold transition-all shadow-md disabled:opacity-60 cursor-pointer"
+            >
+              {isNotifActive ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                  <span>الإشعارات مفعّلة</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="w-4 h-4" />
+                  <span>{loadingNotif ? "جاري التفعيل..." : "تفعيل الإشعارات الفورية"}</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* 🚀 1. قسم التحديثات الذكية */}
         <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
           <button
@@ -1310,7 +1469,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={handleCheckForUpdates}
                     disabled={updateStatus === "checking" || updateStatus === "downloading"}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-theme-gradient text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all disabled:opacity-50 shadow-sm shrink-0 cursor-pointer"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-theme-gradient text-white text-xs font-bold rounded-2xl hover:opacity-95 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
                   >
                     {updateStatus === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     <span>{updateStatus === "checking" ? "جاري الفحص..." : "فحص التحديثات الآن"}</span>
@@ -1387,7 +1546,7 @@ export default function SettingsPage() {
                 exit={{ opacity: 0, height: 0 }}
                 className="p-5 border-t border-border space-y-6"
               >
-                {/* 🎨 اختيار كومبو ألوان ثيمات v14 الاحترافية Mapped المخصصة لكل حساب */}
+                {/* 🎨 اختيار كومبو ألوان ثيمات v14 الاحترافية */}
                 <div className="space-y-3">
                   <div>
                     <h4 className="font-bold text-xs text-foreground flex items-center gap-2">
@@ -1395,7 +1554,7 @@ export default function SettingsPage() {
                       <span>اختيار ثيم كومبو الألوان v14 (Combo Color Themes):</span>
                     </h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      اختر ثيم الألوان المفضل لك، يحفظ تلقائياً لحساب الموظف دون التأثير على الوضع النهاري/الداكن الخاص بالسلايد بار.
+                      اختر ثيم الألوان المفضل لك، يحفظ تلقائياً لحساب الموظف دون التأثير على الوضع النهاري/الداكن.
                     </p>
                   </div>
 
@@ -1413,7 +1572,6 @@ export default function SettingsPage() {
                               : "text-foreground/70 hover:bg-secondary hover:text-theme-primary border-border"
                           }`}
                         >
-                          {/* 🎨 إظهار دائرة معاينة الكومبو بتدرج ألوان حقيقي (Gradient Preview) */}
                           <span 
                             className="w-6 h-6 rounded-full shrink-0 mt-0.5 border border-white/30 shadow-md transition-transform hover:scale-110" 
                             style={{ background: t.previewBg }}
@@ -1530,7 +1688,7 @@ export default function SettingsPage() {
           </AnimatePresence>
         </div>
 
-        {/* 🔒 3. قسم أمان حساب الشركة ورمز PIN السريع للمالك (يخفى تماماً إذا كان موظفاً) */}
+        {/* 🔒 3. قسم أمان حساب الشركة ورمز PIN السريع للمالك */}
         {!isEmployee && (
           <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
             <button
@@ -1611,7 +1769,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* 👥 4. قسم إضافة وتحديد صلاحيات الموظفين (يخفى تماماً إذا كان موظفاً) */}
+        {/* 👥 4. قسم إضافة وتحديد صلاحيات الموظفين */}
         {!isEmployee && (
           <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
             <button
@@ -2379,6 +2537,10 @@ export default function SettingsPage() {
                           type="button"
                           onClick={() => {
                             localStorage.removeItem("google_drive_access_token");
+                            const ownerUid = getOwnerUid();
+                            if (ownerUid) {
+                              setDoc(doc(db, "users", ownerUid), { gdriveAccessToken: "" }, { merge: true });
+                            }
                             setIsDriveConnected(false);
                             toast.info("تم إلغاء ربط Google Drive.");
                           }}

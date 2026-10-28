@@ -25,7 +25,12 @@ import {
   RotateCcw,
   History,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  Layers,
+  Filter,
+  CheckSquare,
+  Square,
+  BookOpen
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -111,8 +116,23 @@ export default function TreasuryPage() {
   const { theme } = useTheme();
   
   const [loading, setLoading] = useState(true);
-  const [transactions, setTransactions] = useState<TreasuryTransaction[]>([]);
+  const [transactions, setTransactions] = useState<(TreasuryTransaction & { installmentId?: string; bookPeriod?: string; bookPeriods?: string[] })[]>([]);
+  const [installmentsMap, setInstallmentsMap] = useState<Map<string, string>>(new Map());
   const [searchQuery, setSearchQuery] = useState("");
+
+  // 📖 حالات نظام فصل الدفاتر المماثلة للداشبورد والحسابات (تحديد متعدد)
+  const [isBookMode, setIsBookMode] = useState(false);
+  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(["monthly", "weekly", "daily"]);
+
+  // toggle التحديد المتعدد لأنواع الدفاتر في شريط التصفية العلوي
+  const togglePeriodFilter = (period: string) => {
+    if (selectedPeriods.includes(period)) {
+      if (selectedPeriods.length === 1) return; // منع إلغاء تحديد الكل
+      setSelectedPeriods(selectedPeriods.filter((p) => p !== period));
+    } else {
+      setSelectedPeriods([...selectedPeriods, period]);
+    }
+  };
 
   // 📅 حالات فلترة التاريخ والتصفير
   const [dateFilterType, setDateFilterType] = useState<"all" | "today" | "month" | "year" | "custom">("all");
@@ -172,11 +192,34 @@ export default function TreasuryPage() {
   const [modalType, setModalType] = useState<"inflow" | "outflow">("inflow");
   const [submitting, setSubmitting] = useState(false);
 
+  // 📝 نموذج الإدخال مع دعم التحديد المتعدد للدفاتر
   const [form, setForm] = useState({
     amount: "" as number | "",
     category: "capital_deposit" as TreasuryTransaction["category"],
     description: "",
+    bookPeriods: ["general"] as string[], // "general" أو دمج بين ["daily", "weekly", "monthly"]
   });
+
+  // toggle تحديد الدفاتر داخل المودال عند إضافة سيولة / مصاريف
+  const toggleFormBookPeriod = (period: string) => {
+    if (period === "general") {
+      setForm((prev) => ({ ...prev, bookPeriods: ["general"] }));
+      return;
+    }
+
+    setForm((prev) => {
+      let filtered = prev.bookPeriods.filter((p) => p !== "general");
+      if (filtered.includes(period)) {
+        filtered = filtered.filter((p) => p !== period);
+      } else {
+        filtered.push(period);
+      }
+      return {
+        ...prev,
+        bookPeriods: filtered.length === 0 ? ["general"] : filtered,
+      };
+    });
+  };
 
   // ➕ إضافة أصفار أو مبالغ سريعة للمدخلات
   const addAmount = (
@@ -224,14 +267,22 @@ export default function TreasuryPage() {
     try {
       const manualTx = await getUserTreasuryTransactions(ownerUid).catch(() => []);
       setTransactions(manualTx || []);
-      setLoading(false);
 
       const [payments, installments] = await Promise.all([
         getUserPayments(ownerUid).catch(() => []),
         getUserInstallments(ownerUid).catch(() => []),
       ]);
 
-      const autoTx: TreasuryTransaction[] = [];
+      // 🗺️ بناء خريطة بربط معرف العقد بأسلوب الدفتر الخاص به
+      const periodMap = new Map<string, string>();
+      (installments || []).forEach((inst: any) => {
+        if (inst.id) {
+          periodMap.set(inst.id, inst.paymentPeriod || "monthly");
+        }
+      });
+      setInstallmentsMap(periodMap);
+
+      const autoTx: (TreasuryTransaction & { installmentId?: string; bookPeriod?: string; bookPeriods?: string[] })[] = [];
 
       // 1. أقساط واصلة (+)
       (payments || []).forEach((p: any) => {
@@ -243,6 +294,7 @@ export default function TreasuryPage() {
           amount: Number(p.amount) || 0,
           description: `تسديد قسط: ${p.customerName || "عميل"} (${p.productName || "منتج"})`,
           date: p.paidAt || p.createdAt || p.date || new Date().toISOString(),
+          installmentId: p.installmentId,
         });
       });
 
@@ -259,6 +311,7 @@ export default function TreasuryPage() {
             amount: Number(inst.downPayment) || 0,
             description: `دفعة مقدمة عقد: ${inst.customerName} (${inst.productName})`,
             date: instDate,
+            installmentId: inst.id,
           });
         }
 
@@ -274,6 +327,7 @@ export default function TreasuryPage() {
             amount: cost,
             description: `تكلفة شراء وتجهيز مباشر: ${inst.productName || "بضاعة"} للعميل (${inst.customerName})`,
             date: instDate,
+            installmentId: inst.id,
           });
         }
       });
@@ -289,6 +343,7 @@ export default function TreasuryPage() {
       setTransactions(allTx);
     } catch (error) {
       console.error("خطأ في جلب بيانات الخزينة:", error);
+    } finally {
       setLoading(false);
     }
   }, [getOwnerUid]);
@@ -299,6 +354,23 @@ export default function TreasuryPage() {
   
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
+      // 📖 الفلترة بنظام الفصل عند تفعيله
+      if (isBookMode) {
+        if (tx.installmentId) {
+          const instPeriod = installmentsMap.get(tx.installmentId) || "monthly";
+          if (!selectedPeriods.includes(instPeriod)) return false;
+        } else {
+          const txPeriods = tx.bookPeriods && tx.bookPeriods.length > 0 
+            ? tx.bookPeriods 
+            : tx.bookPeriod ? [tx.bookPeriod] : ["general"];
+
+          if (!txPeriods.includes("general")) {
+            const hasMatchingPeriod = txPeriods.some((p) => selectedPeriods.includes(p));
+            if (!hasMatchingPeriod) return false;
+          }
+        }
+      }
+
       if (lastResetDate && !showArchivedBeforeReset) {
         const txDate = parseDateObj(tx.date);
         const resetDate = parseDateObj(lastResetDate);
@@ -340,7 +412,7 @@ export default function TreasuryPage() {
 
       return true;
     });
-  }, [transactions, searchQuery, dateFilterType, startDate, endDate, lastResetDate, showArchivedBeforeReset]);
+  }, [transactions, searchQuery, dateFilterType, startDate, endDate, lastResetDate, showArchivedBeforeReset, isBookMode, selectedPeriods, installmentsMap]);
 
   const summary = useMemo(() => {
     let totalInflow = 0;
@@ -364,6 +436,7 @@ export default function TreasuryPage() {
       amount: "",
       category: type === "inflow" ? "capital_deposit" : "expense",
       description: "",
+      bookPeriods: ["general"],
     });
     setIsModalOpen(true);
   };
@@ -385,7 +458,8 @@ export default function TreasuryPage() {
         amount: Number(form.amount),
         description: form.description.trim() || (modalType === "inflow" ? "إيداع رأس مال/سيولة" : "مصروفات تشغيلية"),
         date: new Date().toISOString(),
-      });
+        ...(form.bookPeriods.length > 0 ? { bookPeriods: form.bookPeriods, bookPeriod: form.bookPeriods[0] } : {}),
+      } as any);
 
       toast.success("تم تسجيل الحركة في الخزينة بنجاح!");
       setIsModalOpen(false);
@@ -398,7 +472,6 @@ export default function TreasuryPage() {
     }
   };
 
-  // 🎯 التعديل الرئيسي لحماية حركة شراء المخزن: التصفير الزمني دون مسح سجلات قاعدة البيانات
   const handleClearTreasuryBalance = async () => {
     const confirmClear = window.confirm(
       "تنبيه: هل أنت متأكد من تصفير رصيد الخزينة والصندوق والبدء بصندوق جديد من الآن؟\n\n(ملاحظة هامة: لن يتم مسح أي حركة أو بضاعة بالمخزن مطلقاً، فقط سيبدأ حساب الصندوق من صفر ابتداءً من هذه اللحظة)."
@@ -485,6 +558,20 @@ export default function TreasuryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* ⚡ زر تفعيل/إلغاء نظام الفصل */}
+          <button
+            type="button"
+            onClick={() => setIsBookMode(!isBookMode)}
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl font-black text-xs md:text-sm border transition-all shadow-sm cursor-pointer ${
+              isBookMode 
+                ? "bg-purple-600 text-white border-purple-500 shadow-purple-500/20" 
+                : "bg-secondary text-foreground hover:bg-secondary/80 border-border"
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>{isBookMode ? "إلغاء نظام الفصل" : "نظام فصل الدفاتر"}</span>
+          </button>
+
           <button
             onClick={handleClearTreasuryBalance}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-red-700 hover:bg-red-800 text-white border border-red-600 px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm transition-all shadow-md hover:-translate-y-0.5 active:scale-95 cursor-pointer"
@@ -512,7 +599,67 @@ export default function TreasuryPage() {
         </div>
       </div>
 
-      {/* ⚠️ تنبيه تصفير الصندوق في حال تم التصفير سابقاً */}
+      {/* 📖 شريط التحديد المتعدد */}
+      <AnimatePresence>
+        {isBookMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm print:hidden flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-black text-purple-400">
+                <Filter className="w-4 h-4" />
+                <span>حدد أنواع العقود المراد فصل سيولتها بالخزينة (تحديد متعدد):</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("daily")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("daily")
+                       ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("daily") ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود يومية</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("weekly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("weekly")
+                    ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("weekly") ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود أسبوعية</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("monthly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("monthly")
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("monthly") ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود شهرية </span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ⚠️ تنبيه تصفير الصندوق */}
       {lastResetDate && (
         <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm">
           <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold">
@@ -538,7 +685,7 @@ export default function TreasuryPage() {
         </div>
       )}
 
-      {/* 2. البطاقات المالية */}
+      {/* 2. البطاقات المالية المحدثة */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
         <div className={`p-5 md:p-6 rounded-3xl shadow-sm flex items-center justify-between transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl border ${
           isNegative 
@@ -555,7 +702,7 @@ export default function TreasuryPage() {
               {summary.netBalance.toLocaleString("en-US")} د.ع
             </p>
             <p className={`text-[11px] mt-1 font-bold ${isNegative ? "text-red-100" : "text-muted-foreground"}`}>
-              {isNegative ? "⚠️ يوجد عجز/نقص في الصندوق!" : "الرصيد المتوفر في الفترة المحددة"}
+              {isNegative ? "⚠️ يوجد عجز/نقص في الصندوق!" : isBookMode ? "الرصيد للدفاتر المحددة" : "الرصيد المتوفر في الفترة المحددة"}
             </p>
           </div>
           <div className={`p-4 rounded-2xl border ${
@@ -573,7 +720,9 @@ export default function TreasuryPage() {
             <p className="text-2xl md:text-3xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
               +{summary.totalInflow.toLocaleString("en-US")} د.ع
             </p>
-            <p className="text-[11px] text-muted-foreground mt-1 font-bold">أقساط + مقدمات + إيداعات</p>
+            <p className="text-[11px] text-muted-foreground mt-1 font-bold">
+              {isBookMode ? "مقبوضات العقود المحددة" : "أقساط + مقدمات + إيداعات"}
+            </p>
           </div>
           <div className="p-4 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-500/20">
             <TrendingUp className="w-7 h-7" />
@@ -586,7 +735,9 @@ export default function TreasuryPage() {
             <p className="text-2xl md:text-3xl font-black text-red-600 dark:text-red-400 font-mono">
               -{summary.totalOutflow.toLocaleString("en-US")} د.ع
             </p>
-            <p className="text-[11px] text-muted-foreground mt-1 font-bold">تجهيز سلع + نثريات + مسحوبات</p>
+            <p className="text-[11px] text-muted-foreground mt-1 font-bold">
+              {isBookMode ? "مصاريف وتكاليف المحددة" : "تجهيز سلع + نثريات + مسحوبات"}
+            </p>
           </div>
           <div className="p-4 bg-red-500/10 text-red-600 dark:text-red-400 rounded-2xl border border-red-500/20">
             <TrendingDown className="w-7 h-7" />
@@ -949,61 +1100,76 @@ export default function TreasuryPage() {
               <thead className="bg-secondary/40 text-muted-foreground border-b border-border text-xs">
                 <tr>
                   <th className="p-3.5 font-black">التاريخ والوقت</th>
-                  <th className="p-3.5 font-black">التصنيف</th>
+                  <th className="p-3.5 font-black">التصنيف والدفتر</th>
                   <th className="p-3.5 font-black">البيان / التفاصيل</th>
                   <th className="p-3.5 font-black">المبلغ</th>
                   <th className="p-3.5 font-black text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredTransactions.map((tx, idx) => (
-                  <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
-                    <td className="p-3.5 text-muted-foreground font-mono font-bold text-xs">
-                      {formatDateForDisplay(tx.date)}
-                    </td>
+                {filteredTransactions.map((tx, idx) => {
+                  const txPeriods = tx.bookPeriods && tx.bookPeriods.length > 0 
+                    ? tx.bookPeriods 
+                    : tx.bookPeriod ? [tx.bookPeriod] : ["general"];
 
-                    <td className="p-3.5">
-                      <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
-                        tx.type === "inflow"
-                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                          : "bg-secondary text-foreground border-border"
+                  return (
+                    <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
+                      <td className="p-3.5 text-muted-foreground font-mono font-bold text-xs">
+                        {formatDateForDisplay(tx.date)}
+                      </td>
+
+                      <td className="p-3.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-black border ${
+                            tx.type === "inflow"
+                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                              : "bg-secondary text-foreground border-border"
+                          }`}>
+                            {getCategoryLabel(tx.category)}
+                          </span>
+
+                          {/* شارات توضح نوع الدفاتر المحددة للحركات المخصصة */}
+                          {!txPeriods.includes("general") && txPeriods.map((p) => (
+                            <span key={p} className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                              {p === "daily" ? "⚡ يومي" : p === "weekly" ? "🗓️ أسبوعي" : "🏙️ شهري"}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+
+                      <td className="p-3.5 font-black text-foreground max-w-[280px] truncate">
+                        {tx.description}
+                      </td>
+
+                      <td className={`p-3.5 font-black text-sm md:text-base font-mono ${
+                        tx.type === "inflow" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
                       }`}>
-                        {getCategoryLabel(tx.category)}
-                      </span>
-                    </td>
+                        {tx.type === "inflow" ? "+" : "-"}{tx.amount.toLocaleString("en-US")} د.ع
+                      </td>
 
-                    <td className="p-3.5 font-black text-foreground max-w-[280px] truncate">
-                      {tx.description}
-                    </td>
-
-                    <td className={`p-3.5 font-black text-sm md:text-base font-mono ${
-                      tx.type === "inflow" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-                    }`}>
-                      {tx.type === "inflow" ? "+" : "-"}{tx.amount.toLocaleString("en-US")} د.ع
-                    </td>
-
-                    <td className="p-3.5 text-center">
-                      {!tx.id?.startsWith("pay_") && !tx.id?.startsWith("down_") && !tx.id?.startsWith("cost_") ? (
-                        <button
-                          onClick={() => handleDeleteTx(tx)}
-                          className="p-2 text-red-600 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
-                          title="حذف الحركة اليدوية"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground font-bold italic">آلي من العقود</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      <td className="p-3.5 text-center">
+                        {!tx.id?.startsWith("pay_") && !tx.id?.startsWith("down_") && !tx.id?.startsWith("cost_") ? (
+                          <button
+                            onClick={() => handleDeleteTx(tx)}
+                            className="p-2 text-red-600 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                            title="حذف الحركة اليدوية"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground font-bold italic">آلي من العقود</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* 5. النافذة المنبثقة */}
+      {/* 5. النافذة المنبثقة المحدثة بدعم التحديد المتعدد للدفاتر */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3 md:p-4 backdrop-blur-md">
           <div className="bg-card rounded-3xl w-full max-w-md p-5 md:p-6 shadow-2xl border border-border animate-in zoom-in-95 duration-200">
@@ -1040,6 +1206,72 @@ export default function TreasuryPage() {
                     </>
                   )}
                 </select>
+              </div>
+
+              {/* ⚡ التحديد المتعدد للدفاتر الخاصة بالحركة اليدوية (حرية الاختيار المباشر) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-purple-400" />
+                  <span>تخصيص لدفتر أو عدة دفاتر (تحديد متعدد):</span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {/* عامة لكافة الدفاتر */}
+                  <button
+                    type="button"
+                    onClick={() => toggleFormBookPeriod("general")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                      form.bookPeriods.includes("general")
+                        ? "bg-purple-600 text-white border-purple-500 shadow-sm"
+                        : "bg-secondary/40 text-muted-foreground border-border hover:border-purple-500/40"
+                    }`}
+                  >
+                    {form.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-white" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                    <span> عامة (كافة الدفاتر)</span>
+                  </button>
+
+                  {/* يومي */}
+                  <button
+                    type="button"
+                    onClick={() => toggleFormBookPeriod("daily")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                      form.bookPeriods.includes("daily") && !form.bookPeriods.includes("general")
+                           ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                    }`}
+                  >
+                    {form.bookPeriods.includes("daily") && !form.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-emerald-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                    <span> يومي</span>
+                  </button>
+
+                  {/* أسبوعي */}
+                  <button
+                    type="button"
+                    onClick={() => toggleFormBookPeriod("weekly")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                      form.bookPeriods.includes("weekly") && !form.bookPeriods.includes("general")
+                         ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                    }`}
+                  >
+                    {form.bookPeriods.includes("weekly") && !form.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-amber-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                    <span> أسبوعي</span>
+                  </button>
+
+                  {/* شهري */}
+                  <button
+                    type="button"
+                    onClick={() => toggleFormBookPeriod("monthly")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                      form.bookPeriods.includes("monthly") && !form.bookPeriods.includes("general")
+                        ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                    }`}
+                  >
+                    {form.bookPeriods.includes("monthly") && !form.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-purple-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                    <span> شهري</span>
+                  </button>
+                </div>
               </div>
 
               {/* المبلغ المستلم / المصروف */}

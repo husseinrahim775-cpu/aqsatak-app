@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, Suspense } from "react";
 import { 
   ArrowRight, Save, Calculator, User, ShieldCheck, Box, Loader2, Calendar, 
   Search, Clock, Package, Camera, FileText, Image as ImageIcon, Sparkles,
-  ChevronRight, ChevronLeft, ToggleLeft, ToggleRight
+  ChevronRight, ChevronLeft, ToggleLeft, ToggleRight, ScanText
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -73,6 +73,7 @@ function NewInstallmentContent() {
   const searchParams = useSearchParams();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isScanningId, setIsScanningId] = useState(false);
   const [existingCustomers, setExistingCustomers] = useState<ExistingCustomer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -114,6 +115,126 @@ function NewInstallmentContent() {
     startDate: new Date().toISOString().split("T")[0],
   });
 
+// 🔍 دالة المسح الضوئي المستهدفة الدقيقة لحقول الهوية العراقية الاربعة
+  const handleScanIDCard = async (file: File) => {
+    if (!file) return;
+
+    try {
+      setIsScanningId(true);
+      toast.info("جاري تحضير الصورة وتحليلها بالذكاء الاصطناعي...");
+
+      let base64Image = "";
+      try {
+        base64Image = await compressAndConvertToBase64(file);
+      } catch (imgErr) {
+        console.error("خطأ أثناء ضغط وتحويل الصورة:", imgErr);
+        toast.error("فشل في معالجة حجم الصورة، حاول اختيار صورة أخرى.");
+        setIsScanningId(false);
+        return;
+      }
+
+      const res = await fetch("/api/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64Image }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "خطأ غير معروف في السيرفر" }));
+        console.error("خطأ السيرفر أثناء الـ OCR:", res.status, errorData);
+        toast.error(`خطأ (${res.status}): ${errorData.error || "تعذر تحليل الصورة"}`);
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.text) {
+        const fullText: string = data.text;
+        console.log("النص الكامل المستخرج من OCR:\n", fullText);
+
+        const phoneMatch = fullText.match(/(07[3-9]\d{8})/);
+
+        // دالة تنظيف القيمة بعد الشارحة وإزالة الرموز والكردي
+        const cleanValue = (raw: string) => {
+          if (!raw) return "";
+          return raw
+            .split("\n")[0]
+            .replace(/[^\u0621-\u064A\s]/g, "") // الأحرف العربية والمسافات فقط
+            .replace(/\s+/g, " ")
+            .trim();
+        };
+
+        // دالة مرنة لجلب النص المقابل للعنوان
+        const getValue = (pattern: RegExp) => {
+          const match = fullText.match(pattern);
+          return match && match[1] ? cleanValue(match[1]) : "";
+        };
+
+        // 1. الاسم الأول
+        const firstName = getValue(/(?:الاسم|ناو)[^\n:]*:\s*([^\n\r]+)/i);
+
+        // 2. اسم الأب (يدعم الأب / الاب / لأب / باوك)
+        const fatherName = getValue(/(?:الاب|الأب|لأب|باوك)[^\n:]*:\s*([^\n\r]+)/i);
+
+        // 3. اسم الجد الأول (قبل اللقب أو الأم)
+        const grandFatherName = getValue(/(?:الجد|بابير|باپیر)[^\n:]*:\s*([^\n\r]+)/i);
+
+        // 4. اللقب
+        const surname = getValue(/(?:اللقب|نازناو)[^\n:]*:\s*([^\n\r]+)/i);
+
+        // تجميع الخانات الأربع
+        let assembledFullName = [firstName, fatherName, grandFatherName, surname]
+          .filter(Boolean)
+          .join(" ");
+
+        // خيار احتياطي لتنظيف وجلب القيم من الأسطر المحتوية على (:)
+        if (!fatherName || !assembledFullName.includes(fatherName)) {
+          const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
+          const extractedValues: string[] = [];
+
+          lines.forEach((line) => {
+            if (line.includes(":")) {
+              const parts = line.split(":");
+              const labelPart = parts[0];
+              const valPart = parts[1];
+
+              // استبعاد خطوط الأم والجنس والفصيلة والجد الثاني
+              if (labelPart && valPart && !/(?:الأم|الام|دايك|الجنس|فصيلة|خوێن)/i.test(labelPart)) {
+                const cleaned = cleanValue(valPart);
+                if (cleaned && !["ذكر", "انثى"].includes(cleaned)) {
+                  extractedValues.push(cleaned);
+                }
+              }
+            }
+          });
+
+          if (extractedValues.length >= 3) {
+            // أخذ أول 4 عناصر مستخرجة بعد الشارحة
+            assembledFullName = extractedValues.slice(0, 4).join(" ");
+          }
+        }
+
+        setFormData((prev) => ({
+          ...prev,
+          customerName: assembledFullName || prev.customerName,
+          phoneNumber: phoneMatch ? phoneMatch[0] : prev.phoneNumber,
+        }));
+
+        if (assembledFullName) {
+          toast.success(`تم استخراج الاسم: ${assembledFullName}`);
+        } else {
+          toast.warning("تمت قراءة المستند لكن تعذر تجميع الاسم تلقائياً.");
+        }
+      } else {
+        toast.warning("تم رفع الصورة ولكن لم يتم التعرف على نصوص واضحة.");
+      }
+    } catch (err: any) {
+      console.error("خطأ أثناء الاتصال بالمسح الضوئي:", err?.message || err);
+      toast.error("حدث خطأ في الاتصال بخدمة التحليل الذكي.");
+    } finally {
+      setIsScanningId(false);
+    }
+  };
   useEffect(() => {
     const priceParam = searchParams.get("price");
     const downParam = searchParams.get("down");
@@ -468,7 +589,6 @@ function NewInstallmentContent() {
           <div>
             <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight flex items-center gap-2">
               <span>إنشاء عقد وقسط جديد</span>
-              <Sparkles className="w-5 h-5 text-primary" />
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5 font-medium">أدخل بيانات العميل، الأوراق الثبوتية، والمنتج لتوثيق وحساب القسط.</p>
           </div>
@@ -617,32 +737,55 @@ function NewInstallmentContent() {
             )}
           </div>
 
+          {/* 📷 كارت المسح الضوئي الذكي بالذكاء الاصطناعي والمستندات الثبوتية */}
           <div className="md:col-span-2 bg-card/90 backdrop-blur-md border border-border rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-primary border-b border-border/60 pb-3">
-              <Camera className="w-5 h-5" />
-              <h2 className="font-extrabold text-base">المستندات والأوراق الثبوتية (اختياري)</h2>
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2 text-primary">
+                <Camera className="w-5 h-5" />
+                <h2 className="font-extrabold text-base">المستندات، الأوراق الثبوتية، والمسح الذكي</h2>
+              </div>
+              <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                <ScanText className="w-3.5 h-3.5" /> قراءة بالذكاء الاصطناعي (OCR)
+              </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-primary/50 transition-colors bg-secondary/20">
+              
+              {/* 1. هوية العميل والمسح الذكي */}
+              <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-primary/50 transition-colors bg-secondary/20 relative">
                 <ImageIcon className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الهوية / البطاقة الموحدة</span>
+                
                 <input
                   type="file"
                   accept="image/*"
                   id="idCard"
                   className="hidden"
-                  onChange={(e) => setIdCardFile(e.target.files?.[0] || null)}
+                  onChange={(e) => {
+                    const selected = e.target.files?.[0] || null;
+                    setIdCardFile(selected);
+                    if (selected) handleScanIDCard(selected);
+                  }}
                 />
-                <label
-                  htmlFor="idCard"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-primary/20 transition-colors shadow-sm"
-                >
-                  {idCardFile ? "تم اختيار الصورة ✓" : "اختر صورة الهوية"}
-                </label>
+
+                <div className="flex flex-col gap-1.5 items-center">
+                  <label
+                    htmlFor="idCard"
+                    className="w-full bg-primary/10 text-primary hover:bg-primary/20 text-xs px-3.5 py-2.5 rounded-xl font-bold cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    {isScanningId ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ScanText className="w-4 h-4" />
+                    )}
+                    <span>{isScanningId ? "جاري مسح الهوية..." : idCardFile ? "تم اختيار الصورة ✓" : "مسح وقراءة الهوية"}</span>
+                  </label>
+                </div>
+
                 {idCardFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{idCardFile.name}</p>}
               </div>
 
+              {/* 2. صورة العقد الورقي */}
               <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-primary/50 transition-colors bg-secondary/20">
                 <FileText className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة العقد الورقي الموقّع</span>
@@ -655,13 +798,14 @@ function NewInstallmentContent() {
                 />
                 <label
                   htmlFor="contractDoc"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-primary/20 transition-colors shadow-sm"
+                  className="inline-block bg-primary/10 text-primary text-xs px-3.5 py-2.5 rounded-xl font-bold cursor-pointer hover:bg-primary/20 transition-colors shadow-sm w-full"
                 >
                   {contractFile ? "تم اختيار العقد ✓" : "اختر صورة العقد"}
                 </label>
                 {contractFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{contractFile.name}</p>}
               </div>
 
+              {/* 3. صورة الزبون الشخصية */}
               <div className="border border-dashed border-border/80 rounded-2xl p-4 text-center space-y-2.5 hover:border-primary/50 transition-colors bg-secondary/20">
                 <User className="w-8 h-8 text-primary mx-auto" />
                 <span className="block text-xs font-bold text-foreground">صورة الزبون الشخصية</span>
@@ -674,12 +818,13 @@ function NewInstallmentContent() {
                 />
                 <label
                   htmlFor="personalPhoto"
-                  className="inline-block bg-primary/10 text-primary text-xs px-3.5 py-2 rounded-xl font-bold cursor-pointer hover:bg-primary/20 transition-colors shadow-sm"
+                  className="inline-block bg-primary/10 text-primary text-xs px-3.5 py-2.5 rounded-xl font-bold cursor-pointer hover:bg-primary/20 transition-colors shadow-sm w-full"
                 >
                   {personalPhotoFile ? "تم اختيار الصورة ✓" : "اختر صورة العميل"}
                 </label>
                 {personalPhotoFile && <p className="text-[10px] text-muted-foreground truncate font-mono">{personalPhotoFile.name}</p>}
               </div>
+
             </div>
           </div>
 

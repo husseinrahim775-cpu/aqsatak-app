@@ -1,16 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  GoogleAuthProvider, 
+  signInWithPopup 
+} from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../services/firebase";
-import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight, Sparkles } from "lucide-react";
+import { Loader2, Lock, Mail, ShieldCheck, LogOut, KeyRound, UserCheck, Shield, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SystemUser } from "../../services/firestore";
 
 export default function LoginPage() {
   const [isNewAccount, setIsNewAccount] = useState(false);
   const [isCompanyAuthenticated, setIsCompanyAuthenticated] = useState(false);
+
+  // 🎨 حالة الثيم المخصص المطبق على الواجهة
+  const [colorTheme, setColorTheme] = useState<string>("orange");
 
   // 1. بيانات دخول الشركة
   const [companyEmail, setCompanyEmail] = useState("");
@@ -28,13 +37,45 @@ export default function LoginPage() {
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [error, setError] = useState("");
 
+  // 🎨 استرجاع وتطبيق ثيم الألوان المخصص من localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedTheme = localStorage.getItem("app_color_theme") || "orange";
+      setColorTheme(savedTheme);
+      document.documentElement.setAttribute("data-theme", savedTheme);
+      document.body.setAttribute("data-theme", savedTheme);
+    }
+  }, []);
+
+  // 🎨 تحديث الثيم ديناميكياً عند تغيير اختيار الموظف من القائمة
+  const handleEmployeeSelectionChange = (empId: string) => {
+    setSelectedEmpId(empId);
+    setEmpPinCode("");
+    setError("");
+
+    if (typeof window !== "undefined") {
+      let targetTheme = "orange";
+
+      if (empId === "admin_owner") {
+        targetTheme = localStorage.getItem("app_color_theme") || "orange";
+      } else {
+        const emp = employees.find((e) => e.id === empId);
+        const empKey = emp?.id || emp?.username;
+        targetTheme = (empKey && localStorage.getItem(`user_color_theme_${empKey}`)) || localStorage.getItem("app_color_theme") || "orange";
+      }
+
+      setColorTheme(targetTheme);
+      document.documentElement.setAttribute("data-theme", targetTheme);
+      document.body.setAttribute("data-theme", targetTheme);
+    }
+  };
+
   // جلب بيانات الشركة وضمان وجود رمز PIN للأدمن
   const loadCompanyData = async (ownerUid: string) => {
     try {
       setLoadingEmployees(true);
       setError("");
 
-      // أ. جلب فحص رمز الأدمن المخصص
       const userDocRef = doc(db, "users", ownerUid);
       const userDocSnap = await getDoc(userDocRef);
 
@@ -50,13 +91,12 @@ export default function LoginPage() {
         await setDoc(userDocRef, {
           email: auth.currentUser?.email || "",
           adminPin: "1234",
-          status: "active",
+          status: "pending",
           createdAt: serverTimestamp(),
         }, { merge: true });
         setCompanyAdminPin("1234");
       }
 
-      // ب. جلب الموظفين التابعين لهذه الشركة حصراً عبر ownerUid
       const q = query(collection(db, "system_users"), where("ownerUid", "==", ownerUid));
       const snap = await getDocs(q);
 
@@ -67,7 +107,6 @@ export default function LoginPage() {
 
       setEmployees(list);
 
-      // 🎯 إذا كان الحساب جديداً أو بدون موظفين، ادخل مباشرة للوحة التحكم!
       if (list.length === 0) {
         const sessionData = JSON.stringify({ role: "admin", name: "مدير النظام" });
         sessionStorage.setItem("active_session", sessionData);
@@ -88,6 +127,14 @@ export default function LoginPage() {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
+        const userDocSnap = await getDoc(doc(db, "users", user.uid));
+        if (userDocSnap.exists()) {
+          const status = userDocSnap.data()?.status;
+          if (status === "pending" || status === "suspended" || status === "rejected") {
+            setIsCompanyAuthenticated(false);
+            return;
+          }
+        }
         setIsCompanyAuthenticated(true);
         await loadCompanyData(user.uid);
       } else {
@@ -100,7 +147,60 @@ export default function LoginPage() {
     return () => unsubscribe();
   }, []);
 
-  // تسجيل دخول حساب الشركة
+  // 🌐 تسجيل الدخول / إنشاء حساب عن طريق Google
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError("");
+
+    sessionStorage.removeItem("active_session");
+    localStorage.removeItem("current_employee");
+
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      const userDocRef = doc(db, "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+
+      // 1. حساب جديد يتم إرساله للانتظار
+      if (!userDocSnap.exists()) {
+        await setDoc(userDocRef, {
+          email: user.email,
+          status: "pending",
+          role: "user",
+          adminPin: "1234",
+          createdAt: serverTimestamp(),
+        });
+
+        window.location.href = "/pending";
+        return;
+      }
+
+      // 2. حساب قديم يفحص حظر أو انتظار التفعيل
+      const userData = userDocSnap.data();
+      if (userData?.status === "pending" || userData?.status === "suspended" || userData?.status === "rejected") {
+        await signOut(auth);
+        if (userData.status === "pending") {
+          window.location.href = "/pending";
+        } else {
+          setError("حساب الشركة موقوف أو معطل، يرجى التواصل مع الدعم.");
+        }
+        return;
+      }
+
+      setIsCompanyAuthenticated(true);
+      handleEmployeeSelectionChange("admin_owner");
+      await loadCompanyData(user.uid);
+    } catch (err: any) {
+      console.error("خطأ تسجيل غوغل:", err);
+      setError("حدث خطأ أثناء الاتصال بحساب Google.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // تسجيل دخول حساب الشركة العادي
   const handleCompanyLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -146,8 +246,7 @@ export default function LoginPage() {
         }
 
         setIsCompanyAuthenticated(true);
-        setSelectedEmpId("admin_owner");
-        setEmpPinCode("");
+        handleEmployeeSelectionChange("admin_owner");
         await loadCompanyData(user.uid);
       }
     } catch (err: any) {
@@ -168,7 +267,6 @@ export default function LoginPage() {
       return;
     }
 
-    // 1. دخول مدير النظام (المالك)
     if (selectedEmpId === "admin_owner") {
       const validPin = companyAdminPin || "1234";
       if (empPinCode.trim() !== validPin) {
@@ -184,7 +282,6 @@ export default function LoginPage() {
       return;
     }
 
-    // 2. دخول موظف
     const matchedEmp = employees.find((emp) => emp.id === selectedEmpId);
 
     if (!matchedEmp) {
@@ -196,6 +293,10 @@ export default function LoginPage() {
       setError("الرمز السرّي الخاص بالموظف غير صحيح!");
       return;
     }
+
+    const empKey = matchedEmp.id || matchedEmp.username;
+    const empTheme = (empKey && localStorage.getItem(`user_color_theme_${empKey}`)) || localStorage.getItem("app_color_theme") || "orange";
+    localStorage.setItem("app_color_theme", empTheme);
 
     const empData = JSON.stringify(matchedEmp);
     sessionStorage.setItem("active_session", empData);
@@ -218,17 +319,14 @@ export default function LoginPage() {
     localStorage.removeItem("active_session");
     localStorage.removeItem("current_employee");
     setIsCompanyAuthenticated(false);
-    setSelectedEmpId("admin_owner");
-    setEmpPinCode("");
-    setError("");
+    handleEmployeeSelectionChange("admin_owner");
   };
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background p-4 relative overflow-hidden select-none dir-rtl font-sans">
       
-      {/* خلفية الإضاءة الدائرية العصرية  */}
-      <div className="absolute top-1/4 right-1/2 translate-x-1/2 w-[500px] h-[500px] bg-orange-500/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[400px] bg-red-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/4 right-1/2 translate-x-1/2 w-[500px] h-[500px] bg-theme-primary/15 rounded-full blur-[140px] pointer-events-none transition-all duration-500" />
+      <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[400px] bg-theme-primary/10 rounded-full blur-[140px] pointer-events-none transition-all duration-500" />
 
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -236,14 +334,15 @@ export default function LoginPage() {
         transition={{ duration: 0.35, ease: "easeOut" }}
         className="w-full max-w-md bg-card/90 backdrop-blur-2xl border border-border/80 rounded-3xl shadow-2xl p-6 md:p-8 space-y-6 relative z-10"
       >
-        {/* الترويسة والشعار */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-gradient-to-tr from-orange-500 to-red-500 shadow-lg shadow-orange-500/25 mb-1">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-theme-gradient shadow-lg shadow-primary/25 mb-1 transition-all duration-300">
             <Shield className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-black tracking-tight text-foreground">منظومة أقساطك</h1>
           <p className="text-xs text-muted-foreground font-medium">
-            {!isCompanyAuthenticated ? "تسجيل دخول المنظومة الماليّة " : "اختر المستخدم وأدخل رمز الأمان للبدء"}
+            {!isCompanyAuthenticated 
+              ? (isNewAccount ? "إنشاء حساب شركة جديد" : "تسجيل دخول المنظومة الماليّة") 
+              : "اختر المستخدم وأدخل رمز الأمان للبدء"}
           </p>
         </div>
 
@@ -261,62 +360,104 @@ export default function LoginPage() {
         </AnimatePresence>
 
         {!isCompanyAuthenticated ? (
-          <form onSubmit={handleCompanyLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground">البريد الإلكتروني للشركة</label>
-              <div className="relative">
-                <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  type="email"
-                  required
-                  placeholder="admin@company.com"
-                  className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
-                  value={companyEmail}
-                  onChange={(e) => setCompanyEmail(e.target.value)}
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground">كلمة السر الخاصة بالشركة</label>
-              <div className="relative">
-                <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
-                  value={companyPassword}
-                  onChange={(e) => setCompanyPassword(e.target.value)}
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
+          <div className="space-y-4">
+            
+            {/* 🔴 زر تسجيل الدخول / إنشاء الحساب الديناميكي لـ غوغل */}
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              type="submit"
+              type="button"
+              onClick={handleGoogleLogin}
               disabled={loading}
-              className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-orange-500/20 flex justify-center items-center gap-2 disabled:opacity-50"
+              className="w-full bg-background hover:bg-secondary border border-border text-foreground py-3.5 rounded-2xl font-bold text-xs transition-all shadow-sm flex justify-center items-center gap-3 cursor-pointer disabled:opacity-50"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isNewAccount ? "إنشاء حساب شركة جديد" : "ربط المنظومة الماليّة")}
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                />
+              </svg>
+              <span>
+                {isNewAccount ? "إنشاء حساب بواسطة Google" : "تسجيل الدخول بواسطة Google"}
+              </span>
             </motion.button>
 
-            <div className="text-center text-xs pt-1">
-              <button
-                type="button"
-                onClick={() => { setIsNewAccount(!isNewAccount); setError(""); }}
-                className="text-muted-foreground hover:text-foreground font-bold transition-colors"
-              >
-                {isNewAccount ? "لديك حساب شركة بالفعل؟ تسجيل الدخول" : "أنشئ حساب شركة جديد للمكتب"}
-              </button>
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-border"></div>
+              <span className="flex-shrink mx-4 text-[11px] text-muted-foreground font-bold">
+                {isNewAccount ? "أو التسجيل عن طريق البريد الإلكتروني" : "أو عن طريق البريد الإلكتروني"}
+              </span>
+              <div className="flex-grow border-t border-border"></div>
             </div>
-          </form>
+
+            <form onSubmit={handleCompanyLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground">البريد الإلكتروني للشركة</label>
+                <div className="relative">
+                  <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="admin@company.com"
+                    className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    value={companyEmail}
+                    onChange={(e) => setCompanyEmail(e.target.value)}
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground">كلمة السر الخاصة بالشركة</label>
+                <div className="relative">
+                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    value={companyPassword}
+                    onChange={(e) => setCompanyPassword(e.target.value)}
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="submit"
+                disabled={loading}
+                className="w-full bg-theme-gradient hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-primary/20 flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isNewAccount ? "إنشاء حساب شركة جديد" : "ربط المنظومة الماليّة")}
+              </motion.button>
+
+              <div className="text-center text-xs pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setIsNewAccount(!isNewAccount); setError(""); }}
+                  className="text-muted-foreground hover:text-foreground font-bold transition-colors cursor-pointer"
+                >
+                  {isNewAccount ? "لديك حساب شركة بالفعل؟ تسجيل الدخول" : "أنشئ حساب شركة جديد للمكتب"}
+                </button>
+              </div>
+            </form>
+          </div>
         ) : (
           <form onSubmit={handleEmployeeLogin} className="space-y-4">
-            
             <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-500" />
@@ -325,7 +466,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={handleSwitchCompany}
-                className="text-[11px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1 transition-colors"
+                className="text-[11px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>تغيير الشركة</span>
@@ -333,8 +474,8 @@ export default function LoginPage() {
             </div>
 
             {loadingEmployees ? (
-              <div className="py-8 text-center text-orange-500 space-y-2">
-                <Loader2 className="w-6 h-6 animate-spin mx-auto text-orange-500" />
+              <div className="py-8 text-center text-theme-primary space-y-2">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto text-theme-primary" />
                 <p className="text-xs text-muted-foreground font-bold">جاري جلب بيانات الموظفين...</p>
               </div>
             ) : (
@@ -345,12 +486,8 @@ export default function LoginPage() {
                     <UserCheck className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     <select
                       value={selectedEmpId}
-                      onChange={(e) => {
-                        setSelectedEmpId(e.target.value);
-                        setEmpPinCode("");
-                        setError("");
-                      }}
-                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/50 cursor-pointer"
+                      onChange={(e) => handleEmployeeSelectionChange(e.target.value)}
+                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground text-xs font-bold outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
                     >
                       <option value="admin_owner">🔑 مدير النظام (المالك)</option>
                       {employees.map((emp) => (
@@ -372,7 +509,7 @@ export default function LoginPage() {
                       type="password"
                       required
                       placeholder={selectedEmpId === "admin_owner" ? "أدخل رمز PIN المالك..." : "أدخل الرمز السرّي..."}
-                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
+                      className="w-full pr-11 pl-4 py-3.5 rounded-2xl border border-border bg-background text-foreground placeholder:text-muted-foreground/50 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                       value={empPinCode}
                       onChange={(e) => setEmpPinCode(e.target.value)}
                       dir="ltr"
@@ -385,7 +522,7 @@ export default function LoginPage() {
                   whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-orange-500/20 flex justify-center items-center gap-2 disabled:opacity-50 mt-2"
+                  className="w-full bg-theme-gradient hover:opacity-95 text-white py-3.5 rounded-2xl font-bold text-xs transition-all shadow-lg shadow-primary/20 flex justify-center items-center gap-2 disabled:opacity-50 mt-2 cursor-pointer"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                     <>

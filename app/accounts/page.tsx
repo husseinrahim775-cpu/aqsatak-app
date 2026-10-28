@@ -32,7 +32,9 @@ import {
   CreditCard,
   QrCode,
   Layers,
-  Filter
+  Filter,
+  CheckSquare,
+  Square
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -83,6 +85,20 @@ export default function AccountsPage() {
   const [installments, setInstallments] = useState<InstallmentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // 📖 حالات نظام فصل الدفاتر المماثلة للداشبورد (تحديد متعدد)
+  const [isBookMode, setIsBookMode] = useState(false);
+  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(["monthly", "weekly", "daily"]);
+
+  // toggle التحديد المتعدد لأنواع الدفاتر
+  const togglePeriodFilter = (period: string) => {
+    if (selectedPeriods.includes(period)) {
+      if (selectedPeriods.length === 1) return; // منع إلغاء تحديد الكل
+      setSelectedPeriods(selectedPeriods.filter((p) => p !== period));
+    } else {
+      setSelectedPeriods([...selectedPeriods, period]);
+    }
+  };
 
   // 🔒 فحص الصلاحيات الأمنية
   const isEmployee = userData?.role === "employee";
@@ -208,6 +224,36 @@ export default function AccountsPage() {
     fetchData();
   }, [fetchData]);
 
+  // 🗺️ خريطة بربط معرف العقد بنوع الفترة (يومي / أسبوعي / شهري)
+  const installmentPeriodMap = useMemo(() => {
+    const map = new Map<string, string>();
+    installments.forEach((inst) => {
+      if (inst.id) {
+        map.set(inst.id, inst.paymentPeriod || "monthly");
+      }
+    });
+    return map;
+  }, [installments]);
+
+  // 📊 تصفية قائمة العقود حسب نظام الفصل المختار
+  const filteredInstallments = useMemo(() => {
+    if (!isBookMode) return installments;
+    return installments.filter((inst) => {
+      const period = inst.paymentPeriod || "monthly";
+      return selectedPeriods.includes(period);
+    });
+  }, [installments, isBookMode, selectedPeriods]);
+
+  // 📊 تصفية قائمة كافة المقبوضات حسب نظام الفصل المختار
+  const filteredBookPayments = useMemo(() => {
+    if (!isBookMode) return payments;
+    return payments.filter((p) => {
+      if (!p.installmentId) return true;
+      const instPeriod = installmentPeriodMap.get(p.installmentId) || "monthly";
+      return selectedPeriods.includes(instPeriod);
+    });
+  }, [payments, isBookMode, selectedPeriods, installmentPeriodMap]);
+
   const handleInstallmentSelection = useCallback((id: string, amountOverride?: number, dateOverride?: string) => {
     setSelectedInstallmentId(id);
     const inst = installments.find((i) => i.id === id);
@@ -255,17 +301,18 @@ export default function AccountsPage() {
     }
   }, [searchParams, loading, installments, handleInstallmentSelection]);
 
+  // 🧮 حساب الكارتات متفاعلة مع نظام فصل الدفاتر
   const totalCollected = useMemo(() => {
-    return payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  }, [payments]);
+    return filteredBookPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  }, [filteredBookPayments]);
 
   const totalExpectedProfit = useMemo(() => {
-    return installments.reduce((sum, i) => sum + (i.totalProfit || 0), 0);
-  }, [installments]);
+    return filteredInstallments.reduce((sum, i) => sum + (i.totalProfit || 0), 0);
+  }, [filteredInstallments]);
 
   const totalRemainingDue = useMemo(() => {
-    return installments.reduce((sum, i) => sum + (i.totalDue || 0), 0);
-  }, [installments]);
+    return filteredInstallments.reduce((sum, i) => sum + (i.totalDue || 0), 0);
+  }, [filteredInstallments]);
 
   const filteredPayments = useMemo(() => {
     const today = new Date();
@@ -276,7 +323,7 @@ export default function AccountsPage() {
 
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-    let result = payments.filter((p) => {
+    let result = filteredBookPayments.filter((p) => {
       const matchSearch =
         (p.customerName && p.customerName.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (p.productName && p.productName.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -313,19 +360,19 @@ export default function AccountsPage() {
       const timeB = b.paidAt ? new Date(b.paidAt).getTime() : 0;
       return timeB - timeA;
     });
-  }, [payments, searchQuery, dateFilter, filterSingleDate, filterRangeStart, filterRangeEnd]);
+  }, [filteredBookPayments, searchQuery, dateFilter, filterSingleDate, filterRangeStart, filterRangeEnd]);
 
   const currentFilteredSum = useMemo(() => {
     return filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
   }, [filteredPayments]);
 
   const filteredInstallmentsForSearch = useMemo(() => {
-    if (!customerSearchTerm) return installments;
-    return installments.filter(inst => 
+    if (!customerSearchTerm) return filteredInstallments;
+    return filteredInstallments.filter(inst => 
       inst.customerName?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
       inst.productName?.toLowerCase().includes(customerSearchTerm.toLowerCase())
     );
-  }, [installments, customerSearchTerm]);
+  }, [filteredInstallments, customerSearchTerm]);
 
   const selectedInstallment = useMemo(() => {
     return installments.find((i) => i.id === selectedInstallmentId);
@@ -639,13 +686,94 @@ export default function AccountsPage() {
           <h1 className="text-2xl md:text-3xl font-black text-foreground tracking-tight">الحسابات والمدفوعات 💳</h1>
           <p className="text-xs text-muted-foreground font-bold mt-1">سجل الدفعات المستلمة والموقف المالي العام للحساب.</p>
         </div>
-        <button
-          onClick={() => handleOpenModal()}
-className="flex justify-center w-full sm:w-auto items-center gap-2 bg-theme-gradient text-white font-bold text-xs rounded-2xl py-3 px-5 hover:opacity-95 transition-all shadow-md shadow-primary/20 cursor-pointer"        >
-          <Plus className="w-4 h-4 md:w-5 md:h-5" />
-          <span>تسجيل دفعة جديدة</span>
-        </button>
+
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          {/* ⚡ زر تفعيل/إلغاء نظام الفصل مثل الداشبورد تماماً */}
+          <button
+            type="button"
+            onClick={() => setIsBookMode(!isBookMode)}
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-bold text-xs md:text-sm border transition-all shadow-sm cursor-pointer ${
+              isBookMode 
+                ? "bg-purple-600 text-white border-purple-500 shadow-purple-500/20" 
+                : "bg-secondary text-foreground hover:bg-secondary/80 border-border"
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>{isBookMode ? "إلغاء نظام الفصل" : "نظام فصل الدفاتر"}</span>
+          </button>
+
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex-1 sm:flex-none flex justify-center items-center gap-2 bg-theme-gradient text-white font-bold text-xs md:text-sm rounded-2xl py-3 px-5 hover:opacity-95 transition-all shadow-md shadow-primary/20 cursor-pointer"
+          >
+            <Plus className="w-4 h-4 md:w-5 md:h-5" />
+            <span>تسجيل دفعة جديدة</span>
+          </button>
+        </div>
       </div>
+
+      {/* 📖 شريط التحديد المتعدد (الخاص بالداشبورد) يظهر فقط عند الضغط على زر نظام فصل الدفاتر */}
+      <AnimatePresence>
+        {isBookMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm print:hidden flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-black text-purple-400">
+                <Filter className="w-4 h-4" />
+                <span>حدد أنواع العقود المراد إظهار مدفوعاتها وإحصائياتها (تحديد متعدد):</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/*  عقود يومية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("daily")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("daily")
+                       ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("daily") ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود يومية</span>
+                </button>
+
+                {/*  عقود أسبوعية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("weekly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("weekly")
+                     ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("weekly") ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود أسبوعية</span>
+                </button>
+
+                {/*  عقود شهرية */}
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("monthly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("monthly")
+                     ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("monthly") ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود شهرية </span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <motion.div 
@@ -658,7 +786,7 @@ className="flex justify-center w-full sm:w-auto items-center gap-2 bg-theme-grad
               <AnimatedNumber value={totalCollected} suffix="د.ع" />
             </h2>
             <span className="inline-block text-[10px] font-extrabold px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-              {payments.length} دفعة مستلمة
+              {filteredBookPayments.length} دفعة مستلمة
             </span>
           </div>
           <div className="p-3.5 rounded-2xl bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 shadow-sm shrink-0">
@@ -676,7 +804,7 @@ className="flex justify-center w-full sm:w-auto items-center gap-2 bg-theme-grad
               +<AnimatedNumber value={totalExpectedProfit} suffix="د.ع" />
             </h2>
             <span className="inline-block text-[10px] font-extrabold px-2.5 py-1 rounded-xl bg-blue-500/10 text-blue-600 border border-blue-500/20">
-              من كافة العقود
+              {isBookMode ? "للعقود المحددة" : "من كافة العقود"}
             </span>
           </div>
           <div className="p-3.5 rounded-2xl bg-blue-500/10 text-blue-600 border border-blue-500/20 shadow-sm shrink-0">
@@ -694,7 +822,7 @@ className="flex justify-center w-full sm:w-auto items-center gap-2 bg-theme-grad
               <AnimatedNumber value={totalRemainingDue} suffix="د.ع" />
             </h2>
             <span className="inline-block text-[10px] font-extrabold px-2.5 py-1 rounded-xl bg-primary/10 text-primary border border-primary/20">
-              إجمالي ذمم الأقساط النشطة
+              {isBookMode ? "ذمم العقود المحددة" : "إجمالي ذمم الأقساط النشطة"}
             </span>
           </div>
           <div className="p-3.5 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-sm shrink-0">
@@ -739,7 +867,7 @@ className="flex justify-center w-full sm:w-auto items-center gap-2 bg-theme-grad
                 dateFilter === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              الكل ({payments.length})
+              الكل ({filteredBookPayments.length})
             </button>
             
             <button

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Package, Plus, User, ExternalLink, X, Edit3, Trash2, Tag, Calendar, Sparkles } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Package, Plus, User, ExternalLink, X, Edit3, Trash2, Tag, Calendar, Sparkles, Layers, Filter, CheckSquare, Square, BookOpen } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../components/AuthProvider";
@@ -58,8 +58,21 @@ export default function InventoryPage() {
   const { theme } = useTheme();
 
   const [activeTab, setActiveTab] = useState<"available" | "sold">("available");
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [items, setItems] = useState<(InventoryItem & { bookPeriod?: string; bookPeriods?: string[] })[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // 📖 حالات نظام فصل الدفاتر بالمخزن
+  const [isBookMode, setIsBookMode] = useState(false);
+  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(["monthly", "weekly", "daily"]);
+
+  const togglePeriodFilter = (period: string) => {
+    if (selectedPeriods.includes(period)) {
+      if (selectedPeriods.length === 1) return;
+      setSelectedPeriods(selectedPeriods.filter((p) => p !== period));
+    } else {
+      setSelectedPeriods([...selectedPeriods, period]);
+    }
+  };
 
   // حالة نافذة الإضافة والتعديل
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -73,7 +86,28 @@ export default function InventoryPage() {
     chassisNumber: "",
     color: "",
     modelYear: "",
+    bookPeriods: ["general"] as string[], // "general" أو ["daily", "weekly", "monthly"]
   });
+
+  const toggleFormBookPeriod = (period: string) => {
+    if (period === "general") {
+      setFormData((prev) => ({ ...prev, bookPeriods: ["general"] }));
+      return;
+    }
+
+    setFormData((prev) => {
+      let filtered = prev.bookPeriods.filter((p) => p !== "general");
+      if (filtered.includes(period)) {
+        filtered = filtered.filter((p) => p !== period);
+      } else {
+        filtered.push(period);
+      }
+      return {
+        ...prev,
+        bookPeriods: filtered.length === 0 ? ["general"] : filtered,
+      };
+    });
+  };
 
   // ➕ إضافة أصفار أو مبالغ سريعة للمدخلات
   const addAmount = (
@@ -120,8 +154,22 @@ export default function InventoryPage() {
     loadData();
   }, [activeTab]);
 
+  // فلترة المواد حسب نظام فصل الدفاتر
+  const filteredItems = useMemo(() => {
+    if (!isBookMode) return items;
+
+    return items.filter((item) => {
+      const itemPeriods = item.bookPeriods && item.bookPeriods.length > 0 
+        ? item.bookPeriods 
+        : item.bookPeriod ? [item.bookPeriod] : ["general"];
+
+      if (itemPeriods.includes("general")) return true;
+      return itemPeriods.some((p) => selectedPeriods.includes(p));
+    });
+  }, [items, isBookMode, selectedPeriods]);
+
   // فتح نافذة التعديل مع تعبئة البيانات القديمة
-  const handleOpenEdit = (item: InventoryItem) => {
+  const handleOpenEdit = (item: InventoryItem & { bookPeriod?: string; bookPeriods?: string[] }) => {
     setEditingItem(item);
     setFormData({
       title: item.title || "",
@@ -131,6 +179,9 @@ export default function InventoryPage() {
       chassisNumber: item.specs?.chassisNumber || "",
       color: item.specs?.color || "",
       modelYear: item.specs?.modelYear || "",
+      bookPeriods: item.bookPeriods && item.bookPeriods.length > 0 
+        ? item.bookPeriods 
+        : item.bookPeriod ? [item.bookPeriod] : ["general"],
     });
     setIsAddOpen(true);
   };
@@ -139,10 +190,19 @@ export default function InventoryPage() {
   const handleCloseModal = () => {
     setIsAddOpen(false);
     setEditingItem(null);
-    setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
+    setFormData({ 
+      title: "", 
+      category: "هواتف", 
+      costPrice: "", 
+      price: "", 
+      chassisNumber: "", 
+      color: "", 
+      modelYear: "", 
+      bookPeriods: ["general"] 
+    });
   };
 
-  // دالة الحفظ مع الربط التلقائي بالخزينة (مرة واحدة فقط عند إضافة السلعة)
+  // دالة الحفظ مع الربط التلقائي بالخزينة حسب الدفتر
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.price) {
@@ -164,20 +224,22 @@ export default function InventoryPage() {
           color: formData.color,
           modelYear: formData.modelYear,
         },
+        bookPeriods: formData.bookPeriods,
+        bookPeriod: formData.bookPeriods[0] || "general",
       };
 
       if (editingItem && editingItem.id) {
         // تعديل منتج قائم
-        await updateInventoryItem(editingItem.id, payload);
+        await updateInventoryItem(editingItem.id, payload as any);
         toast.success("تم تعديل بيانات المنتج بنجاح!");
       } else {
         // 1. إضافة منتج جديد للمخزن
         await addInventoryItem({
           ...payload,
           status: "available",
-        });
+        } as any);
 
-        // 2. ⚡ ربط تلقائي بالخزينة: تسجيل حركة شراء بضاعة ومخزن المرة الأولى فقط عند إضافة المادة للمخزن
+        // 2. ⚡ ربط تلقائي بالخزينة: تسجيل حركة شراء بضاعة ومخزن مع الدفتر المحدد
         if (costPriceNum > 0) {
           const ownerUid = getOwnerUid();
           if (ownerUid) {
@@ -188,7 +250,9 @@ export default function InventoryPage() {
               amount: costPriceNum,
               description: `شراء بضاعة ومخزن: ${formData.title} ${formData.chassisNumber ? `(سيريال: ${formData.chassisNumber})` : ""}`,
               date: new Date().toISOString(),
-            });
+              bookPeriods: formData.bookPeriods,
+              bookPeriod: formData.bookPeriods[0] || "general",
+            } as any);
           }
         }
         toast.success("تمت إضافة المنتج للمخزن وتسجيل العملية بالخزينة بنجاح!");
@@ -235,12 +299,35 @@ export default function InventoryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* ⚡ زر تفعيل/إلغاء نظام الفصل بالمخزن */}
+          <button
+            type="button"
+            onClick={() => setIsBookMode(!isBookMode)}
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs md:text-sm border transition-all shadow-sm cursor-pointer ${
+              isBookMode 
+                ? "bg-purple-600 text-white border-purple-500 shadow-purple-500/20" 
+                : "bg-secondary text-foreground hover:bg-secondary/80 border-border"
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>{isBookMode ? "إلغاء نظام الفصل" : "نظام فصل الدفاتر"}</span>
+          </button>
+
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => {
               setEditingItem(null);
-              setFormData({ title: "", category: "هواتف", costPrice: "", price: "", chassisNumber: "", color: "", modelYear: "" });
+              setFormData({ 
+                title: "", 
+                category: "هواتف", 
+                costPrice: "", 
+                price: "", 
+                chassisNumber: "", 
+                color: "", 
+                modelYear: "", 
+                bookPeriods: ["general"] 
+              });
               setIsAddOpen(true);
             }}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-5 py-3 rounded-2xl font-black text-xs md:text-sm shadow-md shadow-primary/20 hover:opacity-95 transition-opacity cursor-pointer"
@@ -270,102 +357,177 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {/* 📖 شريط التحديد المتعدد لفلترة بضائع المخزن */}
+      <AnimatePresence>
+        {isBookMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-card/90 backdrop-blur-md p-4 rounded-3xl border border-border shadow-sm print:hidden flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-black text-purple-400">
+                <Filter className="w-4 h-4" />
+                <span>عرض منتجات الدفاتر المحددة:</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("daily")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("daily")
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("daily") ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود يومية</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("weekly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("weekly")
+                       ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("weekly") ? <CheckSquare className="w-4 h-4 text-amber-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود أسبوعية</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => togglePeriodFilter("monthly")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 cursor-pointer ${
+                    selectedPeriods.includes("monthly")
+                       ? "bg-purple-600 text-white shadow-sm"
+                      : "bg-background/80 text-muted-foreground border border-border hover:bg-background"
+                  }`}
+                >
+                  {selectedPeriods.includes("monthly") ? <CheckSquare className="w-4 h-4 text-purple-400" /> : <Square className="w-4 h-4 opacity-50" />}
+                  <span> عقود شهرية</span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 2. شبكة كروت المنتجات */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
         {loading ? (
           <div className="col-span-full bg-card/40 backdrop-blur-md p-12 text-center text-muted-foreground text-sm font-black rounded-3xl border border-dashed border-border animate-pulse">
             جاري تحميل بضائع المخزن...
           </div>
-        ) : items.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <div className="col-span-full bg-card/40 backdrop-blur-md p-12 text-center text-muted-foreground text-sm font-black rounded-3xl border border-dashed border-border">
             {activeTab === "available" ? "لا توجد منتجات متوفرة حالياً في المخزن." : "لم يتم بيع أي منتجات بعد."}
           </div>
         ) : (
-          items.map((item, index) => (
-            <motion.div 
-              key={item.id || index} 
-              whileHover={{ y: -4 }}
-              className="bg-card/90 backdrop-blur-md p-5 rounded-3xl border border-border space-y-4 flex flex-col justify-between shadow-sm hover:border-primary/40 transition-all relative group"
-            >
-              <div>
-                <div className="flex justify-between items-start border-b border-border/60 pb-3">
-                  <span className="text-xs font-black px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {item.category}
-                  </span>
-                  
-                  <div className="flex items-center gap-2">
-                    <div className="text-left">
-                      <span className="text-lg md:text-2xl font-black text-foreground block tracking-tight font-mono">
-                        {Number(item.price).toLocaleString("en-US")} د.ع
+          filteredItems.map((item, index) => {
+            const itemPeriods = (item as any).bookPeriods && (item as any).bookPeriods.length > 0 
+              ? (item as any).bookPeriods 
+              : (item as any).bookPeriod ? [(item as any).bookPeriod] : ["general"];
+
+            return (
+              <motion.div 
+                key={item.id || index} 
+                whileHover={{ y: -4 }}
+                className="bg-card/90 backdrop-blur-md p-5 rounded-3xl border border-border space-y-4 flex flex-col justify-between shadow-sm hover:border-primary/40 transition-all relative group"
+              >
+                <div>
+                  <div className="flex justify-between items-start border-b border-border/60 pb-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-black px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                        {item.category}
                       </span>
-                      {item.costPrice ? (
-                        <span className="text-xs text-amber-600 dark:text-amber-400 font-mono block font-black">
-                          التكلفة: {Number(item.costPrice).toLocaleString("en-US")} د.ع
+
+                      {/* شارات الدفاتر المحددة */}
+                      {!itemPeriods.includes("general") && itemPeriods.map((p: string) => (
+                        <span key={p} className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                          {p === "daily" ? "⚡ يومي" : p === "weekly" ? "🗓️ أسبوعي" : "🏙️ شهري"}
                         </span>
-                      ) : null}
+                      ))}
                     </div>
                     
-                    <div className="flex items-center gap-1 bg-secondary/80 p-1 rounded-xl border border-border/60 mr-1.5">
-                      <button
-                        onClick={() => handleOpenEdit(item)}
-                        title="تعديل المنتج"
-                        className="text-blue-600 hover:text-blue-700 p-1.5 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteItem(item)}
-                        title="حذف المنتج"
-                        className="text-rose-600 hover:text-rose-700 p-1.5 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    <div className="flex items-center gap-2">
+                      <div className="text-left">
+                        <span className="text-lg md:text-2xl font-black text-foreground block tracking-tight font-mono">
+                          {Number(item.price).toLocaleString("en-US")} د.ع
+                        </span>
+                        {item.costPrice ? (
+                          <span className="text-xs text-amber-600 dark:text-amber-400 font-mono block font-black">
+                            التكلفة: {Number(item.costPrice).toLocaleString("en-US")} د.ع
+                          </span>
+                        ) : null}
+                      </div>
+                      
+                      <div className="flex items-center gap-1 bg-secondary/80 p-1 rounded-xl border border-border/60 mr-1.5">
+                        <button
+                          onClick={() => handleOpenEdit(item)}
+                          title="تعديل المنتج"
+                          className="text-blue-600 hover:text-blue-700 p-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item)}
+                          title="حذف المنتج"
+                          className="text-rose-600 hover:text-rose-700 p-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
+                  </div>
+
+                  <h3 className="font-black text-foreground text-base md:text-lg mt-3">{item.title}</h3>
+
+                  <div className="mt-3 space-y-2 text-xs md:text-sm text-muted-foreground bg-secondary/40 p-3.5 rounded-2xl border border-border/50">
+                    {item.specs?.chassisNumber && (
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold">السيريال  :</span>
+                        <span className="font-mono font-black text-primary">{item.specs.chassisNumber}</span>
+                      </div>
+                    )}
+                    {item.specs?.color && (
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold">اللون:</span>
+                        <span className="font-black text-foreground">{item.specs.color}</span>
+                      </div>
+                    )}
+                    {item.specs?.modelYear && (
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold">الموديل / السنة:</span>
+                        <span className="font-black text-foreground">{item.specs.modelYear}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <h3 className="font-black text-foreground text-base md:text-lg mt-3">{item.title}</h3>
+                {item.status === "sold" && item.soldToClientId && (
+                  <div className="pt-3 border-t border-border/60 flex justify-between items-center text-xs md:text-sm">
+                    <div className="flex items-center gap-1.5 text-muted-foreground font-bold">
+                      <User className="w-4 h-4 text-primary" />
+                      <span>المشتري: <strong className="text-foreground font-black">{item.soldToClientName}</strong></span>
+                    </div>
 
-                <div className="mt-3 space-y-2 text-xs md:text-sm text-muted-foreground bg-secondary/40 p-3.5 rounded-2xl border border-border/50">
-                  {item.specs?.chassisNumber && (
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold">السيريال  :</span>
-                      <span className="font-mono font-black text-primary">{item.specs.chassisNumber}</span>
-                    </div>
-                  )}
-                  {item.specs?.color && (
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold">اللون:</span>
-                      <span className="font-black text-foreground">{item.specs.color}</span>
-                    </div>
-                  )}
-                  {item.specs?.modelYear && (
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold">الموديل / السنة:</span>
-                      <span className="font-black text-foreground">{item.specs.modelYear}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {item.status === "sold" && item.soldToClientId && (
-                <div className="pt-3 border-t border-border/60 flex justify-between items-center text-xs md:text-sm">
-                  <div className="flex items-center gap-1.5 text-muted-foreground font-bold">
-                    <User className="w-4 h-4 text-primary" />
-                    <span>المشتري: <strong className="text-foreground font-black">{item.soldToClientName}</strong></span>
+                    <Link
+                      href={`/customers?id=${item.soldToClientId}`}
+                      className="flex items-center gap-1 text-primary hover:underline font-black transition-all"
+                    >
+                      <span>سجل العميل</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
                   </div>
-
-                  <Link
-                    href={`/customers?id=${item.soldToClientId}`}
-                    className="flex items-center gap-1 text-primary hover:underline font-black transition-all"
-                  >
-                    <span>سجل العميل</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
-                </div>
-              )}
-            </motion.div>
-          ))
+                )}
+              </motion.div>
+            );
+          })
         )}
       </div>
 
@@ -420,6 +582,68 @@ export default function InventoryPage() {
                     <option value="كهربائيات">كهربائيات وأجهزة منزلية</option>
                     <option value="أخرى">أخرى</option>
                   </select>
+                </div>
+
+                {/* ⚡ تحديد الدفتر المخصص للمادة (تحديد متعدد) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs md:text-sm font-black text-foreground block flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-purple-400" />
+                    <span>تخصيص لدفتر أو عدة دفاتر (تحديد متعدد):</span>
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleFormBookPeriod("general")}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                        formData.bookPeriods.includes("general")
+                          ? "bg-purple-600 text-white border-purple-500 shadow-sm"
+                          : "bg-secondary/40 text-muted-foreground border-border hover:border-purple-500/40"
+                      }`}
+                    >
+                      {formData.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-white" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                      <span> عامة (لكافة الدفاتر)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleFormBookPeriod("daily")}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                        formData.bookPeriods.includes("daily") && !formData.bookPeriods.includes("general")
+                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm"
+                          : "bg-secondary/40 text-muted-foreground border-border hover:border-emerald-500/40"
+                      }`}
+                    >
+                      {formData.bookPeriods.includes("daily") && !formData.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-emerald-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                      <span> يومي</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleFormBookPeriod("weekly")}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                        formData.bookPeriods.includes("weekly") && !formData.bookPeriods.includes("general")
+                          ? "bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm"
+                          : "bg-secondary/40 text-muted-foreground border-border hover:border-amber-500/40"
+                      }`}
+                    >
+                      {formData.bookPeriods.includes("weekly") && !formData.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-amber-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                      <span> أسبوعي</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleFormBookPeriod("monthly")}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                        formData.bookPeriods.includes("monthly") && !formData.bookPeriods.includes("general")
+                          ? "bg-purple-500/20 text-purple-400 border-purple-500/50 shadow-sm"
+                          : "bg-secondary/40 text-muted-foreground border-border hover:border-purple-500/40"
+                      }`}
+                    >
+                      {formData.bookPeriods.includes("monthly") && !formData.bookPeriods.includes("general") ? <CheckSquare className="w-3.5 h-3.5 text-purple-400" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                      <span> شهري</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

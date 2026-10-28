@@ -19,8 +19,8 @@ import { useAuth } from "../../../components/AuthProvider";
 import { 
   ArrowRight, User, ShieldCheck, Calendar, Loader2, CreditCard, MessageSquare, 
   Edit, Trash2, X, Receipt, Printer, Camera, FileText, Image as ImageIcon, Download, 
-  ExternalLink, Eye, EyeOff, ChevronDown, ChevronUp, RefreshCw, Upload, CheckCircle2, AlertCircle, Sparkles,
-  Clock, CalendarDays, ChevronRight, ChevronLeft, Coins
+  ExternalLink, Eye, EyeOff, ChevronDown, ChevronUp, RefreshCw, Upload,
+  Clock, CalendarDays, ChevronRight, ChevronLeft, Coins, Home
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -56,7 +56,7 @@ function CustomerDetailsContent() {
 
   const { user, userData } = useAuth() as any;
   
-  // 🔒 فحص الصلاحيات الأمنية: هل المستخدم مالك أو لديه صلاحية التعديل والحذف؟
+  // فحص الصلاحيات الأمنية
   const isEmployee = userData?.role === "employee";
   const canDeleteOrEdit = !isEmployee || !!userData?.permissions?.canDeleteOrEdit;
 
@@ -65,7 +65,7 @@ function CustomerDetailsContent() {
   const [loading, setLoading] = useState(true);
   const [sendingIndex, setSendingIndex] = useState<string | null>(null);
 
-  // 📂 حالة طي وفتح كروت الأقساط (مغلقة افتراضياً)
+  // حالة طي وفتح كروت الأقساط
   const [expandedInstIds, setExpandedInstIds] = useState<Record<string, boolean>>({});
 
   const toggleExpandInst = (id: string) => {
@@ -75,7 +75,7 @@ function CustomerDetailsContent() {
     }));
   };
 
-  // 🔒 حالة إظهار / إخفاء المستندات
+  // حالة إظهار / إخفاء المستندات
   const [showDocs, setShowDocs] = useState(false);
   const [updatingDocType, setUpdatingDocType] = useState<string | null>(null);
 
@@ -85,7 +85,7 @@ function CustomerDetailsContent() {
   const [printContractData, setPrintContractData] = useState<InstallmentData | null>(null);
   const [printPaymentData, setPrintPaymentData] = useState<PaymentRecord | null>(null);
 
-  // 🖨️ مرجع حاوية الطباعة
+  // مرجع حاوية الطباعة
   const printAreaRef = useRef<HTMLDivElement>(null);
 
   const [editingInstallment, setEditingInstallment] = useState<InstallmentData | null>(null);
@@ -98,7 +98,7 @@ function CustomerDetailsContent() {
   });
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🗓️ حالات تعديل الدفعة والمنقي المخصص للأشهر والتواريخ
+  // حالات تعديل الدفعة
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({
     amount: 0,
@@ -138,8 +138,8 @@ function CustomerDetailsContent() {
     fetchData();
   }, [fetchData]);
 
-  // 📸 دالة تغيير أو إضافة صورة وثيقة جديدة
-  const handleUploadOrReplaceDoc = async (inst: InstallmentData, docKey: "idCardUrl" | "contractUrl" | "personalPhotoUrl", file: File) => {
+  // دالة تغيير أو إضافة صورة وثيقة جديدة - تقبل string لتفادي مشاكل الأنواع المتصلبة
+  const handleUploadOrReplaceDoc = async (inst: InstallmentData, docKey: string, file: File) => {
     if (!inst.id) return;
     try {
       setUpdatingDocType(docKey);
@@ -161,8 +161,8 @@ function CustomerDetailsContent() {
     }
   };
 
-  // 🗑️ دالة حذف صورة وثيقة محددة
-  const handleDeleteDoc = async (inst: InstallmentData, docKey: "idCardUrl" | "contractUrl" | "personalPhotoUrl", docName: string) => {
+  // دالة حذف صورة وثيقة محددة
+  const handleDeleteDoc = async (inst: InstallmentData, docKey: string, docName: string) => {
     if (!canDeleteOrEdit) {
       alert("عذراً، لا تملك صلاحية حذف المستندات.");
       return;
@@ -173,7 +173,7 @@ function CustomerDetailsContent() {
 
     try {
       setUpdatingDocType(docKey);
-      const currentDocs = inst.documents || {};
+      const currentDocs = (inst.documents as any) || {};
       const updatedDocs = { ...currentDocs };
       delete updatedDocs[docKey];
 
@@ -183,11 +183,11 @@ function CustomerDetailsContent() {
       console.error("خطأ في حذف الصورة:", error);
       alert("حدث خطأ أثناء حذف الصورة.");
     } finally {
-      setIsSaving(false);
+      setUpdatingDocType(null);
     }
   };
 
-  // 🖨️ دالة الطباعة
+  // دالة الطباعة
   const triggerPrint = (type: "contract" | "payment", paymentData?: PaymentRecord) => {
     let paperSize = "80mm";
     try {
@@ -551,7 +551,6 @@ function CustomerDetailsContent() {
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
-  // 💳 الانتقال المباشر لصفحة الحسابات للتسديد التلقائي مع تفعيل autoOpen=true
   const handleQuickPay = (installmentId: string, dueDate: string, amount: number) => {
     router.push(`/accounts?payInstId=${installmentId}&targetDate=${dueDate}&amount=${amount}&autoOpen=true`);
   };
@@ -649,7 +648,7 @@ function CustomerDetailsContent() {
         </div>
       </div>
 
-      {/* 🔒 3. بطاقة المستندات والأوراق الثبوتية */}
+      {/* 3. بطاقة المستندات والأوراق الثبوتية المنفصلة */}
       <div className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
         <button
           type="button"
@@ -682,7 +681,16 @@ function CustomerDetailsContent() {
         {showDocs && (
           <div className="p-6 border-t border-border animate-in fade-in duration-200 space-y-6">
             {installments.map((inst, instIdx) => {
-              const docs = inst.documents || {};
+              const docs: any = inst.documents || {};
+
+              const docCards = [
+                { key: "idCardUrl", title: "الهوية (أمامي)", icon: ImageIcon },
+                { key: "idCardBackUrl", title: "الهوية (خلفي)", icon: ImageIcon },
+                { key: "residenceCardFrontUrl", title: "بطاقة السكن (أمامي)", icon: Home },
+                { key: "residenceCardBackUrl", title: "بطاقة السكن (خلفي)", icon: Home },
+                { key: "contractUrl", title: "العقد الورقي", icon: FileText },
+                { key: "personalPhotoUrl", title: "الصورة الشخصية", icon: User },
+              ];
 
               return (
                 <div key={inst.id || instIdx} className="space-y-4">
@@ -692,198 +700,76 @@ function CustomerDetailsContent() {
                     </p>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                    {/* 1. الهوية / البطاقة الموحدة */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
-                      <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
-                        <span className="flex items-center gap-2">
-                          <ImageIcon className="w-4 h-4 text-primary" /> الهوية / الموحدة
-                        </span>
-                        {docs.idCardUrl && canDeleteOrEdit && (
-                          <button
-                            onClick={() => handleDeleteDoc(inst, "idCardUrl", "الهوية/الموحدة")}
-                            disabled={updatingDocType === "idCardUrl"}
-                            className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl hover:bg-rose-500/10 transition"
-                            title="حذف الصورة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {docCards.map((card) => {
+                      const IconComp = card.icon;
+                      const imageUrl = docs[card.key];
 
-                      {docs.idCardUrl ? (
-                        <div 
-                          onClick={() => setPreviewImage({ url: docs.idCardUrl!, title: `هوية العميل - ${inst.customerName}` })}
-                          className="relative h-44 w-full rounded-2xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition shadow-sm"
-                        >
-                          <img src={docs.idCardUrl} alt="الهوية" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
-                            <ExternalLink className="w-5 h-5" />
-                            <span>تكبير الصورة</span>
+                      return (
+                        <div key={card.key} className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
+                          <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
+                            <span className="flex items-center gap-2">
+                              <IconComp className="w-4 h-4 text-primary" /> {card.title}
+                            </span>
+                            {imageUrl && canDeleteOrEdit && (
+                              <button
+                                onClick={() => handleDeleteDoc(inst, card.key, card.title)}
+                                disabled={updatingDocType === card.key}
+                                className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl hover:bg-rose-500/10 transition"
+                                title="حذف الصورة"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      ) : (
-                        <div className="h-44 w-full rounded-2xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground gap-2 bg-background/50">
-                          <ImageIcon className="w-9 h-9 opacity-50" />
-                          <span className="text-xs font-bold">لم ترفع صورة الهوية</span>
-                        </div>
-                      )}
 
-                      <label className="block w-full">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUploadOrReplaceDoc(inst, "idCardUrl", file);
-                          }}
-                        />
-                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
-                          {updatingDocType === "idCardUrl" ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : docs.idCardUrl ? (
-                            <>
-                              <RefreshCw className="w-4 h-4" />
-                              <span>تغيير الصورة</span>
-                            </>
+                          {imageUrl ? (
+                            <div 
+                              onClick={() => setPreviewImage({ url: imageUrl, title: `${card.title} - ${inst.customerName}` })}
+                              className="relative h-44 w-full rounded-2xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition shadow-sm"
+                            >
+                              <img src={imageUrl} alt={card.title} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
+                                <ExternalLink className="w-5 h-5" />
+                                <span>تكبير الصورة</span>
+                              </div>
+                            </div>
                           ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              <span>إضافة صورة</span>
-                            </>
+                            <div className="h-44 w-full rounded-2xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground gap-2 bg-background/50">
+                              <IconComp className="w-9 h-9 opacity-50" />
+                              <span className="text-xs font-bold">لم ترفع صورة {card.title}</span>
+                            </div>
                           )}
-                        </span>
-                      </label>
-                    </div>
 
-                    {/* 2. صورة العقد الورقي */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
-                      <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
-                        <span className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-primary" /> العقد الورقي
-                        </span>
-                        {docs.contractUrl && canDeleteOrEdit && (
-                          <button
-                            onClick={() => handleDeleteDoc(inst, "contractUrl", "العقد الورقي")}
-                            disabled={updatingDocType === "contractUrl"}
-                            className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl hover:bg-rose-500/10 transition"
-                            title="حذف الصورة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {docs.contractUrl ? (
-                        <div 
-                          onClick={() => setPreviewImage({ url: docs.contractUrl!, title: `عقد العميل الورقي - ${inst.customerName}` })}
-                          className="relative h-44 w-full rounded-2xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition shadow-sm"
-                        >
-                          <img src={docs.contractUrl} alt="العقد الورقي" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
-                            <ExternalLink className="w-5 h-5" />
-                            <span>تكبير الصورة</span>
-                          </div>
+                          <label className="block w-full">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleUploadOrReplaceDoc(inst, card.key, file);
+                              }}
+                            />
+                            <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
+                              {updatingDocType === card.key ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : imageUrl ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4" />
+                                  <span>تغيير الصورة</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-4 h-4" />
+                                  <span>إضافة صورة</span>
+                                </>
+                              )}
+                            </span>
+                          </label>
                         </div>
-                      ) : (
-                        <div className="h-44 w-full rounded-2xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground gap-2 bg-background/50">
-                          <FileText className="w-9 h-9 opacity-50" />
-                          <span className="text-xs font-bold">لم ترفع صورة العقد الورقي</span>
-                        </div>
-                      )}
-
-                      <label className="block w-full">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUploadOrReplaceDoc(inst, "contractUrl", file);
-                          }}
-                        />
-                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
-                          {updatingDocType === "contractUrl" ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : docs.contractUrl ? (
-                            <>
-                              <RefreshCw className="w-4 h-4" />
-                              <span>تغيير الصورة</span>
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              <span>إضافة صورة</span>
-                            </>
-                          )}
-                        </span>
-                      </label>
-                    </div>
-
-                    {/* 3. الصورة الشخصية للزبون */}
-                    <div className="bg-secondary/40 border border-border/80 rounded-2xl p-4 text-center space-y-3 group hover:border-primary/50 transition relative">
-                      <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
-                        <span className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-primary" /> الصورة الشخصية
-                        </span>
-                        {docs.personalPhotoUrl && canDeleteOrEdit && (
-                          <button
-                            onClick={() => handleDeleteDoc(inst, "personalPhotoUrl", "الصورة الشخصية")}
-                            disabled={updatingDocType === "personalPhotoUrl"}
-                            className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl hover:bg-rose-500/10 transition"
-                            title="حذف الصورة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {docs.personalPhotoUrl ? (
-                        <div 
-                          onClick={() => setPreviewImage({ url: docs.personalPhotoUrl!, title: `الصورة الشخصية - ${inst.customerName}` })}
-                          className="relative h-44 w-full rounded-2xl overflow-hidden cursor-pointer border border-border/60 bg-black/10 group-hover:opacity-90 transition shadow-sm"
-                        >
-                          <img src={docs.personalPhotoUrl} alt="الصورة الشخصية" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white font-bold text-xs gap-1">
-                            <ExternalLink className="w-5 h-5" />
-                            <span>تكبير الصورة</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="h-44 w-full rounded-2xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground gap-2 bg-background/50">
-                          <User className="w-9 h-9 opacity-50" />
-                          <span className="text-xs font-bold">لم ترفع صورة العميل</span>
-                        </div>
-                      )}
-
-                      <label className="block w-full">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUploadOrReplaceDoc(inst, "personalPhotoUrl", file);
-                          }}
-                        />
-                        <span className="w-full py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition shadow-sm">
-                          {updatingDocType === "personalPhotoUrl" ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : docs.personalPhotoUrl ? (
-                            <>
-                              <RefreshCw className="w-4 h-4" />
-                              <span>تغيير الصورة</span>
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              <span>إضافة صورة</span>
-                            </>
-                          )}
-                        </span>
-                      </label>
-                    </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -892,7 +778,7 @@ function CustomerDetailsContent() {
         )}
       </div>
 
-      {/* 4. تفاصيل الأقساط وجدول الدفعات المعتمدة على الطي والتوسيع Accordion */}
+      {/* 4. تفاصيل الأقساط وجدول الدفعات */}
       {installments.map((item, idx) => {
         const instId = item.id || String(idx);
         const isExpanded = !!expandedInstIds[instId];
@@ -902,7 +788,6 @@ function CustomerDetailsContent() {
 
         return (
           <div key={instId} className="bg-card/90 backdrop-blur-md border border-border rounded-3xl overflow-hidden shadow-sm transition-all">
-            {/* ترويسة العقد المألوفة القابلة للضغط للطي والفتح */}
             <div 
               onClick={() => toggleExpandInst(instId)}
               className="p-5 md:p-6 bg-secondary/30 hover:bg-secondary/60 cursor-pointer transition-colors flex flex-wrap items-center justify-between gap-4 border-b border-border/60 group select-none"
@@ -957,7 +842,6 @@ function CustomerDetailsContent() {
               </div>
             </div>
 
-            {/* محتوى العقد عند الفتح */}
             {isExpanded && (
               <div className="p-6 md:p-7 space-y-5 animate-in fade-in duration-200 border-t border-border/40">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/30 p-5 rounded-2xl text-xs md:text-sm border border-border/50">
@@ -987,7 +871,6 @@ function CustomerDetailsContent() {
                   </div>
                 </div>
 
-                {/* جدول الاستحقاقات وزر التسديد التلقائي */}
                 <div className="border border-border/80 rounded-2xl overflow-hidden mt-5 shadow-sm">
                   <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
                     <Calendar className="w-5 h-5 text-primary" />
@@ -1037,7 +920,6 @@ function CustomerDetailsContent() {
                                       مستحق
                                     </span>
 
-                                    {/* 💳 زر التسديد التلقائي المباشر */}
                                     <button
                                       type="button"
                                       onClick={() => item.id && handleQuickPay(item.id, dueDateFormatted, item.monthlyInstallment)}
@@ -1080,7 +962,6 @@ function CustomerDetailsContent() {
                   </div>
                 </div>
 
-                {/* سجل المقبوضات والغرامات المسددة */}
                 <div className="border border-border/80 rounded-2xl overflow-hidden mt-6 shadow-sm">
                   <div className="p-4 bg-secondary/40 border-b border-border font-black text-sm md:text-base flex items-center gap-2.5">
                     <Receipt className="w-5 h-5 text-primary" />
@@ -1160,7 +1041,7 @@ function CustomerDetailsContent() {
         );
       })}
 
-      {/* 🖼️ نافذة تكبير الصورة والتحميل */}
+      {/* نافذة تكبير الصورة والتحميل */}
       <AnimatePresence>
         {previewImage && (
           <motion.div 
@@ -1212,7 +1093,7 @@ function CustomerDetailsContent() {
         )}
       </AnimatePresence>
 
-      {/* 🖨️ حاوية قوالب الطباعة */}
+      {/* حاوية قوالب الطباعة */}
       <div ref={printAreaRef} className="print-container hidden print:block">
         {printContractData && <ContractPrintTemplate installment={printContractData} />}
         {printPaymentData && <PaymentReceiptPrintTemplate payment={printPaymentData} />}
@@ -1317,7 +1198,7 @@ function CustomerDetailsContent() {
         )}
       </AnimatePresence>
 
-      {/* 💳 modal تعديل الدفعة */}
+      {/* modal تعديل الدفعة */}
       <AnimatePresence>
         {editingPayment && canDeleteOrEdit && (() => {
           const matchedInst = installments.find(inst => inst.id === editingPayment.installmentId);
@@ -1344,7 +1225,6 @@ function CustomerDetailsContent() {
                 </div>
                 
                 <div className="space-y-4">
-                  {/* المبلغ */}
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5">المبلغ (د.ع)</label>
                     <input
@@ -1356,7 +1236,6 @@ function CustomerDetailsContent() {
                     />
                   </div>
 
-                  {/* اختيارات التاريخ */}
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5">
                       <Calendar className="w-4 h-4 text-primary" />
@@ -1450,7 +1329,6 @@ function CustomerDetailsContent() {
                     )}
                   </div>
 
-                  {/* ملاحظات / غرامة */}
                   <div>
                     <label className="block text-xs font-bold text-muted-foreground mb-1.5">ملاحظات / غرامة</label>
                     <textarea

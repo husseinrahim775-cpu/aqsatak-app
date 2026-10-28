@@ -1,14 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
-import { MessageSquare, Lock, LogOut } from "lucide-react";
+import { MessageSquare, Lock, LogOut, Loader2 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import { auth } from "../services/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../services/firebase";
 
 const ADMIN_WHATSAPP_NUMBER = "9647838338499"; 
 
 export default function SubscriptionGuard({ children }: { children: React.ReactNode }) {
   const { user, userData } = useAuth() as any;
+  const [ownerSubscription, setOwnerSubscription] = useState<any>(null);
+  const [loadingSub, setLoadingSub] = useState(true);
 
   // 🚪 دالة تسجيل الخروج المؤكدة والتحويل لصفحة تسجيل الدخول
   const handleLogout = async () => {
@@ -22,18 +27,67 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
     }
   };
 
-  // 1. إذا كان صاحب الحساب هو الأدمن الرئيسي للسيستم، لا تقفله مطلقاً
+  // 1. تحديد الـ UID الخاص بالمالك الرئيسي للحساب
+  const getOwnerUid = () => {
+    if (userData?.role === "employee") {
+      const activeSession = sessionStorage.getItem("active_session");
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession);
+          if (parsed.ownerUid) return parsed.ownerUid;
+        } catch (e) {}
+      }
+      return userData?.ownerUid || null;
+    }
+    return user?.uid || null;
+  };
+
+  // 2. جلب اشتراك المالك دائماً لحساب الحظر والتقييم
+  useEffect(() => {
+    const fetchSubscriptionData = async () => {
+      // الأدمن الرئيسي للنظام لا نتحقق من اشتراكه
+      if (userData?.role === "admin" || user?.email === "admin@aqsatak.com") {
+        setLoadingSub(false);
+        return;
+      }
+
+      const ownerUid = getOwnerUid();
+      if (ownerUid) {
+        try {
+          const ownerDocRef = doc(db, "users", ownerUid);
+          const ownerDocSnap = await getDoc(ownerDocRef);
+          if (ownerDocSnap.exists()) {
+            setOwnerSubscription(ownerDocSnap.data()?.subscription || null);
+          }
+        } catch (e) {
+          console.error("خطأ في قراءة اشتراك المالك الرئيسي:", e);
+        }
+      }
+      setLoadingSub(false);
+    };
+
+    if (user || userData) {
+      fetchSubscriptionData();
+    }
+  }, [user, userData]);
+
+  // إذا كان صاحب الحساب هو الأدمن الرئيسي للسيستم، لا تقفله مطلقاً
   if (userData?.role === "admin" || user?.email === "admin@aqsatak.com") {
     return <>{children}</>;
   }
 
-  // 2. قراءة بيانات وتاريخ الاشتراك بدقة من Firestore
-  const sub = userData?.subscription;
+  // انتهاء تحميل البيانات
+  if (loadingSub) {
+    return null; // أو شاشة تحميل بسيطة
+  }
+
+  // قراءة بيانات وتاريخ الاشتراك الخاص بالمالك الرئيسي
+  const sub = ownerSubscription || userData?.subscription;
   const endDate = sub?.endDate ? new Date(sub.endDate) : null;
   const isExpired = endDate ? new Date() > endDate : false;
   const isDisabled = userData?.status === "disabled" || userData?.status === "rejected" || userData?.status === "suspended";
 
-  // 3. 🚨 تفعيل الحظر الكامل إذا كان الحساب موقوفاً أو الاشتراك منتهياً
+  // 3. 🚨 تفعيل الحظر الكامل إذا كان الحساب الرئيسي موقوفاً أو الاشتراك منتهياً
   if (isDisabled || isExpired || sub?.isActive === false) {
     const whatsappMessage = encodeURIComponent(
       `مرحباً عزيزي الأدمن، أود تجديد اشتراكي في نظام أقساطك الحسابي.\nالبريد الإلكتروني: ${userData?.email || user?.email || "غير محدد"}`
@@ -51,7 +105,7 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
           <div className="space-y-2">
             <h2 className="text-xl font-black text-foreground">انتهى اشتراك المنظومة!</h2>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              لقد انتهت الفترة المحددة لاشتراكك الحسابي. تم إيقاف إجراء التعديلات والإضافات لحماية بياناتك، يرجى التجديد للاستمرار.
+              لقد انتهت الفترة المحددة لاشتراك المنظومة الحسابية التابع لها. تم إيقاف إجراء التعديلات والإضافات، يرجى التواصل مع المالك للتجديد.
             </p>
           </div>
 
