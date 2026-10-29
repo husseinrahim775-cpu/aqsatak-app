@@ -7,7 +7,7 @@ import AnimatedNumber from "@/components/dashboard/AnimatedNumber";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Wallet, Users, Percent, Coins, Banknote, 
-  Loader2, MessageSquare, AlertTriangle, Activity, Landmark, 
+  Loader2, Activity,
   CalendarCheck, CalendarDays, CalendarRange, ArrowUpRight, ArrowDownRight, Plus, Calendar,
   ChevronRight, ChevronLeft, X, Layers, Filter, TrendingUp, CheckSquare, Square
 } from "lucide-react";
@@ -18,22 +18,8 @@ import Link from "next/link";
 import { useTheme } from "next-themes";
 import { requestNotificationPermission } from "@/services/notifications";
 
-interface UpcomingAlert {
-  installmentId: string;
-  customerName: string;
-  phoneNumber: string;
-  productName: string;
-  totalOverdueAmount: number;
-  unpaidCount: number;
-  hasTodayDue: boolean;
-  maxDaysOverdue: number;
-  paymentPeriod?: string;
-  hasMultipleContracts?: boolean;
-}
-
 type TimeRange = "today" | "week" | "month" | "custom" | "all";
 type PaymentPeriodType = "daily" | "weekly" | "monthly";
-type OverdueFilterType = "all" | "today" | "past";
 
 const getSmartGreeting = () => {
   const hour = new Date().getHours();
@@ -85,9 +71,6 @@ export default function DashboardPage() {
   // 🗂️ نظام الفصل بين الدفاتر المخصص للتحديد المتعدد الديناميكي
   const [showLedgerFilter, setShowLedgerFilter] = useState(false);
   const [selectedPeriods, setSelectedPeriods] = useState<PaymentPeriodType[]>(["daily", "weekly", "monthly"]);
-
-  // 🎯 فلترة المتأخرات للموظف (الكل / مستحق اليوم / متأخر سابقاً)
-  const [overdueFilter, setOverdueFilter] = useState<OverdueFilterType>("all");
 
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -148,8 +131,6 @@ export default function DashboardPage() {
     monthly: 0,
   });
 
-  const [overdueAlerts, setOverdueAlerts] = useState<UpcomingAlert[]>([]);
-
   // 🎯 تبديل أو تفعيل الخيارات المحددة لنظام الفصل
   const togglePeriodSelection = (period: PaymentPeriodType) => {
     if (selectedPeriods.includes(period)) {
@@ -207,7 +188,7 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [user]);
 
-  // 🎯 حساب الإحصائيات الشاملة وتجميع التعثرات المالية لكل عقد بدون تكرار
+  // 🎯 حساب الإحصائيات الشاملة
   useEffect(() => {
     if (!rawInstallments) return;
 
@@ -224,20 +205,9 @@ export default function DashboardPage() {
     let totalCollectedAllTime = 0;
 
     const uniquePhones = new Set<string>();
-    const overdueList: UpcomingAlert[] = [];
 
-    // 🎯 توحيد تاريخ اليوم عند 00:00:00
     const now = new Date();
     const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-    // 🎯 رصد عدد العقود القائمة لكل عميل للتمييز باسم المنتج إذا تكرر العميل
-    const customerContractCountMap = new Map<string, number>();
-    activeInstallments.forEach((inst) => {
-      const nameKey = (inst.customerName || "").trim();
-      if (nameKey) {
-        customerContractCountMap.set(nameKey, (customerContractCountMap.get(nameKey) || 0) + 1);
-      }
-    });
 
     activeInstallments.forEach((inst) => {
       const installmentAmount = Number(inst.monthlyInstallment) || 0;
@@ -280,12 +250,6 @@ export default function DashboardPage() {
 
       const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
 
-      let contractOverdueSum = 0;
-      let unpaidCount = 0;
-      let hasTodayDue = false;
-      let maxDaysOverdue = 0;
-
-      // 🎯 فحص جميع الدفعات وتجميعها لكل عقد في عنصر واحد
       for (let m = 0; m < totalMonths; m++) {
         let dueDate: Date;
         if (inst.paymentPeriod === "daily") {
@@ -298,46 +262,9 @@ export default function DashboardPage() {
 
         const dueDateMidnight = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()).getTime();
 
-        const requiredForStep = installmentAmount * (m + 1);
-        const isStepPaid = totalPaidForInst >= requiredForStep - 50;
-
         if (dueDateMidnight <= todayMidnight) {
           totalExpectedToDate += installmentAmount;
         }
-
-        // 🎯 تجميع الأقساط المستحقة المتأخرة لهذا العقد
-        if (!isStepPaid && calculatedRemainingDebt > 0 && dueDateMidnight <= todayMidnight) {
-          const diffDays = Math.floor((todayMidnight - dueDateMidnight) / (1000 * 60 * 60 * 24)) + 1;
-
-          if (diffDays >= 1) {
-            const stepAmount = Math.min(installmentAmount, Math.max(0, calculatedRemainingDebt - contractOverdueSum));
-            if (stepAmount > 0) {
-              contractOverdueSum += stepAmount;
-              unpaidCount += 1;
-              if (diffDays === 1) hasTodayDue = true;
-              if (diffDays > maxDaysOverdue) maxDaysOverdue = diffDays;
-            }
-          }
-        }
-      }
-
-      // 🎯 إضافة العقد المتعثر مرة واحدة فقط
-      if (unpaidCount > 0 && contractOverdueSum > 0) {
-        const custName = (inst.customerName || "").trim();
-        const hasMultiple = (customerContractCountMap.get(custName) || 0) > 1;
-
-        overdueList.push({
-          installmentId: inst.id,
-          customerName: custName,
-          phoneNumber: inst.phoneNumber,
-          productName: inst.productName || "عقد أجهزة",
-          totalOverdueAmount: contractOverdueSum,
-          unpaidCount: unpaidCount,
-          hasTodayDue: hasTodayDue,
-          maxDaysOverdue: maxDaysOverdue,
-          paymentPeriod: inst.paymentPeriod || "monthly",
-          hasMultipleContracts: hasMultiple,
-        });
       }
     });
 
@@ -361,22 +288,7 @@ export default function DashboardPage() {
       weekly: expectedWeeklySum,
       monthly: expectedMonthlySum,
     });
-
-    // 🎯 الترتيب: العقود التي تملك استحقاقات قديمة وأكثر تأخيراً تتصدر القائمة
-    overdueList.sort((a, b) => b.maxDaysOverdue - a.maxDaysOverdue);
-    setOverdueAlerts(overdueList);
   }, [activeInstallments, activePayments]);
-
-  // 🎯 تصفية قائمة المتأخرات للموظف بحسب التبويب المختار
-  const filteredOverdueAlerts = useMemo(() => {
-    let list = overdueAlerts;
-    if (overdueFilter === "today") {
-      list = overdueAlerts.filter(a => a.hasTodayDue);
-    } else if (overdueFilter === "past") {
-      list = overdueAlerts.filter(a => a.maxDaysOverdue > 1);
-    }
-    return list.slice(0, 15);
-  }, [overdueAlerts, overdueFilter]);
 
   // 📊 تصفية المقبوضات وحساب نسبة النمو الحقيقية (Growth Rate %)
   const { filteredCollectedAmount, growthRate, growthLabel } = useMemo(() => {
@@ -491,15 +403,6 @@ export default function DashboardPage() {
     }));
   }, [activePayments]);
 
-  const handleQuickWhatsApp = (alert: UpcomingAlert) => {
-    let cleanPhone = alert.phoneNumber.replace(/[^0-9]/g, "");
-    if (cleanPhone.startsWith("0")) cleanPhone = "964" + cleanPhone.slice(1);
-
-    const periodText = alert.paymentPeriod === "daily" ? "اليومي" : alert.paymentPeriod === "weekly" ? "الأسبوعي" : "الشهري";
-    const message = `مرحباً ${alert.customerName}، نود تذكيرك بأن لديك أقساط متأخرة لعقد (${alert.productName}) بإجمالي مبلغ ${Math.round(alert.totalOverdueAmount).toLocaleString()} د.ع. يرجى المبادرة بالتسديد.`;
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, "_blank");
-  };
-
   if (loading) {
     return (
       <div className="h-[75vh] flex flex-col items-center justify-center gap-3 text-primary">
@@ -559,7 +462,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 🗂️ شريط خيارات التصفية بالضغط والتحديد المتعدد (Multi-Select) */}
+        {/* 🗂️ شريط خيارات التصفية بالتحديد المتعدد */}
         <AnimatePresence>
           {showLedgerFilter && (
             <motion.div
@@ -1135,136 +1038,14 @@ export default function DashboardPage() {
           <MetricCard title="متوسط الفائدة" value={`${stats.avgInterest}%`} icon={Percent} />
         </div>
 
-        {/* 📈 5. محاكي الأرباح + كارت المتأخرات */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <div className="xl:col-span-2">
-            <ProfitSimulator 
-              initialCapital={stats.totalRemainingCapital} 
-              currentCapital={stats.totalRemainingCapital}
-              defaultProfitMargin={stats.avgInterest || 20}
-              monthlyCashFlow={expectedIncome.monthly + expectedIncome.daily * 30 + expectedIncome.weekly * 4} 
-            />
-          </div>
-
-          {/* كارت المتأخرات المحدث والمعدل كلياً لتنسيق الموظف */}
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-card/90 backdrop-blur-md rounded-3xl border border-rose-500/20 p-5 md:p-6 shadow-sm hover:border-rose-500/40 transition-all flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-center justify-between mb-3 border-b border-border/60 pb-3 flex-wrap gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-600 border border-rose-500/20 shadow-sm">
-                    <AlertTriangle className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-foreground">دفعات متأخرة (تعثر مالي)</h3>
-                    <p className="text-[10px] text-muted-foreground font-bold">قائمة العقود المتعثرة والمستحقة</p>
-                  </div>
-                </div>
-
-                <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-mono">
-                  {filteredOverdueAlerts.length} تنبيه
-                </span>
-              </div>
-
-              {/* 🎯 شريط فلاتر متابعة الموظف للمتأخرات اليومية والسابقة */}
-              <div className="flex items-center gap-1 bg-secondary/60 p-1 rounded-2xl mb-3 text-[10px] font-black justify-between">
-                <button
-                  onClick={() => setOverdueFilter("all")}
-                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-                    overdueFilter === "all" ? "bg-rose-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  🔴 الكل ({overdueAlerts.length})
-                </button>
-                <button
-                  onClick={() => setOverdueFilter("today")}
-                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-                    overdueFilter === "today" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  ⏰ مستحقة اليوم ({overdueAlerts.filter(a => a.hasTodayDue).length})
-                </button>
-                <button
-                  onClick={() => setOverdueFilter("past")}
-                  className={`flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-                    overdueFilter === "past" ? "bg-rose-700 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  ⚠️ متأخرة سابقاً ({overdueAlerts.filter(a => a.maxDaysOverdue > 1).length})
-                </button>
-              </div>
-              
-              {filteredOverdueAlerts.length === 0 ? (
-                <div className="text-center py-8 bg-secondary/30 rounded-2xl border border-dashed border-border/50">
-                  <p className="text-xs text-emerald-600 font-black">ممتاز! لا توجد متأخرات مالية في هذا التصنيف 👏</p>
-                </div>
-              ) : (
-                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                  {filteredOverdueAlerts.map((alert, index) => (
-                    <motion.div 
-                      key={alert.installmentId || index} 
-                      whileHover={{ x: -4, scale: 1.01 }}
-                      transition={{ duration: 0.2 }}
-                      className="flex justify-between items-center p-3.5 rounded-2xl bg-secondary/40 hover:bg-secondary/80 border border-border/50 transition-all shadow-sm group"
-                    >
-                      <div className="space-y-0.5 min-w-0 pr-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-black text-xs truncate text-foreground group-hover:text-primary transition-colors">
-                            {alert.customerName}
-                          </p>
-                          {/* 🎯 إظهار اسم العقد/المنتج فقط إذا كان للعميل أكثر من عقد */}
-                          {alert.hasMultipleContracts && (
-                            <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 border border-purple-500/20 truncate max-w-[110px]">
-                              📦 {alert.productName}
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center gap-2 pt-0.5">
-                          <p className="text-[10px] text-muted-foreground font-mono font-black" dir="ltr">
-                            {Math.round(alert.totalOverdueAmount).toLocaleString()} د.ع
-                          </p>
-                          <span className="text-[9px] text-muted-foreground font-bold">
-                            ({alert.unpaidCount} {alert.unpaidCount === 1 ? "دفعة" : "دفعات"})
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        {/* 🎯 شارة توضيحية لسبب التنبيه بدقة */}
-                        <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border ${
-                          alert.hasTodayDue && alert.maxDaysOverdue === 1
-                            ? "bg-amber-500/10 text-amber-600 border-amber-500/20" 
-                            : alert.hasTodayDue
-                            ? "bg-orange-500/10 text-orange-600 border-orange-500/20"
-                            : "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                        }`}>
-                          {alert.hasTodayDue && alert.maxDaysOverdue === 1 
-                            ? "مستحق اليوم" 
-                            : alert.hasTodayDue 
-                            ? `اليوم + تأخير ${alert.maxDaysOverdue - 1} أيام`
-                            : `تأخير ${alert.maxDaysOverdue - 1} أيام`}
-                        </span>
-
-                        <motion.button 
-                          whileHover={{ scale: 1.08 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => handleQuickWhatsApp(alert)} 
-                          className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all shadow-md shadow-emerald-600/20 cursor-pointer" 
-                          title="تذكير عبر الواتساب"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </motion.button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
+        {/* 📈 5. محاكي الأرباح بالكامل دون كارت التعثرات */}
+        <div className="w-full">
+          <ProfitSimulator 
+            initialCapital={stats.totalRemainingCapital} 
+            currentCapital={stats.totalRemainingCapital}
+            defaultProfitMargin={stats.avgInterest || 20}
+            monthlyCashFlow={expectedIncome.monthly + expectedIncome.daily * 30 + expectedIncome.weekly * 4} 
+          />
         </div>
 
       </motion.div>

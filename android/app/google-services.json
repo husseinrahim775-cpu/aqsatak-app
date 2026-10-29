@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "752420244346",
+    "project_id": "aqsatak-team",
+    "storage_bucket": "aqsatak-team.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:752420244346:android:d4280fc84638745fbc64c3",
+        "android_client_info": {
+          "package_name": "com.aqsatak.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "752420244346-qmdagdcmgh5ts2bg6a3f8tg2enntujr8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANQOwIOmUHhkJlxiSSokCIbG4BS0BR7S0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "752420244346-qmdagdcmgh5ts2bg6a3f8tg2enntujr8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -11,7 +11,9 @@ import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 import { signOut } from "firebase/auth";
 import InstallmentCalculatorModal from "../components/InstallmentCalculatorModal";
+import OverdueAlertsModal from "../components/OverdueAlertsModal";
 import { motion, AnimatePresence } from "framer-motion";
+import NotificationsSetup from '@/components/NotificationsSetup';
 import { 
   LayoutDashboard, 
   Users, 
@@ -27,7 +29,8 @@ import {
   MoreHorizontal,
   X,
   Calculator,
-  FileText
+  FileText,
+  Bell
 } from "lucide-react";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -44,6 +47,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   if (isLoginPage) {
     return (
       <main className="w-full min-h-screen bg-background flex items-center justify-center p-0 m-0 overflow-hidden">
+        <NotificationsSetup />
         {children}
       </main>
     );
@@ -52,6 +56,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [isCalcOpen, setIsCalcOpen] = useState(false);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false); // 🔔 حالة فتح نافذة المتأخرات والتنبيهات
   const [waveGlow, setWaveGlow] = useState(false);
   const [mobileLogo, setMobileLogo] = useState<string>("/logo.png");
 
@@ -203,45 +208,77 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      {/* 🔔 تفعيل معالج الإشعارات */}
+      <NotificationsSetup />
+
       {/* 🧮 النافذة المنبثقة لحاسبة الأقساط */}
       <InstallmentCalculatorModal 
         isOpen={isCalcOpen} 
         onClose={() => setIsCalcOpen(false)} 
       />
 
-      {/* 1. الشريط العلوي للموبايل */}
-      <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-xl border-b border-border p-4 shadow-sm sticky top-0 z-40">
-        <div className="flex items-center gap-2 font-extrabold text-xl text-theme-primary tracking-tight">
-          <img src={mobileLogo} alt="أقساطك" className="w-8 h-8 rounded-2xl object-cover shadow-sm border border-theme-primary/20 bg-white p-0.5" />
-          <span className="bg-theme-gradient bg-clip-text text-transparent font-black">أقساطك</span>
+      {/* 🔔 النافذة المنبثقة للتنبيهات والمتعثرين */}
+      <OverdueAlertsModal 
+        isOpen={isAlertsOpen}
+        onClose={() => setIsAlertsOpen(false)}
+      />
+
+      {/* 1. الشريط العلوي النظيف للموبايل */}
+      <div className="md:hidden flex items-center justify-between bg-card/80 backdrop-blur-xl border-b border-border px-4 py-3 shadow-sm sticky top-0 z-40">
+        <div className="flex items-center gap-2">
+          {mobileLogo ? (
+           <img 
+  src={mobileLogo} 
+  alt="أقساطك" 
+  className="w-8 h-8 object-contain" 
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center font-black text-primary text-xs">
+              أ
+            </div>
+          )}
+          <span className="font-black text-base text-foreground tracking-tight">
+            أقساطك
+          </span>
         </div>
         
         <div className="flex items-center gap-2">
+          {/* 🔔 زر التنبيهات والمتعثرين */}
+          <button
+            onClick={() => setIsAlertsOpen(true)}
+            className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 hover:bg-rose-500/20 transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            title="التنبيهات والمتعثرين"
+          >
+            <Bell className="w-4 h-4" />
+          </button>
+
+          {/* 🧮 زر الحاسبة */}
           <button
             onClick={() => setIsCalcOpen(true)}
-            className="p-2.5 bg-theme-primary/10 border border-theme-primary/20 rounded-2xl text-theme-primary hover:bg-theme-primary/20 transition-all active:scale-95 flex items-center gap-1 font-bold text-xs"
+            className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 hover:bg-amber-500/20 transition-all active:scale-95 flex items-center justify-center cursor-pointer"
             title="حاسبة الأقساط"
           >
-            <Calculator className="w-5 h-5 text-theme-primary" />
+            <Calculator className="w-4 h-4" />
           </button>
 
+          {/* ☀️/🌙 زر الوضع النهاري/الداكن */}
           <button 
             onClick={toggleTheme}
-            className="p-2.5 bg-background/80 border border-border rounded-2xl text-foreground hover:bg-border/50 transition-all active:scale-95 shadow-sm"
+            className="p-2 bg-secondary border border-border rounded-xl text-foreground hover:bg-border/50 transition-all active:scale-95 shadow-sm cursor-pointer"
           >
-            {isDarkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-indigo-500" />}
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-indigo-500" />}
           </button>
 
+          {/* 🚪 زر تسجيل الخروج */}
           <button 
             onClick={handleLogout}
-            className="p-2.5 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 rounded-2xl text-red-500 hover:bg-red-100 transition-all active:scale-95"
+            className="p-2 bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 rounded-xl text-red-500 hover:bg-red-100 transition-all active:scale-95 cursor-pointer"
             title="تسجيل الخروج"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>
-
       {/* 2. القائمة الجانبية للشاشات الكبيرة */}
       <div className="hidden md:block sticky top-0 h-screen w-20 z-50">
         <Sidebar />
@@ -279,17 +316,31 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               })}
             </div>
 
-            <motion.button
-              whileHover={{ scale: 1.02, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setIsCalcOpen(true)}
-              className="flex items-center gap-2.5 px-4 py-2 bg-card/90 backdrop-blur-md border border-theme-primary/30 hover:border-theme-primary text-theme-primary rounded-2xl font-bold text-xs shadow-sm hover:shadow-primary/10 transition-all group"
-            >
-              <div className="p-1 bg-theme-primary/10 rounded-lg group-hover:bg-theme-primary/20 transition-colors">
-                <Calculator className="w-3.5 h-3.5 text-theme-primary" />
-              </div>
-              <span>حاسبة الأقساط</span>
-            </motion.button>
+            <div className="flex items-center gap-2">
+              {/* 🔔 زر التنبيهات بالهيدر العلوي للحاسوب */}
+              <motion.button
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setIsAlertsOpen(true)}
+                className="flex items-center gap-2 px-3.5 py-2 bg-card/90 backdrop-blur-md border border-rose-500/30 hover:border-rose-500 text-rose-500 rounded-2xl font-bold text-xs shadow-sm hover:shadow-rose-500/10 transition-all cursor-pointer"
+                title="التنبيهات والمتعثرين"
+              >
+                <Bell className="w-4 h-4 text-rose-500" />
+                <span>التنبيهات</span>
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setIsCalcOpen(true)}
+                className="flex items-center gap-2.5 px-4 py-2 bg-card/90 backdrop-blur-md border border-theme-primary/30 hover:border-theme-primary text-theme-primary rounded-2xl font-bold text-xs shadow-sm hover:shadow-primary/10 transition-all group"
+              >
+                <div className="p-1 bg-theme-primary/10 rounded-lg group-hover:bg-theme-primary/20 transition-colors">
+                  <Calculator className="w-3.5 h-3.5 text-theme-primary" />
+                </div>
+                <span>حاسبة الأقساط</span>
+              </motion.button>
+            </div>
           </div>
 
           <AnimatePresence mode="wait">
