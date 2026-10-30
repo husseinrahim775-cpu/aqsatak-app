@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import packageJson from "@/package.json";
 import { useTheme } from "next-themes";
+import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
 import { 
   Store, 
   Percent, 
@@ -126,26 +128,55 @@ export default function SettingsPage() {
   const [downloadingFromDrive, setDownloadingFromDrive] = useState(false);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
-  // 🔔 حالة إشعارات FCM والتفعيل
+ // 🔔 حالة إشعارات FCM والتفعيل
   const [isNotifActive, setIsNotifActive] = useState(false);
   const [loadingNotif, setLoadingNotif] = useState(false);
 
+  // 1. فحص حالة الأذونات عند فتح الصفحة (للأندرويد والويب)
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
+    if (Capacitor.isNativePlatform()) {
+      PushNotifications.checkPermissions().then((res) => {
+        if (res.receive === 'granted') {
+          setIsNotifActive(true);
+        }
+      });
+    } else if (typeof window !== "undefined" && "Notification" in window) {
       if (Notification.permission === "granted") {
         setIsNotifActive(true);
       }
     }
   }, []);
 
+  // 2. دالة تفعيل الإشعارات عند الضغط على الزر
   const handleEnableNotifications = async () => {
     setLoadingNotif(true);
+
+    // 📱 في حال كان التطبيق يعمل على أندرويد (Capacitor Native)
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const permResult = await PushNotifications.requestPermissions();
+        if (permResult.receive === 'granted') {
+          await PushNotifications.register();
+          setIsNotifActive(true);
+          toast.success("تم تفعيل إشعارات التطبيق بنجاح!");
+        } else {
+          toast.error("تم رفض إذن الإشعارات من إعدادات الهاتف.");
+        }
+      } catch (e) {
+        toast.error("حدث خطأ أثناء طلب إذن الإشعارات.");
+      } finally {
+        setLoadingNotif(false);
+      }
+      return;
+    }
+
+    // 🌐 في حال كان التطبيق يعمل على المتصفح العادي
     const token = await requestNotificationPermission();
     setLoadingNotif(false);
 
     if (token) {
       setIsNotifActive(true);
-      toast.success("تم تفعيل الإشعارات الفورية بنجاح! ستصلك التنبيهات عند تسديد الأقساط.");
+      toast.success("تم تفعيل الإشعارات الفورية بنجاح!");
     } else {
       toast.error("لم يتم منح إذن الإشعارات، يرجى التفعيل من إعدادات المتصفح.");
     }

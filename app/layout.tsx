@@ -1,7 +1,16 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import ClientLayout from "./ClientLayout";
 import { Toaster } from "sonner";
+
+// 📱 ضبط الـ Viewport ليدعم ملء الشاشة بالكامل (Edge-to-Edge)
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover", // 👈 هذا هو الوسم المسؤول عن ملء الهوامش السوداء علوياً وسفلياً
+};
 
 export const metadata: Metadata = {
   title: "أقساطك",
@@ -31,8 +40,8 @@ const themeInitializerScript = `
       }
       
       var savedColorTheme = (employeeKey && localStorage.getItem('user_color_theme_' + employeeKey)) 
-                         || localStorage.getItem('app_color_theme') 
-                         || 'orange';
+                           || localStorage.getItem('app_color_theme') 
+                           || 'orange';
       
       document.documentElement.setAttribute('data-theme', savedColorTheme);
       if (document.body) {
@@ -51,7 +60,6 @@ export default function RootLayout({
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         
         {/* 📱 وسوم أيقونة الآيفون والشاشة الرئيسية */}
         <link rel="apple-touch-icon" href="/logo.png" />
@@ -65,7 +73,7 @@ export default function RootLayout({
       </head>
       <body 
         suppressHydrationWarning 
-        className="flex flex-col md:flex-row bg-background min-h-screen text-foreground transition-colors duration-300"
+        className="flex flex-col md:flex-row bg-background min-h-screen text-foreground transition-colors duration-300 antialiased"
       >
         <ClientLayout>{children}</ClientLayout>
         <Toaster position="top-center" richColors />

@@ -414,9 +414,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         )}
       </AnimatePresence>
 
-      {/* 5. الشريط السفلي للموبايل */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/85 backdrop-blur-xl border-t border-border shadow-2xl z-40 px-3 pb-safe">
-        <nav className="flex items-center justify-around py-2">
+{/* 5. الشريط السفلي للموبايل (معدل ومحسّن) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-xl border-t border-border shadow-2xl z-40 px-2 pb-safe">
+        <nav className="flex items-center justify-around py-1.5">
           {baseNavItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
@@ -425,25 +425,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               <Link 
                 key={item.href} 
                 href={item.href}
-                className="relative flex flex-col items-center justify-center w-14 h-14 transition-all duration-300"
+                className="flex flex-col items-center justify-center gap-1 py-1 px-3 min-w-[64px] transition-all duration-200"
               >
+                {/* 1️⃣ الإطار يحيط بالأيقونة فقط */}
                 <div 
-                  className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
+                  className={`p-2 rounded-2xl flex items-center justify-center transition-all duration-300 ${
                     isActive 
-                      ? 'bg-theme-primary/15 backdrop-blur-sm border border-theme-primary/30 scale-100 opacity-100 shadow-sm' 
-                      : 'scale-50 opacity-0'
-                  }`} 
-                />
+                      ? 'bg-theme-primary/15 border border-theme-primary/40 text-theme-primary shadow-sm scale-105' 
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="w-5 h-5 shrink-0" />
+                </div>
                 
-                <Icon 
-                  className={`w-5 h-5 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-theme-primary translate-y-[2px]" : "text-gray-400"
-                  }`} 
-                />
-                
+                {/* 2️⃣ النص بالأسفل بشكل منفصل وواضح تماماً */}
                 <span 
-                  className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
-                    isActive ? "text-theme-primary font-bold" : "text-gray-400 opacity-70"
+                  className={`text-[11px] leading-none transition-all duration-200 ${
+                    isActive 
+                      ? "text-theme-primary font-extrabold" 
+                      : "text-muted-foreground font-medium"
                   }`}
                 >
                   {item.name}
@@ -455,29 +455,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setShowMoreMenu(!showMoreMenu)}
-            className="relative flex flex-col items-center justify-center w-14 h-14 transition-all duration-300"
+            className="flex flex-col items-center justify-center gap-1 py-1 px-3 min-w-[64px] transition-all duration-200 cursor-pointer"
           >
+            {/* 1️⃣ الإطار يحيط بالأيقونة فقط */}
             <div 
-              className={`absolute top-1 w-10 h-10 rounded-2xl transition-all duration-300 ${
+              className={`p-2 rounded-2xl flex items-center justify-center transition-all duration-300 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? 'bg-theme-primary/15 backdrop-blur-sm border border-theme-primary/30 scale-100 opacity-100 shadow-sm' 
-                  : 'scale-50 opacity-0'
-              }`} 
-            />
+                  ? 'bg-theme-primary/15 border border-theme-primary/40 text-theme-primary shadow-sm scale-105' 
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <MoreHorizontal className="w-5 h-5 shrink-0" />
+            </div>
 
-            <MoreHorizontal 
-              className={`w-5 h-5 relative z-10 transition-all duration-300 ${
-                extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-theme-primary translate-y-[2px]" 
-                  : "text-gray-400"
-              }`} 
-            />
-
+            {/* 2️⃣ النص بالأسفل */}
             <span 
-              className={`text-[10px] font-medium mt-1 relative z-10 transition-all duration-300 ${
+              className={`text-[11px] leading-none transition-all duration-200 ${
                 extraNavItems.some(i => pathname === i.href || pathname.startsWith(`${i.href}/`)) || showMoreMenu
-                  ? "text-theme-primary font-bold" 
-                  : "text-gray-400 opacity-70"
+                  ? "text-theme-primary font-extrabold" 
+                  : "text-muted-foreground font-medium"
               }`}
             >
               المزيد
