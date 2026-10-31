@@ -36,21 +36,54 @@ export async function GET(request: Request) {
   const messaging = getMessaging();
 
   try {
-    // 1. جلب بيانات العقود والمدفوعات لتطبيق خوارزمية المودال
-    const [installmentsSnap, paymentsSnap] = await Promise.all([
+    // 1. جلب بيانات المستخدمين وتجميع التوكنات حسب الـ Owner UID
+    const [usersSnap, systemUsersSnap, installmentsSnap, paymentsSnap] = await Promise.all([
+      db.collection("users").get(),
+      db.collection("system_users").get(),
       db.collection("installments").get(),
       db.collection("payments").get(),
     ]);
 
+    // خريطة لتخزين توكنات وأرقام كل حساب SaaS على حدة
+    const tenantMap: Record<string, { tokens: string[]; todayCount: number; overdueCount: number }> = {};
+
+    // أ) جمع توكنات حسابات الرئيسية (users)
+    usersSnap.forEach((doc) => {
+      const data = doc.data();
+      const uid = doc.id;
+      if (data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
+        if (!tenantMap[uid]) tenantMap[uid] = { tokens: [], todayCount: 0, overdueCount: 0 };
+        if (!tenantMap[uid].tokens.includes(data.fcmToken)) {
+          tenantMap[uid].tokens.push(data.fcmToken);
+        }
+      }
+    });
+
+    // ب) جمع توكنات الموظفين الفرعيين (system_users) وربطها بالـ ownerUid
+    systemUsersSnap.forEach((doc) => {
+      const data = doc.data();
+      const ownerUid = data.ownerUid;
+      if (ownerUid && data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
+        if (!tenantMap[ownerUid]) tenantMap[ownerUid] = { tokens: [], todayCount: 0, overdueCount: 0 };
+        if (!tenantMap[ownerUid].tokens.includes(data.fcmToken)) {
+          tenantMap[ownerUid].tokens.push(data.fcmToken);
+        }
+      }
+    });
+
+    // 2. معالجة المدفوعات وتاريخ اليوم
     const payments = paymentsSnap.docs.map((doc) => doc.data());
     const now = new Date();
     const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
-    let overdueContractsCount = 0; // إجمالي العقود المتعثرة
-    let todayDueContractsCount = 0; // العقود المستحقة اليوم حصراً
-
+    // 3. حساب متعثرات كل مستأجر (Tenant) على حدة
     installmentsSnap.forEach((doc) => {
       const inst = doc.data();
+      const tenantId = inst.userId || inst.ownerUid; // معرف التاجر صاحب العقد
+
+      // إذا لم يكن العقد ينتمي لتاجر مسجل لديه توكنات، نتجاوزه
+      if (!tenantId || !tenantMap[tenantId]) return;
+
       const installmentAmount = Number(inst.monthlyInstallment) || 0;
       const totalMonths = Number(inst.months) || 1;
       const calculatedRemainingDebt = Math.max(0, Number(inst.totalDue) || 0);
@@ -101,61 +134,44 @@ export async function GET(request: Request) {
       }
 
       if (unpaidCount > 0 && contractOverdueSum > 0) {
-        overdueContractsCount++;
-        if (hasTodayDue) todayDueContractsCount++;
+        tenantMap[tenantId].overdueCount++;
+        if (hasTodayDue) tenantMap[tenantId].todayCount++;
       }
     });
 
-    if (overdueContractsCount === 0) {
-      return NextResponse.json({ success: true, message: "لا توجد عقود مستحقة أو متأخرة اليوم." });
-    }
+    // 4. إرسال الإشعارات مخصصة لكل عميل SaaS وأجهزة موظفيه
+    const sendPromises: Promise<any>[] = [];
+    let totalNotificationsSent = 0;
 
-    // 2. جلب التوكنات من مجموعتي users و system_users معا
-    const [usersSnap, systemUsersSnap] = await Promise.all([
-      db.collection("users").get(),
-      db.collection("system_users").get(),
-    ]);
+    Object.keys(tenantMap).forEach((tenantId) => {
+      const { tokens, todayCount, overdueCount } = tenantMap[tenantId];
 
-    const targetTokens: string[] = [];
+      // إذا لم تكن هناك عقود متعثرة لهذا الحساب تحديداً، لا نرسل له إشعاراً
+      if (overdueCount === 0 || tokens.length === 0) return;
 
-    const extractToken = (doc: any) => {
-      const data = doc.data();
-      if (data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
-        if (!targetTokens.includes(data.fcmToken)) {
-          targetTokens.push(data.fcmToken);
-        }
-      }
-    };
+      const notificationBody = todayCount > 0
+        ? `يوجد اليوم (${todayCount}) عقد مستحق، وإجمالي العقود المتعثرة (${overdueCount}) عقد.`
+        : `إجمالي العقود المتعثرة والمتأخرة حالياً (${overdueCount}) عقد تتطلب المتابعة.`;
 
-    usersSnap.forEach(extractToken);
-    systemUsersSnap.forEach(extractToken);
-
-    if (targetTokens.length === 0) {
-      return NextResponse.json({ success: false, message: "لم يتم العثور على أجهزة مسجلة بها fcmToken." });
-    }
-
-    // 3. إرسال الإشعار بالدقة النصية المطلوبة
-    const notificationBody = todayDueContractsCount > 0
-      ? `يوجد اليوم (${todayDueContractsCount}) عقد مستحق، وإجمالي العقود المتعثرة (${overdueContractsCount}) عقد.`
-      : `إجمالي العقود المتعثرة والمتأخرة حالياً (${overdueContractsCount}) عقد تتطلب المتابعة.`;
-
-    const sendPromises = targetTokens.map((token) =>
-      messaging.send({
-        notification: {
-          title: "تنبيه التعثرات والمستحقات ⚠️",
-          body: notificationBody,
-        },
-        token: token,
-      })
-    );
+      tokens.forEach((token) => {
+        totalNotificationsSent++;
+        sendPromises.push(
+          messaging.send({
+            notification: {
+              title: "تنبيه التعثرات والمستحقات ⚠️",
+              body: notificationBody,
+            },
+            token: token,
+          })
+        );
+      });
+    });
 
     await Promise.all(sendPromises);
 
     return NextResponse.json({
       success: true,
-      message: `تم إرسال التنبيه بنجاح لـ ${targetTokens.length} جهاز!`,
-      todayDueContractsCount,
-      overdueContractsCount,
+      message: `تم إرسال التنبيهات المخصصة لـ ${totalNotificationsSent} جهاز عبر كافة حسابات العملاء!`,
     });
   } catch (error: any) {
     console.error("Error in send-overdue API:", error);
