@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   const secret = searchParams.get("secret")?.trim();
 
   // التحقق من مفتاح الحماية
-  if (secret !== "MY_SECRET_KEY_123") {
+  if (secret !== "husseinrahimabd1998") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
