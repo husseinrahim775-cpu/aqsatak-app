@@ -3,7 +3,6 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
-// يمنع التخزين المخبأ وضمان معالجة الـ Request في كل مرة
 export const revalidate = 0;
 
 function getPrivateKey() {
@@ -36,54 +35,115 @@ export async function GET(request: Request) {
   const db = getFirestore();
   const messaging = getMessaging();
 
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, "0");
-  const d = String(today.getDate()).padStart(2, "0");
-  const todayStr = `${y}-${m}-${d}`;
-
   try {
-    // 1. جلب الأقساط غير المدفوعة التي استحقاقها اليوم أو قبل اليوم (متأخرة)
-    const instSnap = await db.collection("installments").get();
-    
-    let overdueCount = 0;
-    instSnap.forEach((doc) => {
-      const data = doc.data();
-      const dueDate = data.nextDueDate || data.startDate;
-      const isPending = data.status !== "paid" && data.status !== "completed";
+    // 1. جلب بيانات العقود والمدفوعات لتطبيق خوارزمية المودال
+    const [installmentsSnap, paymentsSnap] = await Promise.all([
+      db.collection("installments").get(),
+      db.collection("payments").get(),
+    ]);
 
-      // فحص إذا القسط مستحق اليوم أو متأخر في تاريخ سابق
-      if (isPending && dueDate && dueDate <= todayStr) {
-        overdueCount++;
+    const payments = paymentsSnap.docs.map((doc) => doc.data());
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    let overdueContractsCount = 0; // إجمالي العقود المتعثرة
+    let todayDueContractsCount = 0; // العقود المستحقة اليوم حصراً
+
+    installmentsSnap.forEach((doc) => {
+      const inst = doc.data();
+      const installmentAmount = Number(inst.monthlyInstallment) || 0;
+      const totalMonths = Number(inst.months) || 1;
+      const calculatedRemainingDebt = Math.max(0, Number(inst.totalDue) || 0);
+
+      if (!inst.startDate || calculatedRemainingDebt <= 0) return;
+
+      const instPayments = payments.filter((p) => p.installmentId === doc.id || p.installmentId === inst.id);
+      const [sYear, sMonth, sDay] = inst.startDate.split("-").map(Number);
+
+      let contractOverdueSum = 0;
+      let unpaidCount = 0;
+      let hasTodayDue = false;
+
+      for (let m = 0; m < totalMonths; m++) {
+        let dueDateOnly: Date;
+        if (inst.paymentPeriod === "daily") {
+          dueDateOnly = new Date(sYear, sMonth - 1, sDay + m);
+        } else if (inst.paymentPeriod === "weekly") {
+          dueDateOnly = new Date(sYear, sMonth - 1, sDay + m * 7);
+        } else {
+          dueDateOnly = new Date(sYear, sMonth - 1 + m, sDay);
+        }
+
+        dueDateOnly.setHours(0, 0, 0, 0);
+        const dueDateMidnight = dueDateOnly.getTime();
+
+        const y = dueDateOnly.getFullYear();
+        const monthStr = String(dueDateOnly.getMonth() + 1).padStart(2, "0");
+        const dayStr = String(dueDateOnly.getDate()).padStart(2, "0");
+        const formattedFullDate = `${y}-${monthStr}-${dayStr}`;
+        const formattedYearMonth = `${y}-${monthStr}`;
+
+        const isPaid =
+          instPayments.some(
+            (p) => p.targetMonth === formattedFullDate || p.targetMonth === formattedYearMonth
+          ) ||
+          inst.paidMonths?.includes(formattedFullDate) ||
+          inst.paidMonths?.includes(formattedYearMonth);
+
+        if (!isPaid && dueDateMidnight <= todayMidnight) {
+          const diffDays = Math.floor((todayMidnight - dueDateMidnight) / (1000 * 60 * 60 * 24));
+          if (diffDays >= 0) {
+            contractOverdueSum += installmentAmount;
+            unpaidCount += 1;
+            if (diffDays === 0) hasTodayDue = true;
+          }
+        }
+      }
+
+      if (unpaidCount > 0 && contractOverdueSum > 0) {
+        overdueContractsCount++;
+        if (hasTodayDue) todayDueContractsCount++;
       }
     });
 
-    if (overdueCount === 0) {
-      return NextResponse.json({ success: true, message: "لا توجد أقساط مستحقة أو متأخرة اليوم." });
+    if (overdueContractsCount === 0) {
+      return NextResponse.json({ success: true, message: "لا توجد عقود مستحقة أو متأخرة اليوم." });
     }
 
-    // 2. جلب أجهزة الموظفين والمدراء لاستلام الإشعارات
-    const usersSnap = await db.collection("users").get();
-    const staffTokens: string[] = [];
+    // 2. جلب التوكنات من مجموعتي users و system_users معا
+    const [usersSnap, systemUsersSnap] = await Promise.all([
+      db.collection("users").get(),
+      db.collection("system_users").get(),
+    ]);
 
-    usersSnap.forEach((doc) => {
+    const targetTokens: string[] = [];
+
+    const extractToken = (doc: any) => {
       const data = doc.data();
-      // تأكد أن الحساب لموظف أو أدمن ولديه توكن فعال
-      if (data.fcmToken && (data.role === "admin" || data.role === "employee" || !data.role)) {
-        staffTokens.push(data.fcmToken);
+      if (data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
+        if (!targetTokens.includes(data.fcmToken)) {
+          targetTokens.push(data.fcmToken);
+        }
       }
-    });
+    };
 
-    if (staffTokens.length === 0) {
-      return NextResponse.json({ success: false, message: "لم يتم العثور على أجهزة موظفين مسجلة." });
+    usersSnap.forEach(extractToken);
+    systemUsersSnap.forEach(extractToken);
+
+    if (targetTokens.length === 0) {
+      return NextResponse.json({ success: false, message: "لم يتم العثور على أجهزة مسجلة بها fcmToken." });
     }
 
-    // 3. إرسال الإشعار التلخيصي لكافة الموظفين
-    const sendPromises = staffTokens.map((token) =>
+    // 3. إرسال الإشعار بالدقة النصية المطلوبة
+    const notificationBody = todayDueContractsCount > 0
+      ? `يوجد اليوم (${todayDueContractsCount}) عقد مستحق، وإجمالي العقود المتعثرة (${overdueContractsCount}) عقد.`
+      : `إجمالي العقود المتعثرة والمتأخرة حالياً (${overdueContractsCount}) عقد تتطلب المتابعة.`;
+
+    const sendPromises = targetTokens.map((token) =>
       messaging.send({
         notification: {
           title: "تنبيه التعثرات والمستحقات ⚠️",
-          body: `يوجد اليوم ${overdueCount} قسط مستحق/متأخر يتطلب متابعة التسديد من العملاء.`,
+          body: notificationBody,
         },
         token: token,
       })
@@ -93,11 +153,12 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `تم إرسال التنبيه بنجاح لـ ${staffTokens.length} جهاز!`,
-      overdueCount,
+      message: `تم إرسال التنبيه بنجاح لـ ${targetTokens.length} جهاز!`,
+      todayDueContractsCount,
+      overdueContractsCount,
     });
   } catch (error: any) {
-    console.error("Error:", error);
+    console.error("Error in send-overdue API:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
