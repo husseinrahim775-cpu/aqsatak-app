@@ -21,7 +21,7 @@ const firebaseConfig = {
 };
 
 // تهيئة تطبيق Firebase الأساسي
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // تفعيل الكاش والتخزين المحلي غير المحدود لسرعة استجابة فائقة
 let firestoreDb;

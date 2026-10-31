@@ -43,40 +43,59 @@ export async function GET(request: Request) {
   const todayStr = `${y}-${m}-${d}`;
 
   try {
-    const usersSnap = await db.collection("users").get();
+    // 1. جلب الأقساط غير المدفوعة التي استحقاقها اليوم أو قبل اليوم (متأخرة)
+    const instSnap = await db.collection("installments").get();
+    
+    let overdueCount = 0;
+    instSnap.forEach((doc) => {
+      const data = doc.data();
+      const dueDate = data.nextDueDate || data.startDate;
+      const isPending = data.status !== "paid" && data.status !== "completed";
 
-    for (const userDoc of usersSnap.docs) {
-      const userData = userDoc.data();
-      const fcmToken = userData.fcmToken;
-
-      if (fcmToken) {
-        const instSnap = await db
-          .collection("installments")
-          .where("userId", "==", userDoc.id)
-          .get();
-
-        let todayDueCount = 0;
-
-        instSnap.forEach((inst) => {
-          const data = inst.data();
-          if (data.nextDueDate === todayStr || data.startDate === todayStr) {
-            todayDueCount++;
-          }
-        });
-
-        if (todayDueCount > 0) {
-          await messaging.send({
-            notification: {
-              title: "تذكير الأقساط اليومية 🔔",
-              body: `لديك ${todayDueCount} أقساط مستحقة الدفع اليوم. يرجى المتابعة والتسديد.`,
-            },
-            token: fcmToken,
-          });
-        }
+      // فحص إذا القسط مستحق اليوم أو متأخر في تاريخ سابق
+      if (isPending && dueDate && dueDate <= todayStr) {
+        overdueCount++;
       }
+    });
+
+    if (overdueCount === 0) {
+      return NextResponse.json({ success: true, message: "لا توجد أقساط مستحقة أو متأخرة اليوم." });
     }
 
-    return NextResponse.json({ success: true, message: "Notifications sent!" });
+    // 2. جلب أجهزة الموظفين والمدراء لاستلام الإشعارات
+    const usersSnap = await db.collection("users").get();
+    const staffTokens: string[] = [];
+
+    usersSnap.forEach((doc) => {
+      const data = doc.data();
+      // تأكد أن الحساب لموظف أو أدمن ولديه توكن فعال
+      if (data.fcmToken && (data.role === "admin" || data.role === "employee" || !data.role)) {
+        staffTokens.push(data.fcmToken);
+      }
+    });
+
+    if (staffTokens.length === 0) {
+      return NextResponse.json({ success: false, message: "لم يتم العثور على أجهزة موظفين مسجلة." });
+    }
+
+    // 3. إرسال الإشعار التلخيصي لكافة الموظفين
+    const sendPromises = staffTokens.map((token) =>
+      messaging.send({
+        notification: {
+          title: "تنبيه التعثرات والمستحقات ⚠️",
+          body: `يوجد اليوم ${overdueCount} قسط مستحق/متأخر يتطلب متابعة التسديد من العملاء.`,
+        },
+        token: token,
+      })
+    );
+
+    await Promise.all(sendPromises);
+
+    return NextResponse.json({
+      success: true,
+      message: `تم إرسال التنبيه بنجاح لـ ${staffTokens.length} جهاز!`,
+      overdueCount,
+    });
   } catch (error: any) {
     console.error("Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
