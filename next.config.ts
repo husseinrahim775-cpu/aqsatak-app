@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
+const isExportBuild = process.env.BUILD_TARGET === "EXPORT";
+
 const nextConfig: NextConfig = {
-  output: "export",
+  // يفعّل التصدير الأستاتيكي فقط عند البناء المحلي للأندرويد أو الحاسوب
+  ...(isExportBuild ? { output: "export" } : {}),
   trailingSlash: true,
   images: {
     unoptimized: true,
