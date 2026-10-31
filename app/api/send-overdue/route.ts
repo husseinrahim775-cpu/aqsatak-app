@@ -3,8 +3,8 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
-// نستخدم force-dynamic لضمان قراءة الـ Query Parameters مثل ?secret= على سيرفر Vercel
-export const dynamic = "force-dynamic";
+// 🟢 يجب أن تكون القيمة نصاً ثابتاً صريحاً ليتعرف عليها Next.js & Turbopack
+export const dynamic = "force-static";
 
 function getPrivateKey() {
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
@@ -25,6 +25,11 @@ if (!getApps().length) {
 }
 
 export async function GET(request: Request) {
+  // 🟢 تجاوز التنفيذ فقط عند عملية البناء الاستاتيكي (BUILD_TARGET=EXPORT)
+  if (process.env.BUILD_TARGET === "EXPORT") {
+    return NextResponse.json({ message: "Static export build bypass" });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const secret = searchParams.get("secret")?.trim();
