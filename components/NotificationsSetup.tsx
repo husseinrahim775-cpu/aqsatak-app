@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, auth, app } from '@/services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
@@ -22,6 +22,7 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
     if (userSnap.exists()) {
       await updateDoc(userRef, {
         fcmToken: token,
+        fcmTokens: arrayUnion(token), // 👈 حفظ التوكن بالمصفوفة لعدم مسح أجهزة المستخدم الأخرى
         lastTokenUpdate: new Date().toISOString(),
       });
       console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في users`);
@@ -34,6 +35,7 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
     if (systemUserSnap.exists()) {
       await updateDoc(systemUserRef, {
         fcmToken: token,
+        fcmTokens: arrayUnion(token), // 👈 حفظ التوكن بالمصفوفة
         lastTokenUpdate: new Date().toISOString(),
       });
       console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في system_users`);
@@ -49,35 +51,29 @@ export default function NotificationsSetup() {
 
     // 📱 1. التشغيل على أجهزة المحمول الأصلية (Android / iOS)
     if (Capacitor.isNativePlatform()) {
-      // الاستماع لتوليد التوكن وتخزينه محلياً
       const registrationListener = PushNotifications.addListener(
         'registration',
         async (token) => {
           console.log('📱 Native Push Registration Token:', token.value);
           nativeFcmToken = token.value;
 
-          // إذا كان هنالك مستخدم مسجل دخوله حالياً، نحدث حقوله فوراً
           if (auth.currentUser?.uid) {
             await saveTokenToCorrectCollection(auth.currentUser.uid, token.value);
           }
         }
       );
 
-      // طلب الإذن والتسجيل
       PushNotifications.requestPermissions().then((result) => {
         if (result.receive === 'granted') {
           PushNotifications.register();
         }
       });
 
-      // 🔄 الاستماع لكل عملية تسجيل دخول جديدة (تنقل بين الحسابات)
       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
         if (user?.uid) {
-          // إذا كان التوكن متولداً مسبقاً، املأ حقل الحساب الجديد فوراً
           if (nativeFcmToken) {
             await saveTokenToCorrectCollection(user.uid, nativeFcmToken);
           } else {
-            // في حال عدم جاهزية التوكن، نطلب التسجيل مجدداً لتمرير التوكن
             PushNotifications.register();
           }
         }
@@ -97,10 +93,9 @@ export default function NotificationsSetup() {
       };
     } 
 
-    // 🖥️ 2. التشغيل على المتصفح، الآيفون (PWA/Web)، وتطبيق سطح المكتب (EXE)
+    // 🖥️ 2. التشغيل على المتصفح، الويب، وتطبيق سطح المكتب (EXE)
     else {
       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-        // عند تسجيل الخروج، لا نفعل شيئاً
         if (!user) return;
 
         try {
@@ -109,16 +104,30 @@ export default function NotificationsSetup() {
           const permission = await Notification.requestPermission();
           if (permission !== 'granted') return;
 
-          const swUrl = `/firebase-messaging-sw.js?apiKey=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}&authDomain=${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}&projectId=${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}&storageBucket=${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}&messagingSenderId=${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}&appId=${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}`;
-
-          const registration = await navigator.serviceWorker.register(swUrl);
           const messaging = getMessaging(app);
+          let token = '';
 
-          // طلب التوكن فورياً للحساب الذي قام بتسجيل الدخول للتو
-          const token = await getToken(messaging, {
-            serviceWorkerRegistration: registration,
-            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-          });
+          // المحاولة الأولى: التسجيل عبر Service Worker في الويب
+          if ('serviceWorker' in navigator) {
+            try {
+              const swUrl = `/firebase-messaging-sw.js?apiKey=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}&authDomain=${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}&projectId=${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}&storageBucket=${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}&messagingSenderId=${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}&appId=${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}`;
+              
+              const registration = await navigator.serviceWorker.register(swUrl);
+              token = await getToken(messaging, {
+                serviceWorkerRegistration: registration,
+                vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+              });
+            } catch (swErr) {
+              console.warn('تنبيه: فشل تسجيل Service Worker، محاولة التسجيل المباشر للـ EXE...', swErr);
+            }
+          }
+
+          // المحاولة الثانية: للديسكتاوب في حال عدم دعم الـ SW المباشر
+          if (!token) {
+            token = await getToken(messaging, {
+              vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+            });
+          }
 
           if (token) {
             await saveTokenToCorrectCollection(user.uid, token);
@@ -136,7 +145,7 @@ export default function NotificationsSetup() {
             if (payload.notification) {
               new Notification(payload.notification.title || 'تنبيه', {
                 body: payload.notification.body,
-                icon: '/window.svg',
+                icon: '/logo.png',
               });
             }
           });
