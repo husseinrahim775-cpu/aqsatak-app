@@ -3,10 +3,41 @@
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, auth, app } from '@/services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+
+// دالة مساعدة لحفظ/تحديث التوكن في المجموعة الصحيحة (users أو system_users)
+async function saveTokenToCorrectCollection(userId: string, token: string) {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      await updateDoc(userRef, {
+        fcmToken: token,
+        lastTokenUpdate: new Date().toISOString(),
+      });
+      console.log('تم تحديث FCM Token في مجموعة users');
+      return;
+    }
+
+    // إذا لم يكن بـ users، نفحص مجموعة system_users
+    const systemUserRef = doc(db, 'system_users', userId);
+    const systemUserSnap = await getDoc(systemUserRef);
+
+    if (systemUserSnap.exists()) {
+      await updateDoc(systemUserRef, {
+        fcmToken: token,
+        lastTokenUpdate: new Date().toISOString(),
+      });
+      console.log('تم تحديث FCM Token في مجموعة system_users');
+    }
+  } catch (error) {
+    console.error('خطأ أثناء حفظ الـ FCM Token في Firestore:', error);
+  }
+}
 
 export default function NotificationsSetup() {
   useEffect(() => {
@@ -24,14 +55,7 @@ export default function NotificationsSetup() {
           console.log('Push Registration Token:', token.value);
           const currentUser = auth.currentUser;
           if (currentUser && token.value) {
-            try {
-              await updateDoc(doc(db, 'users', currentUser.uid), {
-                fcmToken: token.value,
-                lastTokenUpdate: new Date().toISOString(),
-              });
-            } catch (error) {
-              console.error('خطأ في حفظ FCM Token في Firestore:', error);
-            }
+            await saveTokenToCorrectCollection(currentUser.uid, token.value);
           }
         }
       );
@@ -51,18 +75,16 @@ export default function NotificationsSetup() {
     
     // 🖥️ 2. التشغيل على المتصفح وتطبيق سطح المكتب (Web / EXE)
     else {
-      // الاستماع لتغير حالة تسجيل الدخول لضمان وجود currentUser
+      // الاستماع لتغير حالة تسجيل الدخول لضمان ربط التوكن بالحساب الحالي فوراً
       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
         if (!user) return;
 
         try {
           if (typeof window === 'undefined' || !('Notification' in window)) return;
 
-          // طلب إذن التنبيهات
           const permission = await Notification.requestPermission();
           if (permission !== 'granted') return;
 
-          // رابط الـ Service Worker مع المتغيرات البيئية
           const swUrl = `/firebase-messaging-sw.js?apiKey=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}&authDomain=${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}&projectId=${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}&storageBucket=${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}&messagingSenderId=${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}&appId=${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}`;
 
           const registration = await navigator.serviceWorker.register(swUrl);
@@ -74,18 +96,15 @@ export default function NotificationsSetup() {
           });
 
           if (token) {
-            await updateDoc(doc(db, 'users', user.uid), {
-              fcmToken: token,
-              lastTokenUpdate: new Date().toISOString(),
-            });
-            console.log('تم حفظ FCM Token للمتصفح/الحاسوب بنجاح:', token);
+            // حفظ التوكن بحسب معرف الحساب المسجل حالياً في القائمة الصحيحة
+            await saveTokenToCorrectCollection(user.uid, token);
+            console.log('تم حفظ FCM Token للمتصفح/الحاسوب بنجاح للحساب الحالي:', token);
           }
         } catch (error) {
           console.error('خطأ في إعداد إشعارات المتصفح/الحاسوب:', error);
         }
       });
 
-      // الاستماع للإشعارات في الواجهة أثناء فتح المنظومة
       let unsubscribeMessaging: (() => void) | null = null;
       try {
         if (typeof window !== 'undefined' && 'Notification' in window) {

@@ -27,6 +27,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get("secret")?.trim();
 
+  // التحقق من المفتاح السري
   if (secret !== "husseinrahimabd1998") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -42,40 +43,35 @@ export async function GET(request: Request) {
       db.collection("payments").get(),
     ]);
 
-    // خريطة الربط بين حساب المستأجر وتوكنات أجهزته
-    const tenantTokens: Record<string, string[]> = {};
+    // 1. إنشاء خريطة لربط كل توكن بصاحبه الأصلي (Tenant ID)
+    const tokenOwnerMap: Record<string, string> = {};
 
-    const addTokenToTenant = (tenantId: string, token: string) => {
-      if (!tenantId || !token || typeof token !== "string" || token.trim() === "") return;
-      if (!tenantTokens[tenantId]) tenantTokens[tenantId] = [];
-      if (!tenantTokens[tenantId].includes(token)) {
-        tenantTokens[tenantId].push(token);
-      }
-    };
-
-    // 1. ربط توكنات المستخدمين والمدراء
+    // أ) ربط توكنات الحسابات الرئيسية في users
     usersSnap.forEach((doc) => {
       const data = doc.data();
-      if (data.fcmToken) addTokenToTenant(doc.id, data.fcmToken);
+      if (data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
+        tokenOwnerMap[data.fcmToken] = doc.id;
+      }
     });
 
-    // 2. ربط توكنات الموظفين بالـ Owner UID الخاص بمتجرهم
+    // ب) ربط توكنات الموظفين الفرعيين في system_users بالـ ownerUid
     systemUsersSnap.forEach((doc) => {
       const data = doc.data();
       const ownerUid = data.ownerUid || data.userId;
-      if (ownerUid && data.fcmToken) addTokenToTenant(ownerUid, data.fcmToken);
+      if (ownerUid && data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
+        tokenOwnerMap[data.fcmToken] = ownerUid;
+      }
     });
 
-    // 3. ضبط التاريخ والوقت وفق التوقيت المحلي (GMT+3)
+    // 2. إعداد التوقيت المحلي والمدفوعات
     const now = new Date();
     const localNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Baghdad" }));
     const todayMidnight = new Date(localNow.getFullYear(), localNow.getMonth(), localNow.getDate()).getTime();
 
     const payments = paymentsSnap.docs.map((doc) => doc.data());
-    
-    // خريطة حساب العقود لكل مستأجر
     const tenantStats: Record<string, { todayCount: number; overdueCount: number }> = {};
 
+    // 3. تجميع إحصائيات العقود لكل Tenant على حدة
     installmentsSnap.forEach((doc) => {
       const inst = doc.data();
       const tenantId = inst.userId || inst.ownerUid;
@@ -138,30 +134,28 @@ export async function GET(request: Request) {
       }
     });
 
-    // 4. إرسال الإشعارات المخصصة لكافة الحسابات
+    // 4. إرسال الإشعار المخصص لكل Token برقم حاسبة المستأجر حصراً
     const sendPromises: Promise<any>[] = [];
 
-    Object.keys(tenantTokens).forEach((tenantId) => {
-      const tokens = tenantTokens[tenantId];
-      const stats = tenantStats[tenantId] || { todayCount: 0, overdueCount: 0 };
+    Object.keys(tokenOwnerMap).forEach((token) => {
+      const ownerId = tokenOwnerMap[token];
+      const stats = tenantStats[ownerId];
 
-      if (stats.overdueCount === 0 || tokens.length === 0) return;
+      if (!stats || stats.overdueCount === 0) return;
 
       const notificationBody = stats.todayCount > 0
         ? `يوجد اليوم (${stats.todayCount}) عقد مستحق، وإجمالي العقود المتعثرة (${stats.overdueCount}) عقد.`
         : `إجمالي العقود المتعثرة والمتأخرة حالياً (${stats.overdueCount}) عقد تتطلب المتابعة.`;
 
-      tokens.forEach((token) => {
-        sendPromises.push(
-          messaging.send({
-            notification: {
-              title: "تنبيه التعثرات والمستحقات ⚠️",
-              body: notificationBody,
-            },
-            token: token,
-          })
-        );
-      });
+      sendPromises.push(
+        messaging.send({
+          notification: {
+            title: "تنبيه التعثرات والمستحقات ⚠️",
+            body: notificationBody,
+          },
+          token: token,
+        })
+      );
     });
 
     await Promise.all(sendPromises);
