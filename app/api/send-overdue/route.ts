@@ -27,7 +27,6 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get("secret")?.trim();
 
-  // التحقق من مفتاح الحماية
   if (secret !== "husseinrahimabd1998") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -36,7 +35,6 @@ export async function GET(request: Request) {
   const messaging = getMessaging();
 
   try {
-    // 1. جلب بيانات المستخدمين وتجميع التوكنات حسب الـ Owner UID
     const [usersSnap, systemUsersSnap, installmentsSnap, paymentsSnap] = await Promise.all([
       db.collection("users").get(),
       db.collection("system_users").get(),
@@ -44,45 +42,46 @@ export async function GET(request: Request) {
       db.collection("payments").get(),
     ]);
 
-    // خريطة لتخزين توكنات وأرقام كل حساب SaaS على حدة
-    const tenantMap: Record<string, { tokens: string[]; todayCount: number; overdueCount: number }> = {};
+    // خريطة الربط بين حساب المستأجر وتوكنات أجهزته
+    const tenantTokens: Record<string, string[]> = {};
 
-    // أ) جمع توكنات حسابات الرئيسية (users)
+    const addTokenToTenant = (tenantId: string, token: string) => {
+      if (!tenantId || !token || typeof token !== "string" || token.trim() === "") return;
+      if (!tenantTokens[tenantId]) tenantTokens[tenantId] = [];
+      if (!tenantTokens[tenantId].includes(token)) {
+        tenantTokens[tenantId].push(token);
+      }
+    };
+
+    // 1. ربط توكنات المستخدمين والمدراء
     usersSnap.forEach((doc) => {
       const data = doc.data();
-      const uid = doc.id;
-      if (data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
-        if (!tenantMap[uid]) tenantMap[uid] = { tokens: [], todayCount: 0, overdueCount: 0 };
-        if (!tenantMap[uid].tokens.includes(data.fcmToken)) {
-          tenantMap[uid].tokens.push(data.fcmToken);
-        }
-      }
+      if (data.fcmToken) addTokenToTenant(doc.id, data.fcmToken);
     });
 
-    // ب) جمع توكنات الموظفين الفرعيين (system_users) وربطها بالـ ownerUid
+    // 2. ربط توكنات الموظفين بالـ Owner UID الخاص بمتجرهم
     systemUsersSnap.forEach((doc) => {
       const data = doc.data();
-      const ownerUid = data.ownerUid;
-      if (ownerUid && data.fcmToken && typeof data.fcmToken === "string" && data.fcmToken.trim() !== "") {
-        if (!tenantMap[ownerUid]) tenantMap[ownerUid] = { tokens: [], todayCount: 0, overdueCount: 0 };
-        if (!tenantMap[ownerUid].tokens.includes(data.fcmToken)) {
-          tenantMap[ownerUid].tokens.push(data.fcmToken);
-        }
-      }
+      const ownerUid = data.ownerUid || data.userId;
+      if (ownerUid && data.fcmToken) addTokenToTenant(ownerUid, data.fcmToken);
     });
 
-    // 2. معالجة المدفوعات وتاريخ اليوم
-    const payments = paymentsSnap.docs.map((doc) => doc.data());
+    // 3. ضبط التاريخ والوقت وفق التوقيت المحلي (GMT+3)
     const now = new Date();
-    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const localNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Baghdad" }));
+    const todayMidnight = new Date(localNow.getFullYear(), localNow.getMonth(), localNow.getDate()).getTime();
 
-    // 3. حساب متعثرات كل مستأجر (Tenant) على حدة
+    const payments = paymentsSnap.docs.map((doc) => doc.data());
+    
+    // خريطة حساب العقود لكل مستأجر
+    const tenantStats: Record<string, { todayCount: number; overdueCount: number }> = {};
+
     installmentsSnap.forEach((doc) => {
       const inst = doc.data();
-      const tenantId = inst.userId || inst.ownerUid; // معرف التاجر صاحب العقد
+      const tenantId = inst.userId || inst.ownerUid;
 
-      // إذا لم يكن العقد ينتمي لتاجر مسجل لديه توكنات، نتجاوزه
-      if (!tenantId || !tenantMap[tenantId]) return;
+      if (!tenantId) return;
+      if (!tenantStats[tenantId]) tenantStats[tenantId] = { todayCount: 0, overdueCount: 0 };
 
       const installmentAmount = Number(inst.monthlyInstallment) || 0;
       const totalMonths = Number(inst.months) || 1;
@@ -134,27 +133,25 @@ export async function GET(request: Request) {
       }
 
       if (unpaidCount > 0 && contractOverdueSum > 0) {
-        tenantMap[tenantId].overdueCount++;
-        if (hasTodayDue) tenantMap[tenantId].todayCount++;
+        tenantStats[tenantId].overdueCount++;
+        if (hasTodayDue) tenantStats[tenantId].todayCount++;
       }
     });
 
-    // 4. إرسال الإشعارات مخصصة لكل عميل SaaS وأجهزة موظفيه
+    // 4. إرسال الإشعارات المخصصة لكافة الحسابات
     const sendPromises: Promise<any>[] = [];
-    let totalNotificationsSent = 0;
 
-    Object.keys(tenantMap).forEach((tenantId) => {
-      const { tokens, todayCount, overdueCount } = tenantMap[tenantId];
+    Object.keys(tenantTokens).forEach((tenantId) => {
+      const tokens = tenantTokens[tenantId];
+      const stats = tenantStats[tenantId] || { todayCount: 0, overdueCount: 0 };
 
-      // إذا لم تكن هناك عقود متعثرة لهذا الحساب تحديداً، لا نرسل له إشعاراً
-      if (overdueCount === 0 || tokens.length === 0) return;
+      if (stats.overdueCount === 0 || tokens.length === 0) return;
 
-      const notificationBody = todayCount > 0
-        ? `يوجد اليوم (${todayCount}) عقد مستحق، وإجمالي العقود المتعثرة (${overdueCount}) عقد.`
-        : `إجمالي العقود المتعثرة والمتأخرة حالياً (${overdueCount}) عقد تتطلب المتابعة.`;
+      const notificationBody = stats.todayCount > 0
+        ? `يوجد اليوم (${stats.todayCount}) عقد مستحق، وإجمالي العقود المتعثرة (${stats.overdueCount}) عقد.`
+        : `إجمالي العقود المتعثرة والمتأخرة حالياً (${stats.overdueCount}) عقد تتطلب المتابعة.`;
 
       tokens.forEach((token) => {
-        totalNotificationsSent++;
         sendPromises.push(
           messaging.send({
             notification: {
@@ -171,7 +168,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `تم إرسال التنبيهات المخصصة لـ ${totalNotificationsSent} جهاز عبر كافة حسابات العملاء!`,
+      message: "تم معالجة وإرسال الإشعارات بنجاح.",
     });
   } catch (error: any) {
     console.error("Error in send-overdue API:", error);
