@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
 import { db, auth, app } from '@/services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
@@ -22,7 +22,7 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
     if (userSnap.exists()) {
       await updateDoc(userRef, {
         fcmToken: token,
-        fcmTokens: arrayUnion(token), // 👈 حفظ التوكن بالمصفوفة لعدم مسح أجهزة المستخدم الأخرى
+        fcmTokens: arrayUnion(token), // 🟢 استخدام arrayUnion لحفظ عدة أجهزة لنفس الحساب
         lastTokenUpdate: new Date().toISOString(),
       });
       console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في users`);
@@ -35,11 +35,20 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
     if (systemUserSnap.exists()) {
       await updateDoc(systemUserRef, {
         fcmToken: token,
-        fcmTokens: arrayUnion(token), // 👈 حفظ التوكن بالمصفوفة
+        fcmTokens: arrayUnion(token),
         lastTokenUpdate: new Date().toISOString(),
       });
       console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في system_users`);
+      return;
     }
+
+    // fallback لتسجيل التوكن إذا كان الحساب جديداً
+    await setDoc(userRef, {
+      fcmToken: token,
+      fcmTokens: arrayUnion(token),
+      lastTokenUpdate: new Date().toISOString(),
+    }, { merge: true });
+
   } catch (error) {
     console.error('❌ خطأ أثناء حفظ الـ FCM Token في Firestore:', error);
   }
@@ -95,6 +104,10 @@ export default function NotificationsSetup() {
 
     // 🖥️ 2. التشغيل على المتصفح، الويب، وتطبيق سطح المكتب (EXE)
     else {
+      // 🟢 اكتشاف بيئة Electron لتفادي استدعاء Push API المسببة للخطأ
+      const isElectron = typeof window !== 'undefined' && 
+        (navigator.userAgent.toLowerCase().includes('electron') || (window as any).process?.versions?.electron);
+
       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
         if (!user) return;
 
@@ -104,30 +117,21 @@ export default function NotificationsSetup() {
           const permission = await Notification.requestPermission();
           if (permission !== 'granted') return;
 
+          // إذا كنا داخل بيئة Electron، نتجاوز تسجيل Service Worker لتجنب push service not available
+          if (isElectron) {
+            console.log("ℹ️ تم اكتشاف بيئة Electron Desktop - تم تجاوز Push API المسببة للخطأ.");
+            return;
+          }
+
+          const swUrl = `/firebase-messaging-sw.js?apiKey=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}&authDomain=${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}&projectId=${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}&storageBucket=${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}&messagingSenderId=${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}&appId=${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}`;
+
+          const registration = await navigator.serviceWorker.register(swUrl);
           const messaging = getMessaging(app);
-          let token = '';
 
-          // المحاولة الأولى: التسجيل عبر Service Worker في الويب
-          if ('serviceWorker' in navigator) {
-            try {
-              const swUrl = `/firebase-messaging-sw.js?apiKey=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}&authDomain=${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}&projectId=${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}&storageBucket=${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}&messagingSenderId=${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}&appId=${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}`;
-              
-              const registration = await navigator.serviceWorker.register(swUrl);
-              token = await getToken(messaging, {
-                serviceWorkerRegistration: registration,
-                vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-              });
-            } catch (swErr) {
-              console.warn('تنبيه: فشل تسجيل Service Worker، محاولة التسجيل المباشر للـ EXE...', swErr);
-            }
-          }
-
-          // المحاولة الثانية: للديسكتاوب في حال عدم دعم الـ SW المباشر
-          if (!token) {
-            token = await getToken(messaging, {
-              vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-            });
-          }
+          const token = await getToken(messaging, {
+            serviceWorkerRegistration: registration,
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+          });
 
           if (token) {
             await saveTokenToCorrectCollection(user.uid, token);
@@ -139,13 +143,13 @@ export default function NotificationsSetup() {
 
       let unsubscribeMessaging: (() => void) | null = null;
       try {
-        if (typeof window !== 'undefined' && 'Notification' in window) {
+        if (typeof window !== 'undefined' && 'Notification' in window && !isElectron) {
           const messaging = getMessaging(app);
           unsubscribeMessaging = onMessage(messaging, (payload) => {
             if (payload.notification) {
               new Notification(payload.notification.title || 'تنبيه', {
                 body: payload.notification.body,
-                icon: '/logo.png',
+                icon: '/window.svg',
               });
             }
           });
