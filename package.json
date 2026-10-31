@@ -5,8 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:export": "cross-env BUILD_TARGET=EXPORT next build",
-    "start": "next start",
+"build:export": "node scripts/toggle-api.js hide && (cross-env BUILD_TARGET=EXPORT next build || (node scripts/toggle-api.js restore && exit 1)) && node scripts/toggle-api.js restore",    "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
