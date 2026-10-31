@@ -4,7 +4,6 @@ import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
 // ⚠️ force-static نجعل المسار أستاتيكياً ليتوافق مع output: export الخاص بالأندرويد
-export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 function getPrivateKey() {
