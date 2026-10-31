@@ -10,6 +10,11 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 // دالة مساعدة لحفظ/تحديث التوكن في المجموعة الصحيحة (users أو system_users)
 async function saveTokenToCorrectCollection(userId: string, token: string) {
+  if (!token || token.trim() === '') {
+    console.error('❌ إلغاء الحفظ: التوكن فارغ');
+    return;
+  }
+
   try {
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
@@ -19,11 +24,10 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
         fcmToken: token,
         lastTokenUpdate: new Date().toISOString(),
       });
-      console.log('تم تحديث FCM Token في مجموعة users');
+      console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في users`);
       return;
     }
 
-    // إذا لم يكن بـ users، نفحص مجموعة system_users
     const systemUserRef = doc(db, 'system_users', userId);
     const systemUserSnap = await getDoc(systemUserRef);
 
@@ -32,33 +36,52 @@ async function saveTokenToCorrectCollection(userId: string, token: string) {
         fcmToken: token,
         lastTokenUpdate: new Date().toISOString(),
       });
-      console.log('تم تحديث FCM Token في مجموعة system_users');
+      console.log(`✅ تم ربط FCM Token بالحساب (${userId}) في system_users`);
     }
   } catch (error) {
-    console.error('خطأ أثناء حفظ الـ FCM Token في Firestore:', error);
+    console.error('❌ خطأ أثناء حفظ الـ FCM Token في Firestore:', error);
   }
 }
 
 export default function NotificationsSetup() {
   useEffect(() => {
+    let nativeFcmToken = '';
+
     // 📱 1. التشغيل على أجهزة المحمول الأصلية (Android / iOS)
     if (Capacitor.isNativePlatform()) {
+      // الاستماع لتوليد التوكن وتخزينه محلياً
+      const registrationListener = PushNotifications.addListener(
+        'registration',
+        async (token) => {
+          console.log('📱 Native Push Registration Token:', token.value);
+          nativeFcmToken = token.value;
+
+          // إذا كان هنالك مستخدم مسجل دخوله حالياً، نحدث حقوله فوراً
+          if (auth.currentUser?.uid) {
+            await saveTokenToCorrectCollection(auth.currentUser.uid, token.value);
+          }
+        }
+      );
+
+      // طلب الإذن والتسجيل
       PushNotifications.requestPermissions().then((result) => {
         if (result.receive === 'granted') {
           PushNotifications.register();
         }
       });
 
-      const registrationListener = PushNotifications.addListener(
-        'registration',
-        async (token) => {
-          console.log('Push Registration Token:', token.value);
-          const currentUser = auth.currentUser;
-          if (currentUser && token.value) {
-            await saveTokenToCorrectCollection(currentUser.uid, token.value);
+      // 🔄 الاستماع لكل عملية تسجيل دخول جديدة (تنقل بين الحسابات)
+      const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+        if (user?.uid) {
+          // إذا كان التوكن متولداً مسبقاً، املأ حقل الحساب الجديد فوراً
+          if (nativeFcmToken) {
+            await saveTokenToCorrectCollection(user.uid, nativeFcmToken);
+          } else {
+            // في حال عدم جاهزية التوكن، نطلب التسجيل مجدداً لتمرير التوكن
+            PushNotifications.register();
           }
         }
-      );
+      });
 
       const notificationListener = PushNotifications.addListener(
         'pushNotificationReceived',
@@ -70,13 +93,14 @@ export default function NotificationsSetup() {
       return () => {
         registrationListener.then((l) => l.remove());
         notificationListener.then((l) => l.remove());
+        unsubscribeAuth();
       };
     } 
-    
-    // 🖥️ 2. التشغيل على المتصفح وتطبيق سطح المكتب (Web / EXE)
+
+    // 🖥️ 2. التشغيل على المتصفح، الآيفون (PWA/Web)، وتطبيق سطح المكتب (EXE)
     else {
-      // الاستماع لتغير حالة تسجيل الدخول لضمان ربط التوكن بالحساب الحالي فوراً
       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+        // عند تسجيل الخروج، لا نفعل شيئاً
         if (!user) return;
 
         try {
@@ -90,15 +114,14 @@ export default function NotificationsSetup() {
           const registration = await navigator.serviceWorker.register(swUrl);
           const messaging = getMessaging(app);
 
+          // طلب التوكن فورياً للحساب الذي قام بتسجيل الدخول للتو
           const token = await getToken(messaging, {
             serviceWorkerRegistration: registration,
             vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
           });
 
           if (token) {
-            // حفظ التوكن بحسب معرف الحساب المسجل حالياً في القائمة الصحيحة
             await saveTokenToCorrectCollection(user.uid, token);
-            console.log('تم حفظ FCM Token للمتصفح/الحاسوب بنجاح للحساب الحالي:', token);
           }
         } catch (error) {
           console.error('خطأ في إعداد إشعارات المتصفح/الحاسوب:', error);

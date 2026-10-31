@@ -3,7 +3,9 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
-export const revalidate = 0;
+// ⚠️ نجعل المسار أستاتيكياً ليتوافق مع output: export الخاص بالأندرويد
+export const dynamic = 'force-static';
+//export const revalidate = 0;
 
 function getPrivateKey() {
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
