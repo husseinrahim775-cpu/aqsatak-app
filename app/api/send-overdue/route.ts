@@ -29,10 +29,11 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get("secret")?.trim();
 
-  // التحقق من المفتاح السري
-  if (secret !== "alirahimabd1998") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+ const secret = searchParams.get("secret")?.trim();
+
+if (secret !== "mysecret123") {
+  return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+}
 
   const db = getFirestore();
   const messaging = getMessaging();
