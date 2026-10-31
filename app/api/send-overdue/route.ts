@@ -3,9 +3,8 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
-// ⚠️ force-static نجعل المسار أستاتيكياً ليتوافق مع output: export الخاص بالأندرويد
-export const dynamic = 'force-static';
-export const revalidate = 0;
+// نستخدم force-dynamic لضمان قراءة الـ Query Parameters مثل ?secret= على سيرفر Vercel
+export const dynamic = "force-dynamic";
 
 function getPrivateKey() {
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
@@ -26,19 +25,18 @@ if (!getApps().length) {
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get("secret")?.trim();
-
- const secret = searchParams.get("secret")?.trim();
-
-if (secret !== "mysecret123") {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-}
-
-  const db = getFirestore();
-  const messaging = getMessaging();
-
   try {
+    const { searchParams } = new URL(request.url);
+    const secret = searchParams.get("secret")?.trim();
+
+    // التحقق من المفتاح السري
+    if (secret !== "h02co") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    const db = getFirestore();
+    const messaging = getMessaging();
+
     const [usersSnap, systemUsersSnap, installmentsSnap, paymentsSnap] = await Promise.all([
       db.collection("users").get(),
       db.collection("system_users").get(),
