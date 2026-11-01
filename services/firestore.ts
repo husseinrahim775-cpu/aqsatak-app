@@ -23,10 +23,13 @@ export interface InstallmentData {
   userId: string;
   customerName: string;
   phoneNumber: string;
+  phoneE164?: string;
   address: string;
   guarantorName: string;
   guarantorPhone: string;
   productName: string;
+  purchasePrice?: number; // 👈 أضف هذا
+  costPrice?: number;     // 👈 وأضف هذا
   productPrice: number;
   downPayment: number;
   profitMargin: number;

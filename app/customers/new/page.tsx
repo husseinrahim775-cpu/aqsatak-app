@@ -533,10 +533,24 @@ function NewInstallmentContent() {
       const isDirectSale = !selectedProductId;
       const costPriceNum = Number(formData.purchasePrice) || 0;
 
-      const payload: Omit<InstallmentData, "id" | "createdAt"> & { purchasePrice?: number; costPrice?: number; isDirectSale?: boolean; fromInventory?: boolean } = {
+      // 📲 تحويل تلقائي لرقم هاتف الزبون من المحلي إلى الدولي (phoneE164)
+      const rawPhone = formData.phoneNumber || "";
+      const cleanDigits = rawPhone.replace(/\D/g, "");
+      const generatedPhoneE164 = cleanDigits.startsWith("964")
+        ? "+" + cleanDigits
+        : "+964" + cleanDigits.replace(/^0/, "");
+
+      const payload: Omit<InstallmentData, "id" | "createdAt"> & { 
+        purchasePrice?: number; 
+        costPrice?: number; 
+        isDirectSale?: boolean; 
+        fromInventory?: boolean;
+        phoneE164?: string;
+      } = {
         userId: user.uid,
         customerName: formData.customerName,
         phoneNumber: formData.phoneNumber,
+        phoneE164: generatedPhoneE164, // 👈 يُحفظ أوتوماتيكياً بصيغة +964...
         address: formData.address,
         guarantorName: hasGuarantor ? formData.guarantorName : "بدون كفيل",
         guarantorPhone: hasGuarantor ? formData.guarantorPhone : "بدون كفيل",
